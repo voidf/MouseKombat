@@ -8,6 +8,7 @@
 [ext_resource type="Texture2D" uid="uid://c6384cvmwe3ui" path="res://Art/dsIdleAtlas.png" id="3_0q8lf"]
 [ext_resource type="Texture2D" uid="uid://clixxucsx1ftv" path="res://Art/dsWalkAtlas.png" id="3_48u4o"]
 [ext_resource type="Texture2D" uid="uid://17pk6llub42w" path="res://Art/dsWinAtlas.png" id="7_o8y5o"]
+[ext_resource type="Script" uid="uid://ybt3nxx0m7r3" path="res://GameManager.cs" id="gm_script"]
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_jgbpc"]
 atlas = ExtResource("2_rxphb")
@@ -683,7 +684,14 @@ animations = [{
 "speed": 18.0
 }]
 
-[node name="Node2D" type="Node2D" unique_id=929041593]
+[node name="Node2D" type="Node2D" unique_id=929041593 node_paths=PackedStringArray("p1", "p2", "hp1Fill", "hp2Fill", "p1WinAnim", "p2WinAnim")]
+script = ExtResource("gm_script")
+p1 = NodePath("Player1")
+p2 = NodePath("Player2")
+hp1Fill = NodePath("HUD/P1Bar/Fill")
+hp2Fill = NodePath("HUD/P2Bar/Fill")
+p1WinAnim = NodePath("P1WinAnim")
+p2WinAnim = NodePath("P2WinAnim")
 
 [node name="Player2" type="Node2D" parent="." unique_id=64225234 node_paths=PackedStringArray("anim")]
 position = Vector2(650, 560)
@@ -692,6 +700,14 @@ anim = NodePath("袋鼠")
 ActionLeft = "p2_left"
 ActionRight = "p2_right"
 ActionAttack = "p2_atk"
+StartFacingRight = false
+WalkSpeedPxPerSec = 200.0
+AtkActiveFrames = 6
+AtkRecoveryFrames = 18
+AtkDamage = 12
+AtkHitbox = Rect2(30, -220, 140, 120)
+Hurtbox = Rect2(-70, -280, 140, 280)
+HurtStunFrames = 16
 
 [node name="袋鼠" type="AnimatedSprite2D" parent="Player2" unique_id=344721729]
 position = Vector2(0, -167)
@@ -704,7 +720,14 @@ speed_scale = 2.0
 position = Vector2(120, 560)
 script = ExtResource("1_tu88n")
 anim = NodePath("仓鼠")
-ActionAttack = "p1_atk"
+WalkSpeedPxPerSec = 240.0
+AtkStartupFrames = 4
+AtkActiveFrames = 3
+AtkRecoveryFrames = 10
+AtkDamage = 8
+AtkHitbox = Rect2(10, -130, 80, 70)
+Hurtbox = Rect2(-40, -180, 80, 180)
+HurtStunFrames = 12
 
 [node name="仓鼠" type="AnimatedSprite2D" parent="Player1" unique_id=185176480]
 position = Vector2(0, -107)
@@ -721,3 +744,54 @@ scale = Vector2(1.6857142, 1.6857142)
 sprite_frames = SubResource("SpriteFrames_jgbpc")
 frame = 47
 frame_progress = 1.0
+
+[node name="P1WinAnim" type="AnimatedSprite2D" parent="." unique_id=1016562224]
+visible = false
+position = Vector2(414, 299)
+scale = Vector2(1.6857142, 1.6857142)
+sprite_frames = SubResource("SpriteFrames_jgbpc")
+frame = 47
+frame_progress = 1.0
+flip_h = true
+
+[node name="HUD" type="CanvasLayer" parent="." unique_id=1998954204]
+
+[node name="P1Bar" type="Control" parent="HUD" unique_id=2069848012]
+layout_mode = 3
+anchors_preset = 0
+offset_left = 20.0
+offset_top = 20.0
+offset_right = 280.0
+offset_bottom = 44.0
+
+[node name="Bg" type="ColorRect" parent="HUD/P1Bar" unique_id=212302533]
+layout_mode = 0
+offset_right = 260.0
+offset_bottom = 24.0
+color = Color(0.12, 0.04, 0.04, 0.9)
+
+[node name="Fill" type="ColorRect" parent="HUD/P1Bar" unique_id=1541464722]
+layout_mode = 0
+offset_right = 260.0
+offset_bottom = 24.0
+color = Color(0.95, 0.25, 0.25, 1)
+
+[node name="P2Bar" type="Control" parent="HUD" unique_id=658719578]
+layout_mode = 3
+anchors_preset = 0
+offset_left = 520.0
+offset_top = 20.0
+offset_right = 780.0
+offset_bottom = 44.0
+
+[node name="Bg" type="ColorRect" parent="HUD/P2Bar" unique_id=1484641048]
+layout_mode = 0
+offset_right = 260.0
+offset_bottom = 24.0
+color = Color(0.12, 0.04, 0.04, 0.9)
+
+[node name="Fill" type="ColorRect" parent="HUD/P2Bar" unique_id=1936017168]
+layout_mode = 0
+offset_right = 260.0
+offset_bottom = 24.0
+color = Color(0.25, 0.55, 0.95, 1)

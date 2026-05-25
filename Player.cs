@@ -1,106 +1,180 @@
 using Godot;
-using System;
 
-public partial class Player : Node2D // 改名：从 Player1 改为 Player
+public partial class Player : Node2D
 {
     [Export] public AnimatedSprite2D anim;
 
-    // 【核心改动】将输入的动作名称暴露给编辑器，默认填入 P1 的按键
     [Export] public string ActionLeft = "p1_left";
     [Export] public string ActionRight = "p1_right";
-    [Export] public string ActionAttack = "p1_attack";
+    [Export] public string ActionAttack = "p1_atk";
 
-    public enum PlayerState
-    {
-        Idle,
-        Walk,
-        Attack
-    }
+    [Export] public string IdleAnimName = "IDLE";
+    [Export] public string WalkAnimName = "WALK";
+    [Export] public string AtkAnimName = "ATK";
+    [Export] public string HurtAnimName = "HURT";
 
-    private PlayerState currentState = PlayerState.Idle;
+    [Export] public bool ArtFacesRight = false;
+    [Export] public bool StartFacingRight = true;
+
+    [Export] public int MaxHp = 100;
+    [Export] public float WalkSpeedPxPerSec = 220f;
+
+    [Export] public int AtkStartupFrames = 6;
+    [Export] public int AtkActiveFrames = 4;
+    [Export] public int AtkRecoveryFrames = 14;
+    [Export] public int AtkDamage = 10;
+    [Export] public Rect2 AtkHitbox = new Rect2(20, -180, 140, 140);
+    [Export] public Rect2 Hurtbox = new Rect2(-60, -200, 120, 200);
+    [Export] public int HurtStunFrames = 14;
+
+    public enum PlayerState { Idle, Walk, Attack, Hurt, Dead }
+
+    public int Hp { get; private set; }
+    public PlayerState State { get; private set; } = PlayerState.Idle;
+    public bool FacingRight { get; set; } = true;
+
+    public bool InLeft { get; private set; }
+    public bool InRight { get; private set; }
+    public bool InAtkPressed { get; private set; }
+    public float DesiredDeltaX { get; set; }
+
+    private int _atkFrame = -1;
+    private int _hurtFrame = -1;
+    private bool _atkHitConsumed = false;
+
+    public bool IsDirectionPressed => InLeft || InRight;
+
+    public bool IsAttackingActive =>
+        State == PlayerState.Attack
+        && _atkFrame >= AtkStartupFrames
+        && _atkFrame < AtkStartupFrames + AtkActiveFrames
+        && !_atkHitConsumed;
+
+    public bool IsBusy => State == PlayerState.Attack || State == PlayerState.Hurt || State == PlayerState.Dead;
 
     public override void _Ready()
     {
-        anim.AnimationFinished += OnAnimationFinished;
+        Hp = MaxHp;
+        FacingRight = StartFacingRight;
+        PlayAnimSafe(IdleAnimName);
+    }
+
+    public void LatchInput()
+    {
+        if (State == PlayerState.Dead)
+        {
+            InLeft = InRight = InAtkPressed = false;
+            return;
+        }
+        InLeft = Input.IsActionPressed(ActionLeft);
+        InRight = Input.IsActionPressed(ActionRight);
+        InAtkPressed = Input.IsActionJustPressed(ActionAttack);
+    }
+
+    public void TickStartAttackIfRequested()
+    {
+        if (State != PlayerState.Idle && State != PlayerState.Walk) return;
+        if (!InAtkPressed) return;
+        State = PlayerState.Attack;
+        _atkFrame = 0;
+        _atkHitConsumed = false;
+        PlayAnimSafe(AtkAnimName);
+    }
+
+    public void TickApplyMovement()
+    {
+        Position += new Vector2(DesiredDeltaX, 0);
+        if (IsBusy) { DesiredDeltaX = 0; return; }
+        if (DesiredDeltaX < 0) FacingRight = false;
+        else if (DesiredDeltaX > 0) FacingRight = true;
+        State = (Mathf.Abs(DesiredDeltaX) > 0.01f) ? PlayerState.Walk : PlayerState.Idle;
+        DesiredDeltaX = 0;
+    }
+
+    public void TickAdvanceTimers()
+    {
+        if (State == PlayerState.Attack)
+        {
+            _atkFrame++;
+            if (_atkFrame >= AtkStartupFrames + AtkActiveFrames + AtkRecoveryFrames)
+            {
+                State = PlayerState.Idle;
+                _atkFrame = -1;
+                PlayAnimSafe(IdleAnimName);
+            }
+        }
+        else if (State == PlayerState.Hurt)
+        {
+            _hurtFrame++;
+            if (_hurtFrame >= HurtStunFrames)
+            {
+                State = PlayerState.Idle;
+                _hurtFrame = -1;
+                PlayAnimSafe(IdleAnimName);
+            }
+        }
+    }
+
+    public Rect2 GetWorldHitbox()
+    {
+        var local = AtkHitbox;
+        var pos = local.Position;
+        if (!FacingRight) pos = new Vector2(-pos.X - local.Size.X, pos.Y);
+        return new Rect2(GlobalPosition + pos, local.Size);
+    }
+
+    public Rect2 GetWorldHurtbox()
+    {
+        return new Rect2(GlobalPosition + Hurtbox.Position, Hurtbox.Size);
+    }
+
+    public void ConsumeAttackHit() { _atkHitConsumed = true; }
+
+    public void ApplyDamage(int dmg)
+    {
+        if (State == PlayerState.Dead) return;
+        Hp = Mathf.Max(0, Hp - dmg);
+        if (Hp == 0)
+        {
+            State = PlayerState.Dead;
+            anim.Stop();
+            return;
+        }
+        State = PlayerState.Hurt;
+        _hurtFrame = 0;
+        PlayAnimSafe(HurtAnimName);
+    }
+
+    public void ResetForNewRound(Vector2 startPos, bool facingRight)
+    {
+        Position = startPos;
+        FacingRight = facingRight;
+        Hp = MaxHp;
+        State = PlayerState.Idle;
+        _atkFrame = -1;
+        _hurtFrame = -1;
+        _atkHitConsumed = false;
+        InLeft = InRight = InAtkPressed = false;
+        DesiredDeltaX = 0;
+        PlayAnimSafe(IdleAnimName);
     }
 
     public override void _Process(double delta)
     {
-        // 【核心改动】使用变量替代写死的字符串
-        if (Input.IsActionJustPressed(ActionAttack) && currentState != PlayerState.Attack)
-        {
-            StartAttack();
-        }
+        anim.FlipH = ArtFacesRight ? !FacingRight : FacingRight;
 
-        switch (currentState)
+        if (State == PlayerState.Idle || State == PlayerState.Walk)
         {
-            case PlayerState.Idle:
-            case PlayerState.Walk:
-                HandleMovement(delta);
-                break;
-            case PlayerState.Attack:
-                break;
+            bool moving = Input.IsActionPressed(ActionLeft) || Input.IsActionPressed(ActionRight);
+            PlayAnimSafe(moving ? WalkAnimName : IdleAnimName);
         }
     }
 
-    private void HandleMovement(double delta)
+    private void PlayAnimSafe(string name)
     {
-        // 【核心改动】使用变量获取移动输入
-        bool isMovingLeft = Input.IsActionPressed(ActionLeft);
-        bool isMovingRight = Input.IsActionPressed(ActionRight);
-        float deltaX = 0f;
-
-        if (isMovingLeft && !isMovingRight)
-        {
-            deltaX = -1f;
-            anim.FlipH = false; // Player1默认朝右，向左走不需要翻转(或者视你的美术素材而定)
-            ChangeState(PlayerState.Walk);
-        }
-        else if (isMovingRight && !isMovingLeft)
-        {
-            deltaX = 1f;
-            anim.FlipH = true; 
-            ChangeState(PlayerState.Walk);
-        }
-        else
-        {
-            ChangeState(PlayerState.Idle);
-        }
-
-        Position += new Vector2((float)delta * deltaX * 400f, 0);
-    }
-
-    private void StartAttack()
-    {
-        ChangeState(PlayerState.Attack);
-    }
-
-    private void ChangeState(PlayerState newState)
-    {
-        if (currentState == newState && newState != PlayerState.Attack) 
-            return; 
-
-        currentState = newState;
-
-        switch (currentState)
-        {
-            case PlayerState.Idle:
-                anim.Play("IDLE");
-                break;
-            case PlayerState.Walk:
-                anim.Play("WALK");
-                break;
-            case PlayerState.Attack:
-                anim.Play("ATK");
-                break;
-        }
-    }
-
-    private void OnAnimationFinished()
-    {
-        if (currentState == PlayerState.Attack && anim.Animation == "ATK")
-        {
-            ChangeState(PlayerState.Idle);
-        }
+        if (anim?.SpriteFrames == null) return;
+        if (string.IsNullOrEmpty(name)) return;
+        if (!anim.SpriteFrames.HasAnimation(name)) return;
+        anim.Play(name);
     }
 }
