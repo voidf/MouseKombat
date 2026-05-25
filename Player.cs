@@ -27,6 +27,8 @@ public partial class Player : Node2D
     [Export] public Rect2 Hurtbox = new Rect2(-60, -200, 120, 200);
     [Export] public int HurtStunFrames = 14;
 
+    [Export] public bool DebugDrawBoxes = true;
+
     public enum PlayerState { Idle, Walk, Attack, Hurt, Dead }
 
     public int Hp { get; private set; }
@@ -166,6 +168,32 @@ public partial class Player : Node2D
             bool moving = Input.IsActionPressed(ActionLeft) || Input.IsActionPressed(ActionRight);
             PlayAnimSafe(moving ? WalkAnimName : IdleAnimName);
         }
+
+        if (DebugDrawBoxes) QueueRedraw();
+    }
+
+    public override void _Draw()
+    {
+        if (!DebugDrawBoxes) return;
+
+        DrawRect(Hurtbox, new Color(0, 1, 0, 0.25f), filled: true);
+        DrawRect(Hurtbox, new Color(0, 1, 0, 1f), filled: false, width: 2f);
+
+        var hb = AtkHitbox;
+        if (!FacingRight) hb.Position = new Vector2(-hb.Position.X - hb.Size.X, hb.Position.Y);
+
+        bool active = IsAttackingActive;
+        bool inWindup = State == PlayerState.Attack && !active;
+        Color fill = active ? new Color(1, 0, 0, 0.45f)
+                   : inWindup ? new Color(1, 0.6f, 0, 0.25f)
+                              : new Color(1, 1, 0, 0.12f);
+        Color edge = active ? new Color(1, 0, 0, 1f)
+                   : inWindup ? new Color(1, 0.6f, 0, 1f)
+                              : new Color(1, 1, 0, 0.6f);
+        DrawRect(hb, fill, filled: true);
+        DrawRect(hb, edge, filled: false, width: 2f);
+
+        DrawCircle(Vector2.Zero, 3f, new Color(1, 1, 1, 1));
     }
 
     private void PlayAnimSafe(string name)
