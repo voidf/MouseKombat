@@ -85,8 +85,6 @@ public partial class Player : Node2D
     {
         Position += new Vector2(DesiredDeltaX, 0);
         if (IsBusy) { DesiredDeltaX = 0; return; }
-        if (DesiredDeltaX < 0) FacingRight = false;
-        else if (DesiredDeltaX > 0) FacingRight = true;
         State = (Mathf.Abs(DesiredDeltaX) > 0.01f) ? PlayerState.Walk : PlayerState.Idle;
         DesiredDeltaX = 0;
     }

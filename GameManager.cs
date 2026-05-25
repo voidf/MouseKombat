@@ -48,6 +48,8 @@ public partial class GameManager : Node2D
         p1.LatchInput();
         p2.LatchInput();
 
+        UpdateFacings();
+
         ResolveMovement(delta);
 
         p1.TickApplyMovement();
@@ -119,6 +121,14 @@ public partial class GameManager : Node2D
 
         p1.DesiredDeltaX = v1;
         p2.DesiredDeltaX = v2;
+    }
+
+    private void UpdateFacings()
+    {
+        if (p1.State != Player.PlayerState.Attack && p1.State != Player.PlayerState.Hurt && p1.State != Player.PlayerState.Dead)
+            p1.FacingRight = p2.GlobalPosition.X >= p1.GlobalPosition.X;
+        if (p2.State != Player.PlayerState.Attack && p2.State != Player.PlayerState.Hurt && p2.State != Player.PlayerState.Dead)
+            p2.FacingRight = p1.GlobalPosition.X >= p2.GlobalPosition.X;
     }
 
     private static int SignFromInput(Player p)
