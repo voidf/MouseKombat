@@ -21,7 +21,7 @@ public partial class Player : Node2D
 
     [Export] public int AtkStartupFrames = 6;
     [Export] public int AtkActiveFrames = 4;
-    [Export] public int AtkRecoveryFrames = 14;
+    [Export] public int AtkRecoveryFrames = 10;
     [Export] public int AtkDamage = 10;
     [Export] public Rect2 AtkHitbox = new Rect2(20, -180, 140, 140);
     [Export] public Rect2 Hurtbox = new Rect2(-60, -200, 120, 200);
