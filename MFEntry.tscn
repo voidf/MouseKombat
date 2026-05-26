@@ -1029,9 +1029,10 @@ anim = NodePath("袋鼠")
 ActionLeft = "p2_left"
 ActionRight = "p2_right"
 ActionAttack = "p2_atk"
-AtkStartupFrames = 8
-AtkActiveFrames = 10
-AtkDamage = 20
+AtkStartupFrames = 10
+AtkActiveFrames = 12
+AtkRecoveryFrames = 15
+AtkDamage = 50
 AtkHitbox = Rect2(30, -180, 160, 140)
 DebugDrawBoxes = false
 
@@ -1045,7 +1046,10 @@ speed_scale = 2.0
 position = Vector2(120, 560)
 script = ExtResource("1_tu88n")
 anim = NodePath("仓鼠")
-AtkRecoveryFrames = 2
+AtkStartupFrames = 3
+AtkActiveFrames = 3
+AtkRecoveryFrames = 1
+AtkDamage = 8
 AtkHitbox = Rect2(20, -180, 80, 140)
 DebugDrawBoxes = false
 
