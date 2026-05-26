@@ -10,10 +10,16 @@ config_version=5
 
 [application]
 
-config/name="MouseFTG"
+config/name="MouseKombat"
+config/name_localized={
+"cmn_CN": "真鼠快打",
+"zh": "真鼠快打",
+"zh_CN": "真鼠快打"
+}
+config/version="0.0.2"
 run/main_scene="uid://c6hrnln4c247g"
 config/features=PackedStringArray("4.6", "C#", "Mobile")
-config/icon="res://icon.svg"
+config/icon="uid://betfal31o5rh8"
 
 [display]
 
@@ -21,11 +27,10 @@ window/size/viewport_width=800
 window/size/viewport_height=600
 window/size/resizable=false
 window/stretch/mode="viewport"
-window/stretch/aspect="keep"
 
 [dotnet]
 
-project/assembly_name="MouseFTG"
+project/assembly_name="MouseKombat"
 
 [input]
 
@@ -68,3 +73,4 @@ p2_atk={
 
 rendering_device/driver.windows="d3d12"
 renderer/rendering_method="mobile"
+textures/vram_compression/import_etc2_astc=true
