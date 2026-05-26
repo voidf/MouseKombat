@@ -677,12 +677,12 @@ animations = [{
 "duration": 1.0,
 "texture": SubResource("AtlasTexture_71o4e")
 }, {
-"duration": 1.0,
+"duration": 18.0,
 "texture": SubResource("AtlasTexture_au64l")
 }],
 "loop": false,
 "name": &"default",
-"speed": 18.0
+"speed": 16.0
 }]
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_eq8um"]
@@ -820,108 +820,108 @@ region = Rect2(5120, 1024, 512, 512)
 [sub_resource type="SpriteFrames" id="SpriteFrames_bgo5y"]
 animations = [{
 "frames": [{
-"duration": 1.0,
+"duration": 44.0,
 "texture": SubResource("AtlasTexture_eq8um")
 }, {
-"duration": 1.0,
+"duration": 7.0,
 "texture": SubResource("AtlasTexture_2jsvj")
 }, {
-"duration": 1.0,
+"duration": 6.0,
 "texture": SubResource("AtlasTexture_fcng2")
 }, {
-"duration": 1.0,
+"duration": 6.0,
 "texture": SubResource("AtlasTexture_fex27")
 }, {
-"duration": 1.0,
+"duration": 6.0,
 "texture": SubResource("AtlasTexture_e2yxy")
 }, {
-"duration": 1.0,
+"duration": 6.0,
 "texture": SubResource("AtlasTexture_8pv74")
 }, {
-"duration": 1.0,
+"duration": 6.0,
 "texture": SubResource("AtlasTexture_bdr7v")
 }, {
-"duration": 1.0,
+"duration": 6.0,
 "texture": SubResource("AtlasTexture_c4qct")
 }, {
-"duration": 1.0,
+"duration": 6.0,
 "texture": SubResource("AtlasTexture_g1pag")
 }, {
-"duration": 1.0,
+"duration": 6.0,
 "texture": SubResource("AtlasTexture_kpjt3")
 }, {
-"duration": 1.0,
+"duration": 6.0,
 "texture": SubResource("AtlasTexture_45yym")
 }, {
-"duration": 1.0,
+"duration": 6.0,
 "texture": SubResource("AtlasTexture_l2ofx")
 }, {
-"duration": 1.0,
+"duration": 6.0,
 "texture": SubResource("AtlasTexture_pg0ut")
 }, {
-"duration": 1.0,
+"duration": 6.0,
 "texture": SubResource("AtlasTexture_u2pbv")
 }, {
-"duration": 1.0,
+"duration": 6.0,
 "texture": SubResource("AtlasTexture_lwa4m")
 }, {
-"duration": 1.0,
+"duration": 6.0,
 "texture": SubResource("AtlasTexture_vy20o")
 }, {
-"duration": 1.0,
+"duration": 17.0,
 "texture": SubResource("AtlasTexture_b1cni")
 }, {
-"duration": 1.0,
+"duration": 17.0,
 "texture": SubResource("AtlasTexture_3aqli")
 }, {
-"duration": 1.0,
+"duration": 4.0,
 "texture": SubResource("AtlasTexture_xdttc")
 }, {
-"duration": 1.0,
+"duration": 4.0,
 "texture": SubResource("AtlasTexture_wx0mj")
 }, {
-"duration": 1.0,
+"duration": 4.0,
 "texture": SubResource("AtlasTexture_cioxe")
 }, {
-"duration": 1.0,
+"duration": 5.0,
 "texture": SubResource("AtlasTexture_d1fxg")
 }, {
-"duration": 1.0,
+"duration": 5.0,
 "texture": SubResource("AtlasTexture_ddhq7")
 }, {
-"duration": 1.0,
+"duration": 5.0,
 "texture": SubResource("AtlasTexture_f1iad")
 }, {
-"duration": 1.0,
+"duration": 5.0,
 "texture": SubResource("AtlasTexture_fys1j")
 }, {
-"duration": 1.0,
+"duration": 5.0,
 "texture": SubResource("AtlasTexture_rrv3a")
 }, {
-"duration": 1.0,
+"duration": 5.0,
 "texture": SubResource("AtlasTexture_2rrp6")
 }, {
-"duration": 1.0,
+"duration": 9.0,
 "texture": SubResource("AtlasTexture_uye8i")
 }, {
-"duration": 1.0,
+"duration": 10.0,
 "texture": SubResource("AtlasTexture_ovq7k")
 }, {
-"duration": 1.0,
+"duration": 22.0,
 "texture": SubResource("AtlasTexture_gqhxs")
 }, {
-"duration": 1.0,
+"duration": 22.0,
 "texture": SubResource("AtlasTexture_2jdfp")
 }, {
-"duration": 1.0,
+"duration": 22.0,
 "texture": SubResource("AtlasTexture_xiyun")
 }, {
-"duration": 1.0,
+"duration": 120.0,
 "texture": SubResource("AtlasTexture_irrqb")
 }],
-"loop": true,
+"loop": false,
 "name": &"default",
-"speed": 5.0
+"speed": 60.0
 }]
 
 [node name="Node2D" type="Node2D" unique_id=929041593 node_paths=PackedStringArray("p1", "p2", "hp1Fill", "hp2Fill", "p1WinAnim", "p2WinAnim")]
@@ -940,7 +940,11 @@ anim = NodePath("袋鼠")
 ActionLeft = "p2_left"
 ActionRight = "p2_right"
 ActionAttack = "p2_atk"
+AtkStartupFrames = 8
+AtkActiveFrames = 10
+AtkRecoveryFrames = 14
 AtkDamage = 20
+AtkHitbox = Rect2(30, -180, 160, 140)
 
 [node name="袋鼠" type="AnimatedSprite2D" parent="Player2" unique_id=344721729]
 position = Vector2(0, -167)
@@ -953,6 +957,7 @@ position = Vector2(120, 560)
 script = ExtResource("1_tu88n")
 anim = NodePath("仓鼠")
 AtkRecoveryFrames = 2
+AtkHitbox = Rect2(20, -180, 80, 140)
 
 [node name="仓鼠" type="AnimatedSprite2D" parent="Player1" unique_id=185176480]
 position = Vector2(0, -107)
@@ -972,9 +977,9 @@ frame_progress = 1.0
 [node name="P1WinAnim" type="AnimatedSprite2D" parent="." unique_id=1016562224]
 visible = false
 position = Vector2(414, 299)
-scale = Vector2(1.6857142, 1.6857142)
 sprite_frames = SubResource("SpriteFrames_bgo5y")
-flip_h = true
+frame = 32
+frame_progress = 1.0
 
 [node name="HUD" type="CanvasLayer" parent="." unique_id=1998954204]
 
