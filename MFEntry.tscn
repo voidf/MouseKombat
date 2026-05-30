@@ -14,6 +14,7 @@
 [ext_resource type="Texture2D" uid="uid://byc4ufhaaqgp" path="res://Art/csHurtAtlas.png" id="8_254nc"]
 [ext_resource type="Texture2D" uid="uid://dl6jhgh6an73t" path="res://Art/csDefAtlas.png" id="9_nmseu"]
 [ext_resource type="Texture2D" uid="uid://wgj8onqetjte" path="res://Art/csWinAtlas.png" id="10_i24j6"]
+[ext_resource type="Texture2D" uid="uid://dpxgbdmft2j3h" path="res://Art/csJumpAtlas.png" id="13_3pm86"]
 [ext_resource type="Script" uid="uid://ybt3nxx0m7r3" path="res://GameManager.cs" id="gm_script"]
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_jgbpc"]
@@ -302,6 +303,26 @@ region = Rect2(3072, 0, 512, 512)
 atlas = ExtResource("1_3kii0")
 region = Rect2(3584, 0, 512, 512)
 
+[sub_resource type="AtlasTexture" id="AtlasTexture_64t5q"]
+atlas = ExtResource("13_3pm86")
+region = Rect2(0, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_6k2cd"]
+atlas = ExtResource("13_3pm86")
+region = Rect2(512, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_iy28u"]
+atlas = ExtResource("13_3pm86")
+region = Rect2(1024, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_dvlmy"]
+atlas = ExtResource("13_3pm86")
+region = Rect2(1536, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_3e7a1"]
+atlas = ExtResource("13_3pm86")
+region = Rect2(2048, 0, 512, 512)
+
 [sub_resource type="AtlasTexture" id="AtlasTexture_75jsd"]
 atlas = ExtResource("2_tu88n")
 region = Rect2(0, 0, 512, 512)
@@ -415,6 +436,26 @@ animations = [{
 }],
 "loop": true,
 "name": &"IDLE",
+"speed": 5.0
+}, {
+"frames": [{
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_64t5q")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_6k2cd")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_iy28u")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_dvlmy")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_3e7a1")
+}],
+"loop": false,
+"name": &"JUMP",
 "speed": 5.0
 }, {
 "frames": [{
@@ -1074,7 +1115,6 @@ AtkActiveFrames = 12
 AtkRecoveryFrames = 15
 AtkDamage = 50
 AtkHitbox = Rect2(30, -180, 160, 140)
-DebugDrawBoxes = false
 
 [node name="袋鼠" type="AnimatedSprite2D" parent="Player2" unique_id=344721729]
 position = Vector2(0, -167)
@@ -1093,12 +1133,13 @@ AtkActiveFrames = 3
 AtkRecoveryFrames = 3
 AtkDamage = 8
 AtkHitbox = Rect2(20, -180, 80, 140)
-DebugDrawBoxes = false
 
 [node name="仓鼠" type="AnimatedSprite2D" parent="Player1" unique_id=185176480]
 position = Vector2(0, -107)
 sprite_frames = SubResource("SpriteFrames_iruj8")
-animation = &"IDLE"
+animation = &"JUMP"
+frame = 4
+frame_progress = 1.0
 speed_scale = 2.0
 flip_h = true
 
