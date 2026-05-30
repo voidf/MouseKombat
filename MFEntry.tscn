@@ -1110,6 +1110,7 @@ anim = NodePath("袋鼠")
 ActionLeft = "p2_left"
 ActionRight = "p2_right"
 ActionAttack = "p2_atk"
+ActionAttackHeavy = "p2_atk_heavy"
 ActionUp = "p2_up"
 AtkStartupFrames = 10
 AtkActiveFrames = 12

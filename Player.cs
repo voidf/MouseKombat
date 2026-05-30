@@ -7,11 +7,13 @@ public partial class Player : Node2D
     [Export] public string ActionLeft = "p1_left";
     [Export] public string ActionRight = "p1_right";
     [Export] public string ActionAttack = "p1_atk";
+    [Export] public string ActionAttackHeavy = "p1_atk_heavy";
     [Export] public string ActionUp = "p1_up";
 
     [Export] public string IdleAnimName = "IDLE";
     [Export] public string WalkAnimName = "WALK";
     [Export] public string AtkAnimName = "ATK";
+    [Export] public string AtkHeavyAnimName = "ATKHEAVY";
     [Export] public string HurtAnimName = "HURT";
     [Export] public string DefAnimName = "DEF";
     [Export] public string JumpAnimName = "JUMP";
@@ -24,11 +26,20 @@ public partial class Player : Node2D
     [Export] public int MaxHp = 100;
     [Export] public float WalkSpeedPxPerSec = 220f;
 
+    // Light attack (existing ATK)
     [Export] public int AtkStartupFrames = 6;
     [Export] public int AtkActiveFrames = 4;
     [Export] public int AtkRecoveryFrames = 10;
     [Export] public int AtkDamage = 10;
     [Export] public Rect2 AtkHitbox = new Rect2(20, -180, 140, 140);
+
+    // Heavy attack (ATKHEAVY placeholder) — independent config
+    [Export] public int AtkHeavyStartupFrames = 11;
+    [Export] public int AtkHeavyActiveFrames = 5;
+    [Export] public int AtkHeavyRecoveryFrames = 22;
+    [Export] public int AtkHeavyDamage = 20;
+    [Export] public Rect2 AtkHeavyHitbox = new Rect2(20, -190, 190, 170);
+
     [Export] public Rect2 Hurtbox = new Rect2(-60, -200, 120, 200);
     [Export] public int HurtStunFrames = 14;
     [Export] public int DefHitStunFrames = 10;
@@ -49,6 +60,7 @@ public partial class Player : Node2D
     public bool InLeft { get; private set; }
     public bool InRight { get; private set; }
     public bool InAtkPressed { get; private set; }
+    public bool InHeavyPressed { get; private set; }
     public bool InUpPressed { get; private set; }
     public float DesiredDeltaX { get; set; }
 
@@ -57,11 +69,17 @@ public partial class Player : Node2D
     private int _defHitFrame = -1;
     private bool _atkHitConsumed = false;
 
+    // active-attack params resolved at attack start (light or heavy)
+    private int _curStartup, _curActive, _curRecovery, _curDamage;
+    private Rect2 _curHitbox;
+
     private float _vy = 0f;
     private float _jumpHVel = 0f;
     private float _groundY = 0f;
 
-    public bool IsAirborne => State == PlayerState.Jump;
+    public bool IsAirborne => Position.Y < _groundY - 0.5f;
+
+    public int CurrentAtkDamage => _curDamage;
 
     public bool IsDirectionPressed => InLeft || InRight;
 
@@ -73,8 +91,8 @@ public partial class Player : Node2D
 
     public bool IsAttackingActive =>
         State == PlayerState.Attack
-        && _atkFrame >= AtkStartupFrames
-        && _atkFrame < AtkStartupFrames + AtkActiveFrames
+        && _atkFrame >= _curStartup
+        && _atkFrame < _curStartup + _curActive
         && !_atkHitConsumed;
 
     public bool IsBusy => State == PlayerState.Attack || State == PlayerState.Hurt || State == PlayerState.Dead || State == PlayerState.DefenseHit || State == PlayerState.Jump;
@@ -84,6 +102,8 @@ public partial class Player : Node2D
         Hp = MaxHp;
         FacingRight = StartFacingRight;
         _groundY = Position.Y;
+        _curHitbox = AtkHitbox;
+        _curDamage = AtkDamage;
         PlayAnimSafe(IdleAnimName);
     }
 
@@ -91,12 +111,13 @@ public partial class Player : Node2D
     {
         if (State == PlayerState.Dead)
         {
-            InLeft = InRight = InAtkPressed = InUpPressed = false;
+            InLeft = InRight = InAtkPressed = InHeavyPressed = InUpPressed = false;
             return;
         }
         InLeft = Input.IsActionPressed(ActionLeft);
         InRight = Input.IsActionPressed(ActionRight);
         InAtkPressed = Input.IsActionJustPressed(ActionAttack);
+        InHeavyPressed = Input.IsActionJustPressed(ActionAttackHeavy);
         InUpPressed = Input.IsActionJustPressed(ActionUp);
     }
 
@@ -104,6 +125,7 @@ public partial class Player : Node2D
     public void TickStartJumpIfRequested(int towardSign)
     {
         if (State != PlayerState.Idle && State != PlayerState.Walk) return;
+        if (IsAirborne) return; // no air-jump (e.g. Idle regained mid-air after hurt stun)
         if (!InUpPressed) return;
 
         int inputSign = InLeft && !InRight ? -1 : (InRight && !InLeft ? 1 : 0);
@@ -119,38 +141,63 @@ public partial class Player : Node2D
         PlayAnimSafe(JumpAnimName);
     }
 
-    public void TickJumpPhysics(double dt)
+    public void TickVertical(double dt)
     {
-        if (State != PlayerState.Jump) return;
+        // Runs for any above-ground player: jump arc, or falling while hurt mid-air.
+        if (State != PlayerState.Jump && !IsAirborne && _vy == 0f) return;
 
         _vy += Gravity * (float)dt;
         var pos = Position;
-        pos.X += _jumpHVel * (float)dt;
+        if (State == PlayerState.Jump) pos.X += _jumpHVel * (float)dt; // only an active jump carries horizontal
         pos.Y += _vy * (float)dt;
 
         if (_vy > 0f && pos.Y >= _groundY)
         {
             pos.Y = _groundY;
-            Position = pos;
-            State = PlayerState.Idle;
             _vy = 0f;
             _jumpHVel = 0f;
-            PlayAnimSafe(IdleAnimName);
+            if (State == PlayerState.Jump)
+            {
+                State = PlayerState.Idle;
+                PlayAnimSafe(IdleAnimName);
+            }
+            // if Hurt mid-air: land but keep Hurt; stun timer ends it
         }
-        else
-        {
-            Position = pos;
-        }
+        Position = pos;
     }
 
     public void TickStartAttackIfRequested()
     {
+        if (IsAirborne)
+        {
+            // air attack: visual only for now (no hitbox / no state change), jump arc continues
+            if (State == PlayerState.Jump)
+            {
+                if (InAtkPressed) PlayAnimSafe(AtkAnimName);
+                else if (InHeavyPressed) PlayAnimSafe(AtkHeavyAnimName);
+            }
+            return;
+        }
+
         if (State != PlayerState.Idle && State != PlayerState.Walk) return;
-        if (!InAtkPressed) return;
+
+        if (InAtkPressed)
+            StartGroundAttack(AtkStartupFrames, AtkActiveFrames, AtkRecoveryFrames, AtkDamage, AtkHitbox, AtkAnimName);
+        else if (InHeavyPressed)
+            StartGroundAttack(AtkHeavyStartupFrames, AtkHeavyActiveFrames, AtkHeavyRecoveryFrames, AtkHeavyDamage, AtkHeavyHitbox, AtkHeavyAnimName);
+    }
+
+    private void StartGroundAttack(int startup, int active, int recovery, int damage, Rect2 hitbox, string animName)
+    {
         State = PlayerState.Attack;
         _atkFrame = 0;
         _atkHitConsumed = false;
-        PlayAnimSafe(AtkAnimName);
+        _curStartup = startup;
+        _curActive = active;
+        _curRecovery = recovery;
+        _curDamage = damage;
+        _curHitbox = hitbox;
+        PlayAnimSafe(animName);
     }
 
     public void TickApplyMovement()
@@ -166,7 +213,7 @@ public partial class Player : Node2D
         if (State == PlayerState.Attack)
         {
             _atkFrame++;
-            if (_atkFrame >= AtkStartupFrames + AtkActiveFrames + AtkRecoveryFrames)
+            if (_atkFrame >= _curStartup + _curActive + _curRecovery)
             {
                 State = PlayerState.Idle;
                 _atkFrame = -1;
@@ -197,7 +244,7 @@ public partial class Player : Node2D
 
     public Rect2 GetWorldHitbox()
     {
-        var local = AtkHitbox;
+        var local = _curHitbox;
         var pos = local.Position;
         if (!FacingRight) pos = new Vector2(-pos.X - local.Size.X, pos.Y);
         return new Rect2(GlobalPosition + pos, local.Size);
@@ -252,7 +299,9 @@ public partial class Player : Node2D
         _atkHitConsumed = false;
         _vy = 0f;
         _jumpHVel = 0f;
-        InLeft = InRight = InAtkPressed = InUpPressed = false;
+        _curHitbox = AtkHitbox;
+        _curDamage = AtkDamage;
+        InLeft = InRight = InAtkPressed = InHeavyPressed = InUpPressed = false;
         DesiredDeltaX = 0;
         PlayAnimSafe(IdleAnimName);
     }
@@ -278,7 +327,7 @@ public partial class Player : Node2D
         DrawRect(Hurtbox, new Color(0, 1, 0, 0.25f), filled: true);
         DrawRect(Hurtbox, new Color(0, 1, 0, 1f), filled: false, width: 2f);
 
-        var hb = AtkHitbox;
+        var hb = (State == PlayerState.Attack) ? _curHitbox : AtkHitbox;
         if (!FacingRight) hb.Position = new Vector2(-hb.Position.X - hb.Size.X, hb.Position.Y);
 
         bool active = IsAttackingActive;

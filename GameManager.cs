@@ -82,9 +82,8 @@ public partial class GameManager : Node2D
         p1.TickApplyMovement();
         p2.TickApplyMovement();
 
-        p1.TickJumpPhysics(delta);
-        p2.TickJumpPhysics(delta);
-
+        p1.TickVertical(delta);
+        p2.TickVertical(delta);
         ClampToStage(p1);
         ClampToStage(p2);
 
@@ -106,8 +105,8 @@ public partial class GameManager : Node2D
         // Airborne player owns its X in TickJumpPhysics (DesiredDeltaX stays 0 via IsBusy).
         if (p1.IsAirborne || p2.IsAirborne)
         {
-            p1.DesiredDeltaX = p1.IsBusy ? 0 : SignFromInput(p1) * p1.WalkSpeedPxPerSec * (float)dt;
-            p2.DesiredDeltaX = p2.IsBusy ? 0 : SignFromInput(p2) * p2.WalkSpeedPxPerSec * (float)dt;
+            p1.DesiredDeltaX = (p1.IsAirborne || p1.IsBusy) ? 0 : SignFromInput(p1) * p1.WalkSpeedPxPerSec * (float)dt;
+            p2.DesiredDeltaX = (p2.IsAirborne || p2.IsBusy) ? 0 : SignFromInput(p2) * p2.WalkSpeedPxPerSec * (float)dt;
             return;
         }
 
@@ -164,9 +163,9 @@ public partial class GameManager : Node2D
 
     private void UpdateFacings()
     {
-        if (p1.State != Player.PlayerState.Attack && p1.State != Player.PlayerState.Hurt && p1.State != Player.PlayerState.Dead && p1.State != Player.PlayerState.DefenseHit && p1.State != Player.PlayerState.Jump)
+        if (!p1.IsAirborne && p1.State != Player.PlayerState.Attack && p1.State != Player.PlayerState.Hurt && p1.State != Player.PlayerState.Dead && p1.State != Player.PlayerState.DefenseHit)
             p1.FacingRight = p2.GlobalPosition.X >= p1.GlobalPosition.X;
-        if (p2.State != Player.PlayerState.Attack && p2.State != Player.PlayerState.Hurt && p2.State != Player.PlayerState.Dead && p2.State != Player.PlayerState.DefenseHit && p2.State != Player.PlayerState.Jump)
+        if (!p2.IsAirborne && p2.State != Player.PlayerState.Attack && p2.State != Player.PlayerState.Hurt && p2.State != Player.PlayerState.Dead && p2.State != Player.PlayerState.DefenseHit)
             p2.FacingRight = p1.GlobalPosition.X >= p2.GlobalPosition.X;
     }
 
@@ -194,10 +193,9 @@ public partial class GameManager : Node2D
     {
         if (!attacker.IsAttackingActive) return;
         if (defender.State == Player.PlayerState.Dead) return;
-        if (defender.IsAirborne) return; // airborne = pure evasion for now; revisit when air combat lands
         if (attacker.GetWorldHitbox().Intersects(defender.GetWorldHurtbox()))
         {
-            defender.ApplyDamage(attacker.AtkDamage);
+            defender.ApplyDamage(attacker.CurrentAtkDamage);
             attacker.ConsumeAttackHit();
         }
     }
