@@ -9,6 +9,7 @@
 [ext_resource type="Texture2D" uid="uid://c6384cvmwe3ui" path="res://Art/dsIdleAtlas.png" id="3_0q8lf"]
 [ext_resource type="Texture2D" uid="uid://clixxucsx1ftv" path="res://Art/dsWalkAtlas.png" id="3_48u4o"]
 [ext_resource type="Texture2D" uid="uid://f43b1irdb6ba" path="res://Art/dsHurtAtlas.png" id="5_mklpb"]
+[ext_resource type="Texture2D" uid="uid://dymmwxv3o8jaj" path="res://Art/dsDefAtlas.png" id="5_o1vs4"]
 [ext_resource type="Texture2D" uid="uid://17pk6llub42w" path="res://Art/dsWinAtlas.png" id="7_o8y5o"]
 [ext_resource type="Texture2D" uid="uid://byc4ufhaaqgp" path="res://Art/csHurtAtlas.png" id="8_254nc"]
 [ext_resource type="Texture2D" uid="uid://dl6jhgh6an73t" path="res://Art/csDefAtlas.png" id="9_nmseu"]
@@ -34,6 +35,14 @@ region = Rect2(1536, 0, 512, 512)
 [sub_resource type="AtlasTexture" id="AtlasTexture_pqdeg"]
 atlas = ExtResource("2_rxphb")
 region = Rect2(2048, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_idh50"]
+atlas = ExtResource("5_o1vs4")
+region = Rect2(0, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_7wige"]
+atlas = ExtResource("5_o1vs4")
+region = Rect2(512, 0, 512, 512)
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_d4qoq"]
 atlas = ExtResource("5_mklpb")
@@ -131,6 +140,17 @@ animations = [{
 }],
 "loop": false,
 "name": &"ATK",
+"speed": 5.0
+}, {
+"frames": [{
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_idh50")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_7wige")
+}],
+"loop": false,
+"name": &"DEF",
 "speed": 5.0
 }, {
 "frames": [{
@@ -347,7 +367,7 @@ animations = [{
 "duration": 1.0,
 "texture": SubResource("AtlasTexture_vn1r7")
 }],
-"loop": true,
+"loop": false,
 "name": &"DEF",
 "speed": 5.0
 }, {
@@ -1059,7 +1079,9 @@ DebugDrawBoxes = false
 [node name="袋鼠" type="AnimatedSprite2D" parent="Player2" unique_id=344721729]
 position = Vector2(0, -167)
 sprite_frames = SubResource("SpriteFrames_jd2df")
-animation = &"HURT"
+animation = &"DEF"
+frame = 1
+frame_progress = 1.0
 speed_scale = 2.0
 
 [node name="Player1" type="Node2D" parent="." unique_id=280155618 node_paths=PackedStringArray("anim")]
@@ -1076,8 +1098,7 @@ DebugDrawBoxes = false
 [node name="仓鼠" type="AnimatedSprite2D" parent="Player1" unique_id=185176480]
 position = Vector2(0, -107)
 sprite_frames = SubResource("SpriteFrames_iruj8")
-animation = &"DEF"
-frame_progress = 0.2872327
+animation = &"IDLE"
 speed_scale = 2.0
 flip_h = true
 

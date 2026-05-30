@@ -149,9 +149,9 @@ public partial class GameManager : Node2D
 
     private void UpdateFacings()
     {
-        if (p1.State != Player.PlayerState.Attack && p1.State != Player.PlayerState.Hurt && p1.State != Player.PlayerState.Dead)
+        if (p1.State != Player.PlayerState.Attack && p1.State != Player.PlayerState.Hurt && p1.State != Player.PlayerState.Dead && p1.State != Player.PlayerState.DefenseHit)
             p1.FacingRight = p2.GlobalPosition.X >= p1.GlobalPosition.X;
-        if (p2.State != Player.PlayerState.Attack && p2.State != Player.PlayerState.Hurt && p2.State != Player.PlayerState.Dead)
+        if (p2.State != Player.PlayerState.Attack && p2.State != Player.PlayerState.Hurt && p2.State != Player.PlayerState.Dead && p2.State != Player.PlayerState.DefenseHit)
             p2.FacingRight = p1.GlobalPosition.X >= p2.GlobalPosition.X;
     }
 

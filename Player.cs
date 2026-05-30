@@ -12,6 +12,9 @@ public partial class Player : Node2D
     [Export] public string WalkAnimName = "WALK";
     [Export] public string AtkAnimName = "ATK";
     [Export] public string HurtAnimName = "HURT";
+    [Export] public string DefAnimName = "DEF";
+
+    [Export] public float DefDamageMultiplier = 0.1f;
 
     [Export] public bool ArtFacesRight = false;
     [Export] public bool StartFacingRight = true;
@@ -26,10 +29,11 @@ public partial class Player : Node2D
     [Export] public Rect2 AtkHitbox = new Rect2(20, -180, 140, 140);
     [Export] public Rect2 Hurtbox = new Rect2(-60, -200, 120, 200);
     [Export] public int HurtStunFrames = 14;
+    [Export] public int DefHitStunFrames = 10;
 
     [Export] public bool DebugDrawBoxes = true;
 
-    public enum PlayerState { Idle, Walk, Attack, Hurt, Dead }
+    public enum PlayerState { Idle, Walk, Attack, Hurt, Dead, DefenseHit }
 
     public int Hp { get; private set; }
     public PlayerState State { get; private set; } = PlayerState.Idle;
@@ -42,9 +46,16 @@ public partial class Player : Node2D
 
     private int _atkFrame = -1;
     private int _hurtFrame = -1;
+    private int _defHitFrame = -1;
     private bool _atkHitConsumed = false;
 
     public bool IsDirectionPressed => InLeft || InRight;
+
+    public bool IsDefendingInput => FacingRight ? InLeft : InRight;
+
+    public bool IsDefending =>
+        (State == PlayerState.Idle || State == PlayerState.Walk)
+        && IsDefendingInput;
 
     public bool IsAttackingActive =>
         State == PlayerState.Attack
@@ -52,7 +63,7 @@ public partial class Player : Node2D
         && _atkFrame < AtkStartupFrames + AtkActiveFrames
         && !_atkHitConsumed;
 
-    public bool IsBusy => State == PlayerState.Attack || State == PlayerState.Hurt || State == PlayerState.Dead;
+    public bool IsBusy => State == PlayerState.Attack || State == PlayerState.Hurt || State == PlayerState.Dead || State == PlayerState.DefenseHit;
 
     public override void _Ready()
     {
@@ -113,6 +124,16 @@ public partial class Player : Node2D
                 PlayAnimSafe(IdleAnimName);
             }
         }
+        else if (State == PlayerState.DefenseHit)
+        {
+            _defHitFrame++;
+            if (_defHitFrame >= DefHitStunFrames)
+            {
+                State = PlayerState.Idle;
+                _defHitFrame = -1;
+                PlayAnimSafe(IdleAnimName);
+            }
+        }
     }
 
     public Rect2 GetWorldHitbox()
@@ -133,16 +154,30 @@ public partial class Player : Node2D
     public void ApplyDamage(int dmg)
     {
         if (State == PlayerState.Dead) return;
-        Hp = Mathf.Max(0, Hp - dmg);
+        
+        bool isDefending = IsDefending;
+        int finalDamage = isDefending ? Mathf.Max(1, Mathf.RoundToInt(dmg * DefDamageMultiplier)) : dmg;
+        
+        Hp = Mathf.Max(0, Hp - finalDamage);
         if (Hp == 0)
         {
             State = PlayerState.Dead;
             anim.Stop();
             return;
         }
-        State = PlayerState.Hurt;
-        _hurtFrame = 0;
-        PlayAnimSafe(HurtAnimName);
+        
+        if (isDefending)
+        {
+            State = PlayerState.DefenseHit;
+            _defHitFrame = 0;
+            PlayAnimSafe(DefAnimName);
+        }
+        else
+        {
+            State = PlayerState.Hurt;
+            _hurtFrame = 0;
+            PlayAnimSafe(HurtAnimName);
+        }
     }
 
     public void ResetForNewRound(Vector2 startPos, bool facingRight)
@@ -153,6 +188,7 @@ public partial class Player : Node2D
         State = PlayerState.Idle;
         _atkFrame = -1;
         _hurtFrame = -1;
+        _defHitFrame = -1;
         _atkHitConsumed = false;
         InLeft = InRight = InAtkPressed = false;
         DesiredDeltaX = 0;
@@ -166,6 +202,7 @@ public partial class Player : Node2D
         if (State == PlayerState.Idle || State == PlayerState.Walk)
         {
             bool moving = Input.IsActionPressed(ActionLeft) || Input.IsActionPressed(ActionRight);
+            State = moving ? PlayerState.Walk : PlayerState.Idle;
             PlayAnimSafe(moving ? WalkAnimName : IdleAnimName);
         }
 
