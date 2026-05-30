@@ -7,12 +7,14 @@ public partial class Player : Node2D
     [Export] public string ActionLeft = "p1_left";
     [Export] public string ActionRight = "p1_right";
     [Export] public string ActionAttack = "p1_atk";
+    [Export] public string ActionUp = "p1_up";
 
     [Export] public string IdleAnimName = "IDLE";
     [Export] public string WalkAnimName = "WALK";
     [Export] public string AtkAnimName = "ATK";
     [Export] public string HurtAnimName = "HURT";
     [Export] public string DefAnimName = "DEF";
+    [Export] public string JumpAnimName = "JUMP";
 
     [Export] public float DefDamageMultiplier = 0.1f;
 
@@ -31,9 +33,14 @@ public partial class Player : Node2D
     [Export] public int HurtStunFrames = 14;
     [Export] public int DefHitStunFrames = 10;
 
+    [Export] public float JumpVelocity = 1350f;
+    [Export] public float Gravity = 3600f;
+    [Export] public float ForwardJumpSpeed = 420f;
+    [Export] public float BackJumpSpeed = 380f;
+
     [Export] public bool DebugDrawBoxes = true;
 
-    public enum PlayerState { Idle, Walk, Attack, Hurt, Dead, DefenseHit }
+    public enum PlayerState { Idle, Walk, Attack, Hurt, Dead, DefenseHit, Jump }
 
     public int Hp { get; private set; }
     public PlayerState State { get; private set; } = PlayerState.Idle;
@@ -42,12 +49,19 @@ public partial class Player : Node2D
     public bool InLeft { get; private set; }
     public bool InRight { get; private set; }
     public bool InAtkPressed { get; private set; }
+    public bool InUpPressed { get; private set; }
     public float DesiredDeltaX { get; set; }
 
     private int _atkFrame = -1;
     private int _hurtFrame = -1;
     private int _defHitFrame = -1;
     private bool _atkHitConsumed = false;
+
+    private float _vy = 0f;
+    private float _jumpHVel = 0f;
+    private float _groundY = 0f;
+
+    public bool IsAirborne => State == PlayerState.Jump;
 
     public bool IsDirectionPressed => InLeft || InRight;
 
@@ -63,12 +77,13 @@ public partial class Player : Node2D
         && _atkFrame < AtkStartupFrames + AtkActiveFrames
         && !_atkHitConsumed;
 
-    public bool IsBusy => State == PlayerState.Attack || State == PlayerState.Hurt || State == PlayerState.Dead || State == PlayerState.DefenseHit;
+    public bool IsBusy => State == PlayerState.Attack || State == PlayerState.Hurt || State == PlayerState.Dead || State == PlayerState.DefenseHit || State == PlayerState.Jump;
 
     public override void _Ready()
     {
         Hp = MaxHp;
         FacingRight = StartFacingRight;
+        _groundY = Position.Y;
         PlayAnimSafe(IdleAnimName);
     }
 
@@ -76,12 +91,56 @@ public partial class Player : Node2D
     {
         if (State == PlayerState.Dead)
         {
-            InLeft = InRight = InAtkPressed = false;
+            InLeft = InRight = InAtkPressed = InUpPressed = false;
             return;
         }
         InLeft = Input.IsActionPressed(ActionLeft);
         InRight = Input.IsActionPressed(ActionRight);
         InAtkPressed = Input.IsActionJustPressed(ActionAttack);
+        InUpPressed = Input.IsActionJustPressed(ActionUp);
+    }
+
+    // towardSign: +1 if opponent on right, -1 if on left (== facing dir on ground)
+    public void TickStartJumpIfRequested(int towardSign)
+    {
+        if (State != PlayerState.Idle && State != PlayerState.Walk) return;
+        if (!InUpPressed) return;
+
+        int inputSign = InLeft && !InRight ? -1 : (InRight && !InLeft ? 1 : 0);
+        if (inputSign == 0)
+            _jumpHVel = 0f;                              // neutral jump
+        else if (inputSign == towardSign)
+            _jumpHVel = towardSign * ForwardJumpSpeed;   // forward jump
+        else
+            _jumpHVel = -towardSign * BackJumpSpeed;     // back jump
+
+        State = PlayerState.Jump;
+        _vy = -JumpVelocity;
+        PlayAnimSafe(JumpAnimName);
+    }
+
+    public void TickJumpPhysics(double dt)
+    {
+        if (State != PlayerState.Jump) return;
+
+        _vy += Gravity * (float)dt;
+        var pos = Position;
+        pos.X += _jumpHVel * (float)dt;
+        pos.Y += _vy * (float)dt;
+
+        if (_vy > 0f && pos.Y >= _groundY)
+        {
+            pos.Y = _groundY;
+            Position = pos;
+            State = PlayerState.Idle;
+            _vy = 0f;
+            _jumpHVel = 0f;
+            PlayAnimSafe(IdleAnimName);
+        }
+        else
+        {
+            Position = pos;
+        }
     }
 
     public void TickStartAttackIfRequested()
@@ -183,6 +242,7 @@ public partial class Player : Node2D
     public void ResetForNewRound(Vector2 startPos, bool facingRight)
     {
         Position = startPos;
+        _groundY = startPos.Y;
         FacingRight = facingRight;
         Hp = MaxHp;
         State = PlayerState.Idle;
@@ -190,7 +250,9 @@ public partial class Player : Node2D
         _hurtFrame = -1;
         _defHitFrame = -1;
         _atkHitConsumed = false;
-        InLeft = InRight = InAtkPressed = false;
+        _vy = 0f;
+        _jumpHVel = 0f;
+        InLeft = InRight = InAtkPressed = InUpPressed = false;
         DesiredDeltaX = 0;
         PlayAnimSafe(IdleAnimName);
     }
