@@ -16,6 +16,7 @@
 [ext_resource type="Texture2D" uid="uid://4jmwgdpol8de" path="res://Art/dsJumpAtlas.png" id="8_lv44l"]
 [ext_resource type="Texture2D" uid="uid://dl6jhgh6an73t" path="res://Art/csDefAtlas.png" id="9_nmseu"]
 [ext_resource type="Texture2D" uid="uid://wgj8onqetjte" path="res://Art/csWinAtlas.png" id="10_i24j6"]
+[ext_resource type="Texture2D" uid="uid://dy046e3ahu0wm" path="res://Art/csAtk2Atlas.png" id="12_1dni5"]
 [ext_resource type="Texture2D" uid="uid://dpxgbdmft2j3h" path="res://Art/csJumpAtlas.png" id="13_3pm86"]
 [ext_resource type="Script" uid="uid://ybt3nxx0m7r3" path="res://GameManager.cs" id="gm_script"]
 
@@ -329,6 +330,26 @@ region = Rect2(1536, 0, 512, 512)
 atlas = ExtResource("2_0vut4")
 region = Rect2(2048, 0, 512, 512)
 
+[sub_resource type="AtlasTexture" id="AtlasTexture_gadnn"]
+atlas = ExtResource("12_1dni5")
+region = Rect2(0, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_jtyww"]
+atlas = ExtResource("12_1dni5")
+region = Rect2(512, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_15j76"]
+atlas = ExtResource("12_1dni5")
+region = Rect2(1024, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_bnhq5"]
+atlas = ExtResource("12_1dni5")
+region = Rect2(1536, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_lfvwl"]
+atlas = ExtResource("12_1dni5")
+region = Rect2(2048, 0, 512, 512)
+
 [sub_resource type="AtlasTexture" id="AtlasTexture_1deol"]
 atlas = ExtResource("9_nmseu")
 region = Rect2(0, 0, 512, 512)
@@ -462,6 +483,26 @@ animations = [{
 "loop": false,
 "name": &"ATK",
 "speed": 16.0
+}, {
+"frames": [{
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_gadnn")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_jtyww")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_15j76")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_bnhq5")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_lfvwl")
+}],
+"loop": false,
+"name": &"ATKHEAVY",
+"speed": 5.0
 }, {
 "frames": [{
 "duration": 1.0,
@@ -1208,7 +1249,7 @@ AtkHeavyHitbox = Rect2(30, -180, 160, 140)
 [node name="袋鼠" type="AnimatedSprite2D" parent="Player2" unique_id=344721729]
 position = Vector2(0, -167)
 sprite_frames = SubResource("SpriteFrames_jd2df")
-animation = &"ATK"
+animation = &"ATKHEAVY"
 speed_scale = 2.0
 
 [node name="Player1" type="Node2D" parent="." unique_id=280155618 node_paths=PackedStringArray("anim")]
@@ -1220,11 +1261,18 @@ AtkActiveFrames = 3
 AtkRecoveryFrames = 3
 AtkDamage = 8
 AtkHitbox = Rect2(20, -180, 80, 140)
+AtkHeavyStartupFrames = 10
+AtkHeavyActiveFrames = 12
+AtkHeavyRecoveryFrames = 15
+AtkHeavyDamage = 34
+AtkHeavyHitbox = Rect2(30, -180, 160, 140)
 
 [node name="仓鼠" type="AnimatedSprite2D" parent="Player1" unique_id=185176480]
 position = Vector2(0, -107)
 sprite_frames = SubResource("SpriteFrames_iruj8")
-animation = &"ATK"
+animation = &"ATKHEAVY"
+frame = 4
+frame_progress = 1.0
 speed_scale = 2.0
 flip_h = true
 
