@@ -12,6 +12,7 @@
 [ext_resource type="Texture2D" uid="uid://dymmwxv3o8jaj" path="res://Art/dsDefAtlas.png" id="5_o1vs4"]
 [ext_resource type="Texture2D" uid="uid://17pk6llub42w" path="res://Art/dsWinAtlas.png" id="7_o8y5o"]
 [ext_resource type="Texture2D" uid="uid://byc4ufhaaqgp" path="res://Art/csHurtAtlas.png" id="8_254nc"]
+[ext_resource type="Texture2D" uid="uid://4jmwgdpol8de" path="res://Art/dsJumpAtlas.png" id="8_lv44l"]
 [ext_resource type="Texture2D" uid="uid://dl6jhgh6an73t" path="res://Art/csDefAtlas.png" id="9_nmseu"]
 [ext_resource type="Texture2D" uid="uid://wgj8onqetjte" path="res://Art/csWinAtlas.png" id="10_i24j6"]
 [ext_resource type="Texture2D" uid="uid://dpxgbdmft2j3h" path="res://Art/csJumpAtlas.png" id="13_3pm86"]
@@ -92,6 +93,26 @@ region = Rect2(1024, 512, 512, 512)
 [sub_resource type="AtlasTexture" id="AtlasTexture_gixib"]
 atlas = ExtResource("3_0q8lf")
 region = Rect2(1536, 512, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_guner"]
+atlas = ExtResource("8_lv44l")
+region = Rect2(0, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_ynk1a"]
+atlas = ExtResource("8_lv44l")
+region = Rect2(512, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_dwd57"]
+atlas = ExtResource("8_lv44l")
+region = Rect2(1024, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_kgpil"]
+atlas = ExtResource("8_lv44l")
+region = Rect2(1536, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_jh7mc"]
+atlas = ExtResource("8_lv44l")
+region = Rect2(2048, 0, 512, 512)
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_jd2df"]
 atlas = ExtResource("3_48u4o")
@@ -198,6 +219,26 @@ animations = [{
 }],
 "loop": true,
 "name": &"IDLE",
+"speed": 5.0
+}, {
+"frames": [{
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_guner")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_ynk1a")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_dwd57")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_kgpil")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_jh7mc")
+}],
+"loop": false,
+"name": &"JUMP",
 "speed": 5.0
 }, {
 "frames": [{
@@ -1110,7 +1151,6 @@ anim = NodePath("袋鼠")
 ActionLeft = "p2_left"
 ActionRight = "p2_right"
 ActionAttack = "p2_atk"
-ActionAttackHeavy = "p2_atk_heavy"
 ActionUp = "p2_up"
 AtkStartupFrames = 10
 AtkActiveFrames = 12
@@ -1121,8 +1161,8 @@ AtkHitbox = Rect2(30, -180, 160, 140)
 [node name="袋鼠" type="AnimatedSprite2D" parent="Player2" unique_id=344721729]
 position = Vector2(0, -167)
 sprite_frames = SubResource("SpriteFrames_jd2df")
-animation = &"DEF"
-frame = 1
+animation = &"JUMP"
+frame = 4
 frame_progress = 1.0
 speed_scale = 2.0
 
@@ -1139,9 +1179,7 @@ AtkHitbox = Rect2(20, -180, 80, 140)
 [node name="仓鼠" type="AnimatedSprite2D" parent="Player1" unique_id=185176480]
 position = Vector2(0, -107)
 sprite_frames = SubResource("SpriteFrames_iruj8")
-animation = &"JUMP"
-frame = 4
-frame_progress = 1.0
+animation = &"IDLE"
 speed_scale = 2.0
 flip_h = true
 
