@@ -2,12 +2,13 @@
 
 [ext_resource type="Texture2D" uid="uid://dju23nkdy2mj5" path="res://Art/csIdleAtlas.png" id="1_3kii0"]
 [ext_resource type="Script" uid="uid://c371721sxj4ig" path="res://Player.cs" id="1_tu88n"]
-[ext_resource type="Texture2D" uid="uid://dxbj4gu0oekt5" path="res://Art/csAtkAtlas.png" id="2_0vut4"]
+[ext_resource type="Texture2D" uid="uid://dxbj4gu0oekt5" path="res://Art/csAtk1Atlas.png" id="2_0vut4"]
 [ext_resource type="Texture2D" uid="uid://bv3dc8cf3ldcu" path="res://Art/BG.png" id="2_jj8fq"]
-[ext_resource type="Texture2D" uid="uid://bbqiyy67p4j4m" path="res://Art/dsAtkAtlas.png" id="2_rxphb"]
+[ext_resource type="Texture2D" uid="uid://bbqiyy67p4j4m" path="res://Art/dsAtk2Atlas.png" id="2_rxphb"]
 [ext_resource type="Texture2D" uid="uid://5q11fxihlcj1" path="res://Art/csWalkAtlas.png" id="2_tu88n"]
 [ext_resource type="Texture2D" uid="uid://c6384cvmwe3ui" path="res://Art/dsIdleAtlas.png" id="3_0q8lf"]
 [ext_resource type="Texture2D" uid="uid://clixxucsx1ftv" path="res://Art/dsWalkAtlas.png" id="3_48u4o"]
+[ext_resource type="Texture2D" uid="uid://dli7cv1f4sj88" path="res://Art/dsAtk1Atlas.png" id="4_2xao8"]
 [ext_resource type="Texture2D" uid="uid://f43b1irdb6ba" path="res://Art/dsHurtAtlas.png" id="5_mklpb"]
 [ext_resource type="Texture2D" uid="uid://dymmwxv3o8jaj" path="res://Art/dsDefAtlas.png" id="5_o1vs4"]
 [ext_resource type="Texture2D" uid="uid://17pk6llub42w" path="res://Art/dsWinAtlas.png" id="7_o8y5o"]
@@ -17,6 +18,26 @@
 [ext_resource type="Texture2D" uid="uid://wgj8onqetjte" path="res://Art/csWinAtlas.png" id="10_i24j6"]
 [ext_resource type="Texture2D" uid="uid://dpxgbdmft2j3h" path="res://Art/csJumpAtlas.png" id="13_3pm86"]
 [ext_resource type="Script" uid="uid://ybt3nxx0m7r3" path="res://GameManager.cs" id="gm_script"]
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_casu7"]
+atlas = ExtResource("4_2xao8")
+region = Rect2(0, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_jnokv"]
+atlas = ExtResource("4_2xao8")
+region = Rect2(512, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_q70fw"]
+atlas = ExtResource("4_2xao8")
+region = Rect2(1024, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_50e17"]
+atlas = ExtResource("4_2xao8")
+region = Rect2(1536, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_b2sm8"]
+atlas = ExtResource("4_2xao8")
+region = Rect2(2048, 0, 512, 512)
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_jgbpc"]
 atlas = ExtResource("2_rxphb")
@@ -146,6 +167,26 @@ region = Rect2(3072, 0, 512, 512)
 animations = [{
 "frames": [{
 "duration": 1.0,
+"texture": SubResource("AtlasTexture_casu7")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_jnokv")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_q70fw")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_50e17")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_b2sm8")
+}],
+"loop": false,
+"name": &"ATK",
+"speed": 16.0
+}, {
+"frames": [{
+"duration": 1.0,
 "texture": SubResource("AtlasTexture_jgbpc")
 }, {
 "duration": 1.0,
@@ -161,7 +202,7 @@ animations = [{
 "texture": SubResource("AtlasTexture_pqdeg")
 }],
 "loop": false,
-"name": &"ATK",
+"name": &"ATKHEAVY",
 "speed": 5.0
 }, {
 "frames": [{
@@ -1151,19 +1192,23 @@ anim = NodePath("袋鼠")
 ActionLeft = "p2_left"
 ActionRight = "p2_right"
 ActionAttack = "p2_atk"
+ActionAttackHeavy = "p2_atk_heavy"
 ActionUp = "p2_up"
-AtkStartupFrames = 10
-AtkActiveFrames = 12
-AtkRecoveryFrames = 15
-AtkDamage = 50
-AtkHitbox = Rect2(30, -180, 160, 140)
+AtkStartupFrames = 5
+AtkActiveFrames = 3
+AtkRecoveryFrames = 3
+AtkDamage = 8
+AtkHitbox = Rect2(20, -180, 80, 140)
+AtkHeavyStartupFrames = 10
+AtkHeavyActiveFrames = 12
+AtkHeavyRecoveryFrames = 15
+AtkHeavyDamage = 34
+AtkHeavyHitbox = Rect2(30, -180, 160, 140)
 
 [node name="袋鼠" type="AnimatedSprite2D" parent="Player2" unique_id=344721729]
 position = Vector2(0, -167)
 sprite_frames = SubResource("SpriteFrames_jd2df")
-animation = &"JUMP"
-frame = 4
-frame_progress = 1.0
+animation = &"ATK"
 speed_scale = 2.0
 
 [node name="Player1" type="Node2D" parent="." unique_id=280155618 node_paths=PackedStringArray("anim")]
@@ -1179,7 +1224,7 @@ AtkHitbox = Rect2(20, -180, 80, 140)
 [node name="仓鼠" type="AnimatedSprite2D" parent="Player1" unique_id=185176480]
 position = Vector2(0, -107)
 sprite_frames = SubResource("SpriteFrames_iruj8")
-animation = &"IDLE"
+animation = &"ATK"
 speed_scale = 2.0
 flip_h = true
 
