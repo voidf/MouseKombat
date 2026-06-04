@@ -36,6 +36,8 @@ public partial class GameManager : Node2D
 
     public override void _Ready()
     {
+        LoadAndApplyConfig();
+
         if (p1WinAnim != null)
         {
             p1WinAnim.Visible = false;
@@ -51,6 +53,58 @@ public partial class GameManager : Node2D
         CacheAndHideLabel(p2WinLine1, ref _p2L1Home);
         CacheAndHideLabel(p2WinLine2, ref _p2L2Home);
         UpdateHpBars();
+    }
+
+    [Export] public string ConfigFileName = "fighter_config.csv";
+
+    // Loads numeric tuning from a loose CSV next to the executable (so non-engine users can tune),
+    // falling back to the bundled res:// copy. Vertical table: header "key,p1,p2"; one config per row.
+    private void LoadAndApplyConfig()
+    {
+        string text = ReadConfigText();
+        if (string.IsNullOrEmpty(text)) return;
+
+        var p1col = new System.Collections.Generic.Dictionary<string, string>();
+        var p2col = new System.Collections.Generic.Dictionary<string, string>();
+
+        var lines = text.Replace("\r\n", "\n").Replace("\r", "\n").Split('\n');
+        bool headerSeen = false;
+        foreach (var raw in lines)
+        {
+            var line = raw.Trim();
+            if (line.Length == 0 || line.StartsWith("#")) continue;
+            var cells = line.Split(',');
+            if (cells.Length < 3) continue;
+            if (!headerSeen) { headerSeen = true; continue; } // skip "key,p1,p2"
+            string key = cells[0].Trim();
+            if (key.Length == 0) continue;
+            p1col[key] = cells[1];
+            p2col[key] = cells[2];
+        }
+
+        p1?.ApplyConfig(p1col);
+        p2?.ApplyConfig(p2col);
+    }
+
+    private string ReadConfigText()
+    {
+        // 1) loose file next to the binary (editable without the engine)
+        string exeDir = OS.GetExecutablePath().GetBaseDir();
+        string looksePath = exeDir + "/" + ConfigFileName;
+        if (Godot.FileAccess.FileExists(looksePath))
+        {
+            using var f = Godot.FileAccess.Open(looksePath, Godot.FileAccess.ModeFlags.Read);
+            if (f != null) return f.GetAsText();
+        }
+        // 2) bundled fallback
+        string resPath = "res://" + ConfigFileName;
+        if (Godot.FileAccess.FileExists(resPath))
+        {
+            using var f = Godot.FileAccess.Open(resPath, Godot.FileAccess.ModeFlags.Read);
+            if (f != null) return f.GetAsText();
+        }
+        GD.PushWarning($"[GameManager] config not found: {looksePath} or {resPath}; using engine defaults.");
+        return null;
     }
 
     private static void CacheAndHideLabel(Label l, ref Vector2 home)
@@ -77,8 +131,8 @@ public partial class GameManager : Node2D
         p1.TickStartJumpIfRequested(p1.FacingRight ? 1 : -1);
         p2.TickStartJumpIfRequested(p2.FacingRight ? 1 : -1);
 
-        p1.TickCrouch();
-        p2.TickCrouch();
+        p1.TickGroundStance();
+        p2.TickGroundStance();
 
         ResolveMovement(delta);
 

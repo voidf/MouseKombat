@@ -55,7 +55,7 @@ public partial class Player : Node2D
 
     [Export] public bool DebugDrawBoxes = true;
 
-    public enum PlayerState { Idle, Walk, Attack, Hurt, Dead, DefenseHit, Jump, CrouchEnter, Crouch, CrouchExit }
+    public enum PlayerState { Idle, Walk, Attack, Hurt, Dead, DefenseHit, Jump, Crouch, CrouchExit }
 
     public int Hp { get; private set; }
     public PlayerState State { get; private set; } = PlayerState.Idle;
@@ -65,7 +65,7 @@ public partial class Player : Node2D
     public bool InRight { get; private set; }
     public bool InAtkPressed { get; private set; }
     public bool InHeavyPressed { get; private set; }
-    public bool InUpPressed { get; private set; }
+    public bool InUpHeld { get; private set; }
     public bool InDownHeld { get; private set; }
     public float DesiredDeltaX { get; set; }
 
@@ -89,13 +89,12 @@ public partial class Player : Node2D
 
     public bool IsDirectionPressed => InLeft || InRight;
 
-    public bool IsCrouching =>
-        State == PlayerState.CrouchEnter || State == PlayerState.Crouch || State == PlayerState.CrouchExit;
+    public bool IsCrouching => State == PlayerState.Crouch; // low stance (CrouchExit = rising, treated as standing)
 
     public bool IsDefendingInput => FacingRight ? InLeft : InRight;
 
     public bool IsDefending =>
-        (State == PlayerState.Idle || State == PlayerState.Walk || IsCrouching)
+        (State == PlayerState.Idle || State == PlayerState.Walk || State == PlayerState.Crouch || State == PlayerState.CrouchExit)
         && IsDefendingInput;
 
     public bool IsAttackingActive =>
@@ -104,7 +103,10 @@ public partial class Player : Node2D
         && _atkFrame < _curStartup + _curActive
         && !_atkHitConsumed;
 
-    public bool IsBusy => State == PlayerState.Attack || State == PlayerState.Hurt || State == PlayerState.Dead || State == PlayerState.DefenseHit || State == PlayerState.Jump || IsCrouching;
+    public bool IsBusy => State == PlayerState.Attack || State == PlayerState.Hurt || State == PlayerState.Dead || State == PlayerState.DefenseHit || State == PlayerState.Jump || State == PlayerState.Crouch;
+
+    private bool IsGroundFree =>
+        State == PlayerState.Idle || State == PlayerState.Walk || State == PlayerState.Crouch || State == PlayerState.CrouchExit;
 
     public override void _Ready()
     {
@@ -120,24 +122,60 @@ public partial class Player : Node2D
     {
         if (State == PlayerState.Dead)
         {
-            InLeft = InRight = InAtkPressed = InHeavyPressed = InUpPressed = InDownHeld = false;
+            InLeft = InRight = InAtkPressed = InHeavyPressed = InUpHeld = InDownHeld = false;
             return;
         }
         InLeft = Input.IsActionPressed(ActionLeft);
         InRight = Input.IsActionPressed(ActionRight);
         InAtkPressed = Input.IsActionJustPressed(ActionAttack);
         InHeavyPressed = Input.IsActionJustPressed(ActionAttackHeavy);
-        InUpPressed = Input.IsActionJustPressed(ActionUp);
+        InUpHeld = Input.IsActionPressed(ActionUp);
         InDownHeld = Input.IsActionPressed(ActionDown);
     }
+
+    // Apply numeric tuning from CSV column (key->value). Missing keys keep the engine export default.
+    public void ApplyConfig(System.Collections.Generic.Dictionary<string, string> cfg)
+    {
+        if (cfg == null) return;
+        MaxHp = GetInt(cfg, "MaxHp", MaxHp);
+        WalkSpeedPxPerSec = GetFloat(cfg, "WalkSpeedPxPerSec", WalkSpeedPxPerSec);
+        DefDamageMultiplier = GetFloat(cfg, "DefDamageMultiplier", DefDamageMultiplier);
+        AtkStartupFrames = GetInt(cfg, "AtkStartupFrames", AtkStartupFrames);
+        AtkActiveFrames = GetInt(cfg, "AtkActiveFrames", AtkActiveFrames);
+        AtkRecoveryFrames = GetInt(cfg, "AtkRecoveryFrames", AtkRecoveryFrames);
+        AtkDamage = GetInt(cfg, "AtkDamage", AtkDamage);
+        AtkHeavyStartupFrames = GetInt(cfg, "AtkHeavyStartupFrames", AtkHeavyStartupFrames);
+        AtkHeavyActiveFrames = GetInt(cfg, "AtkHeavyActiveFrames", AtkHeavyActiveFrames);
+        AtkHeavyRecoveryFrames = GetInt(cfg, "AtkHeavyRecoveryFrames", AtkHeavyRecoveryFrames);
+        AtkHeavyDamage = GetInt(cfg, "AtkHeavyDamage", AtkHeavyDamage);
+        HurtStunFrames = GetInt(cfg, "HurtStunFrames", HurtStunFrames);
+        DefHitStunFrames = GetInt(cfg, "DefHitStunFrames", DefHitStunFrames);
+        JumpVelocity = GetFloat(cfg, "JumpVelocity", JumpVelocity);
+        Gravity = GetFloat(cfg, "Gravity", Gravity);
+        ForwardJumpSpeed = GetFloat(cfg, "ForwardJumpSpeed", ForwardJumpSpeed);
+        BackJumpSpeed = GetFloat(cfg, "BackJumpSpeed", BackJumpSpeed);
+        CrouchEnterFrames = GetInt(cfg, "CrouchEnterFrames", CrouchEnterFrames);
+
+        Hp = MaxHp; // re-init after MaxHp change
+    }
+
+    private static int GetInt(System.Collections.Generic.Dictionary<string, string> c, string k, int def)
+        => c.TryGetValue(k, out var v) && int.TryParse(v.Trim(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var r) ? r : def;
+
+    private static float GetFloat(System.Collections.Generic.Dictionary<string, string> c, string k, float def)
+        => c.TryGetValue(k, out var v) && float.TryParse(v.Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var r) ? r : def;
 
     // towardSign: +1 if opponent on right, -1 if on left (== facing dir on ground)
     public void TickStartJumpIfRequested(int towardSign)
     {
-        if (State != PlayerState.Idle && State != PlayerState.Walk) return;
-        if (IsAirborne) return; // no air-jump (e.g. Idle regained mid-air after hurt stun)
-        if (!InUpPressed) return;
+        if (IsAirborne) return;
+        if (!IsGroundFree) return;             // committed states block jump
+        if (!InUpHeld || InDownHeld) return;   // up held & down NOT held (down+up = stand, per SF6)
+        DoJump(towardSign);
+    }
 
+    private void DoJump(int towardSign)
+    {
         int inputSign = InLeft && !InRight ? -1 : (InRight && !InLeft ? 1 : 0);
         if (inputSign == 0)
             _jumpHVel = 0f;                              // neutral jump
@@ -164,59 +202,80 @@ public partial class Player : Node2D
         if (_vy > 0f && pos.Y >= _groundY)
         {
             pos.Y = _groundY;
+            Position = pos;
             _vy = 0f;
             _jumpHVel = 0f;
             if (State == PlayerState.Jump)
             {
-                State = PlayerState.Idle;
-                PlayAnimSafe(IdleAnimName);
-            }
-            // if Hurt mid-air: land but keep Hurt; stun timer ends it
-        }
-        Position = pos;
-    }
-
-    public void TickCrouch()
-    {
-        switch (State)
-        {
-            case PlayerState.Idle:
-            case PlayerState.Walk:
-                if (!IsAirborne && InDownHeld)
-                {
-                    State = PlayerState.CrouchEnter;
-                    _crouchFrame = 0;
-                    PlayAnimSafe(EnterCrouchAnimName);
-                }
-                break;
-
-            case PlayerState.CrouchEnter:
-                if (!InDownHeld) { StartCrouchExit(); break; }
-                _crouchFrame++;
-                if (_crouchFrame >= CrouchEnterFrames)
-                    State = PlayerState.Crouch; // hold last frame (anim already rested there)
-                break;
-
-            case PlayerState.Crouch:
-                if (!InDownHeld) StartCrouchExit();
-                break;
-
-            case PlayerState.CrouchExit:
-                _crouchFrame++;
-                if (_crouchFrame >= CrouchEnterFrames)
+                if (InUpHeld && !InDownHeld)
+                    DoJump(FacingRight ? 1 : -1); // SF6 hold-up: re-jump on landing frame (dir = fwd/back)
+                else
                 {
                     State = PlayerState.Idle;
                     PlayAnimSafe(IdleAnimName);
                 }
-                break;
+            }
+            // if Hurt mid-air: land but keep Hurt; stun timer ends it
+            return;
         }
+        Position = pos;
     }
 
-    private void StartCrouchExit()
+    public void TickGroundStance()
     {
-        State = PlayerState.CrouchExit;
-        _crouchFrame = 0;
-        PlayAnimBackwardsSafe(EnterCrouchAnimName);
+        if (IsAirborne) return;
+        // committed states own themselves
+        if (State == PlayerState.Attack || State == PlayerState.Hurt || State == PlayerState.Dead
+            || State == PlayerState.DefenseHit || State == PlayerState.Jump) return;
+
+        bool wantCrouch = InDownHeld && !InUpHeld; // up overrides down (down+up = stand)
+
+        switch (State)
+        {
+            case PlayerState.Idle:
+            case PlayerState.Walk:
+                if (wantCrouch)
+                {
+                    State = PlayerState.Crouch; // instant, no startup stun
+                    PlayAnimSafe(EnterCrouchAnimName);
+                }
+                break;
+
+            case PlayerState.Crouch:
+                if (!wantCrouch)
+                {
+                    if (InUpHeld)
+                    {
+                        State = PlayerState.Idle; // down+up stand-up: play stand anim directly
+                        PlayAnimSafe(IdleAnimName);
+                    }
+                    else
+                    {
+                        State = PlayerState.CrouchExit; // passive release: reverse-play enter anim
+                        _crouchFrame = 0;
+                        PlayAnimBackwardsSafe(EnterCrouchAnimName);
+                    }
+                }
+                break;
+
+            case PlayerState.CrouchExit:
+                if (wantCrouch)
+                {
+                    State = PlayerState.Crouch; // re-crouch interrupts the rising anim
+                    PlayAnimSafe(EnterCrouchAnimName);
+                }
+                else if (InLeft || InRight)
+                {
+                    State = PlayerState.Idle; // walking cancels exit; _Process plays WALK
+                }
+                else
+                {
+                    _crouchFrame++;
+                    if (_crouchFrame >= CrouchEnterFrames)
+                        State = PlayerState.Idle;
+                }
+                break;
+        }
     }
 
     public void TickStartAttackIfRequested()
@@ -232,7 +291,7 @@ public partial class Player : Node2D
             return;
         }
 
-        if (State != PlayerState.Idle && State != PlayerState.Walk) return;
+        if (State != PlayerState.Idle && State != PlayerState.Walk && State != PlayerState.CrouchExit) return;
 
         if (InAtkPressed)
             StartGroundAttack(AtkStartupFrames, AtkActiveFrames, AtkRecoveryFrames, AtkDamage, AtkHitbox, AtkAnimName);
@@ -255,9 +314,9 @@ public partial class Player : Node2D
 
     public void TickApplyMovement()
     {
+        // Position only. Idle<->Walk distinction (cosmetic) handled in _Process;
+        // Crouch/CrouchExit owned by TickGroundStance. Busy states get DesiredDeltaX=0 from GameManager.
         Position += new Vector2(DesiredDeltaX, 0);
-        if (IsBusy) { DesiredDeltaX = 0; return; }
-        State = (Mathf.Abs(DesiredDeltaX) > 0.01f) ? PlayerState.Walk : PlayerState.Idle;
         DesiredDeltaX = 0;
     }
 
@@ -356,7 +415,7 @@ public partial class Player : Node2D
         _jumpHVel = 0f;
         _curHitbox = AtkHitbox;
         _curDamage = AtkDamage;
-        InLeft = InRight = InAtkPressed = InHeavyPressed = InUpPressed = InDownHeld = false;
+        InLeft = InRight = InAtkPressed = InHeavyPressed = InUpHeld = InDownHeld = false;
         DesiredDeltaX = 0;
         PlayAnimSafe(IdleAnimName);
     }
