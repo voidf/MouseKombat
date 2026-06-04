@@ -314,10 +314,12 @@ public partial class Player : Node2D
 
     public void TickApplyMovement()
     {
-        // Position only. Idle<->Walk distinction (cosmetic) handled in _Process;
-        // Crouch/CrouchExit owned by TickGroundStance. Busy states get DesiredDeltaX=0 from GameManager.
+        // Position only. Crouch/CrouchExit owned by TickGroundStance. Busy states get DesiredDeltaX=0 from GameManager.
         Position += new Vector2(DesiredDeltaX, 0);
         DesiredDeltaX = 0;
+        // locomotion state (logic) decided here on the fixed tick, not in _Process
+        if (State == PlayerState.Idle || State == PlayerState.Walk)
+            State = (InLeft ^ InRight) ? PlayerState.Walk : PlayerState.Idle;
     }
 
     public void TickAdvanceTimers()
@@ -423,14 +425,13 @@ public partial class Player : Node2D
 
     public override void _Process(double delta)
     {
+        // presentation only — observes logic State, never writes it
         anim.FlipH = ArtFacesRight ? !FacingRight : FacingRight;
 
-        if (State == PlayerState.Idle || State == PlayerState.Walk)
-        {
-            bool moving = Input.IsActionPressed(ActionLeft) || Input.IsActionPressed(ActionRight);
-            State = moving ? PlayerState.Walk : PlayerState.Idle;
-            PlayAnimSafe(moving ? WalkAnimName : IdleAnimName);
-        }
+        // keep the looping locomotion clip in sync with State (combat/jump/crouch clips
+        // are one-shots fired by the logic tick at their transition)
+        if (State == PlayerState.Idle && anim.Animation != IdleAnimName) PlayAnimSafe(IdleAnimName);
+        else if (State == PlayerState.Walk && anim.Animation != WalkAnimName) PlayAnimSafe(WalkAnimName);
 
         if (DebugDrawBoxes) QueueRedraw();
     }

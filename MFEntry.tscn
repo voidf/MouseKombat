@@ -1396,7 +1396,6 @@ CrouchEnterFrames = 3
 position = Vector2(0, -167)
 sprite_frames = SubResource("SpriteFrames_jd2df")
 animation = &"ENTER_CROUCH"
-speed_scale = 2.0
 
 [node name="Player1" type="Node2D" parent="." unique_id=280155618 node_paths=PackedStringArray("anim")]
 position = Vector2(120, 560)
@@ -1418,7 +1417,6 @@ CrouchEnterFrames = 3
 position = Vector2(0, -107)
 sprite_frames = SubResource("SpriteFrames_iruj8")
 animation = &"ATK"
-speed_scale = 2.0
 flip_h = true
 
 [node name="P2WinAnim" type="AnimatedSprite2D" parent="." unique_id=374502234]
