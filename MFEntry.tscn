@@ -207,7 +207,7 @@ animations = [{
 }],
 "loop": false,
 "name": &"ATK",
-"speed": 16.0
+"speed": 32.0
 }, {
 "frames": [{
 "duration": 1.0,
@@ -227,7 +227,7 @@ animations = [{
 }],
 "loop": false,
 "name": &"ATKHEAVY",
-"speed": 5.0
+"speed": 10.0
 }, {
 "frames": [{
 "duration": 1.0,
@@ -238,7 +238,7 @@ animations = [{
 }],
 "loop": false,
 "name": &"DEF",
-"speed": 5.0
+"speed": 10.0
 }, {
 "frames": [{
 "duration": 1.0,
@@ -258,7 +258,7 @@ animations = [{
 }],
 "loop": false,
 "name": &"ENTER_CROUCH",
-"speed": 60.0
+"speed": 120.0
 }, {
 "frames": [{
 "duration": 1.0,
@@ -275,7 +275,7 @@ animations = [{
 }],
 "loop": true,
 "name": &"HURT",
-"speed": 5.0
+"speed": 10.0
 }, {
 "frames": [{
 "duration": 1.0,
@@ -304,7 +304,7 @@ animations = [{
 }],
 "loop": true,
 "name": &"IDLE",
-"speed": 5.0
+"speed": 10.0
 }, {
 "frames": [{
 "duration": 1.0,
@@ -324,7 +324,7 @@ animations = [{
 }],
 "loop": false,
 "name": &"JUMP",
-"speed": 5.0
+"speed": 10.0
 }, {
 "frames": [{
 "duration": 1.0,
@@ -350,7 +350,7 @@ animations = [{
 }],
 "loop": true,
 "name": &"WALK",
-"speed": 5.0
+"speed": 10.0
 }]
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_o8et7"]
@@ -560,28 +560,28 @@ region = Rect2(1024, 1024, 512, 512)
 [sub_resource type="SpriteFrames" id="SpriteFrames_iruj8"]
 animations = [{
 "frames": [{
-"duration": 8.0,
+"duration": 4.0,
 "texture": SubResource("AtlasTexture_o8et7")
 }, {
-"duration": 8.0,
+"duration": 4.0,
 "texture": SubResource("AtlasTexture_bpjnd")
 }, {
-"duration": 6.0,
+"duration": 3.0,
 "texture": SubResource("AtlasTexture_v8dsk")
 }, {
-"duration": 6.0,
+"duration": 3.0,
 "texture": SubResource("AtlasTexture_1otu5")
 }, {
-"duration": 6.0,
+"duration": 3.0,
 "texture": SubResource("AtlasTexture_epwjo")
 }, {
-"duration": 2.0,
+"duration": 5.0,
 "texture": SubResource("AtlasTexture_qh6jn")
 }, {
-"duration": 2.0,
+"duration": 4.0,
 "texture": SubResource("AtlasTexture_lik25")
 }, {
-"duration": 1.0,
+"duration": 5.0,
 "texture": SubResource("AtlasTexture_4vyaf")
 }],
 "loop": false,
@@ -626,7 +626,7 @@ animations = [{
 }],
 "loop": false,
 "name": &"ATKHEAVY",
-"speed": 5.0
+"speed": 10.0
 }, {
 "frames": [{
 "duration": 1.0,
@@ -637,7 +637,7 @@ animations = [{
 }],
 "loop": false,
 "name": &"DEF",
-"speed": 5.0
+"speed": 10.0
 }, {
 "frames": [{
 "duration": 1.0,
@@ -657,7 +657,7 @@ animations = [{
 }],
 "loop": false,
 "name": &"ENTER_CROUCH",
-"speed": 60.0
+"speed": 120.0
 }, {
 "frames": [{
 "duration": 1.0,
@@ -674,7 +674,7 @@ animations = [{
 }],
 "loop": true,
 "name": &"HURT",
-"speed": 5.0
+"speed": 10.0
 }, {
 "frames": [{
 "duration": 1.0,
@@ -703,7 +703,7 @@ animations = [{
 }],
 "loop": true,
 "name": &"IDLE",
-"speed": 5.0
+"speed": 10.0
 }, {
 "frames": [{
 "duration": 1.0,
@@ -723,7 +723,7 @@ animations = [{
 }],
 "loop": false,
 "name": &"JUMP",
-"speed": 5.0
+"speed": 10.0
 }, {
 "frames": [{
 "duration": 1.0,
@@ -755,7 +755,7 @@ animations = [{
 }],
 "loop": true,
 "name": &"WALK",
-"speed": 5.0
+"speed": 10.0
 }]
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_5px7w"]
@@ -1395,7 +1395,7 @@ CrouchEnterFrames = 3
 [node name="袋鼠" type="AnimatedSprite2D" parent="Player2" unique_id=344721729]
 position = Vector2(0, -167)
 sprite_frames = SubResource("SpriteFrames_jd2df")
-animation = &"ENTER_CROUCH"
+animation = &"DEF"
 
 [node name="Player1" type="Node2D" parent="." unique_id=280155618 node_paths=PackedStringArray("anim")]
 position = Vector2(120, 560)
