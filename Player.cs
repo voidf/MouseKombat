@@ -325,6 +325,7 @@ public partial class Player : Node2D
         if (State == PlayerState.Attack)
         {
             _atkFrame++;
+            // GD.Print($"_atkFrame{ _atkFrame} {_curStartup + _curActive + _curRecovery} {_curStartup} {_curActive} {_curRecovery}");
             if (_atkFrame >= _curStartup + _curActive + _curRecovery)
             {
                 State = PlayerState.Idle;

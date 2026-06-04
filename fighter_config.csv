@@ -2,9 +2,9 @@ key,p1,p2
 MaxHp,100,100
 WalkSpeedPxPerSec,220,220
 DefDamageMultiplier,0.1,0.1
-AtkStartupFrames,5,5
+AtkStartupFrames,16,16
 AtkActiveFrames,3,3
-AtkRecoveryFrames,3,3
+AtkRecoveryFrames,20,20
 AtkDamage,8,8
 AtkHeavyStartupFrames,10,10
 AtkHeavyActiveFrames,12,12

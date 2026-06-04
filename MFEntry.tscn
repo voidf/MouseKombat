@@ -18,6 +18,7 @@
 [ext_resource type="Texture2D" uid="uid://dl6jhgh6an73t" path="res://Art/csDefAtlas.png" id="9_nmseu"]
 [ext_resource type="Texture2D" uid="uid://wgj8onqetjte" path="res://Art/csWinAtlas.png" id="10_i24j6"]
 [ext_resource type="Texture2D" uid="uid://dy046e3ahu0wm" path="res://Art/csAtk2Atlas.png" id="12_1dni5"]
+[ext_resource type="Texture2D" uid="uid://d3i0o1b50iiy4" path="res://Art/csAtk1RWAtlas.png" id="12_75jsd"]
 [ext_resource type="Texture2D" uid="uid://dpxgbdmft2j3h" path="res://Art/csJumpAtlas.png" id="13_3pm86"]
 [ext_resource type="Texture2D" uid="uid://ccvaxdbd5lntw" path="res://Art/csCrouchAtlas.png" id="14_pypjs"]
 [ext_resource type="Script" uid="uid://ybt3nxx0m7r3" path="res://GameManager.cs" id="gm_script"]
@@ -352,6 +353,38 @@ animations = [{
 "speed": 5.0
 }]
 
+[sub_resource type="AtlasTexture" id="AtlasTexture_o8et7"]
+atlas = ExtResource("12_75jsd")
+region = Rect2(0, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_bpjnd"]
+atlas = ExtResource("12_75jsd")
+region = Rect2(512, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_v8dsk"]
+atlas = ExtResource("12_75jsd")
+region = Rect2(1024, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_1otu5"]
+atlas = ExtResource("12_75jsd")
+region = Rect2(1536, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_epwjo"]
+atlas = ExtResource("12_75jsd")
+region = Rect2(0, 512, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_qh6jn"]
+atlas = ExtResource("12_75jsd")
+region = Rect2(512, 512, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_lik25"]
+atlas = ExtResource("12_75jsd")
+region = Rect2(1024, 512, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_4vyaf"]
+atlas = ExtResource("12_75jsd")
+region = Rect2(1536, 512, 512, 512)
+
 [sub_resource type="AtlasTexture" id="AtlasTexture_2i07s"]
 atlas = ExtResource("2_0vut4")
 region = Rect2(0, 0, 512, 512)
@@ -527,6 +560,35 @@ region = Rect2(1024, 1024, 512, 512)
 [sub_resource type="SpriteFrames" id="SpriteFrames_iruj8"]
 animations = [{
 "frames": [{
+"duration": 8.0,
+"texture": SubResource("AtlasTexture_o8et7")
+}, {
+"duration": 8.0,
+"texture": SubResource("AtlasTexture_bpjnd")
+}, {
+"duration": 6.0,
+"texture": SubResource("AtlasTexture_v8dsk")
+}, {
+"duration": 6.0,
+"texture": SubResource("AtlasTexture_1otu5")
+}, {
+"duration": 6.0,
+"texture": SubResource("AtlasTexture_epwjo")
+}, {
+"duration": 2.0,
+"texture": SubResource("AtlasTexture_qh6jn")
+}, {
+"duration": 2.0,
+"texture": SubResource("AtlasTexture_lik25")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_4vyaf")
+}],
+"loop": false,
+"name": &"ATK",
+"speed": 60.0
+}, {
+"frames": [{
 "duration": 1.0,
 "texture": SubResource("AtlasTexture_2i07s")
 }, {
@@ -543,7 +605,7 @@ animations = [{
 "texture": SubResource("AtlasTexture_mklpb")
 }],
 "loop": false,
-"name": &"ATK",
+"name": &"ATK1BAK",
 "speed": 16.0
 }, {
 "frames": [{
@@ -1355,9 +1417,7 @@ CrouchEnterFrames = 3
 [node name="仓鼠" type="AnimatedSprite2D" parent="Player1" unique_id=185176480]
 position = Vector2(0, -107)
 sprite_frames = SubResource("SpriteFrames_iruj8")
-animation = &"ENTER_CROUCH"
-frame = 4
-frame_progress = 1.0
+animation = &"ATK"
 speed_scale = 2.0
 flip_h = true
 
