@@ -18,6 +18,7 @@
 [ext_resource type="Texture2D" uid="uid://wgj8onqetjte" path="res://Art/csWinAtlas.png" id="10_i24j6"]
 [ext_resource type="Texture2D" uid="uid://dy046e3ahu0wm" path="res://Art/csAtk2Atlas.png" id="12_1dni5"]
 [ext_resource type="Texture2D" uid="uid://dpxgbdmft2j3h" path="res://Art/csJumpAtlas.png" id="13_3pm86"]
+[ext_resource type="Texture2D" uid="uid://ccvaxdbd5lntw" path="res://Art/csCrouchAtlas.png" id="14_pypjs"]
 [ext_resource type="Script" uid="uid://ybt3nxx0m7r3" path="res://GameManager.cs" id="gm_script"]
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_casu7"]
@@ -358,6 +359,26 @@ region = Rect2(0, 0, 512, 512)
 atlas = ExtResource("9_nmseu")
 region = Rect2(512, 0, 512, 512)
 
+[sub_resource type="AtlasTexture" id="AtlasTexture_06uhv"]
+atlas = ExtResource("14_pypjs")
+region = Rect2(0, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_x77ln"]
+atlas = ExtResource("14_pypjs")
+region = Rect2(512, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_0i5tt"]
+atlas = ExtResource("14_pypjs")
+region = Rect2(1024, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_ogm7t"]
+atlas = ExtResource("14_pypjs")
+region = Rect2(1536, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_g2k47"]
+atlas = ExtResource("14_pypjs")
+region = Rect2(2048, 0, 512, 512)
+
 [sub_resource type="AtlasTexture" id="AtlasTexture_bgo5y"]
 atlas = ExtResource("8_254nc")
 region = Rect2(0, 0, 512, 512)
@@ -514,6 +535,26 @@ animations = [{
 "loop": false,
 "name": &"DEF",
 "speed": 5.0
+}, {
+"frames": [{
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_06uhv")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_x77ln")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_0i5tt")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_ogm7t")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_g2k47")
+}],
+"loop": false,
+"name": &"ENTER_CROUCH",
+"speed": 12.0
 }, {
 "frames": [{
 "duration": 1.0,
@@ -1245,6 +1286,7 @@ AtkHeavyActiveFrames = 12
 AtkHeavyRecoveryFrames = 15
 AtkHeavyDamage = 34
 AtkHeavyHitbox = Rect2(30, -180, 160, 140)
+DebugDrawBoxes = false
 
 [node name="袋鼠" type="AnimatedSprite2D" parent="Player2" unique_id=344721729]
 position = Vector2(0, -167)
@@ -1266,11 +1308,12 @@ AtkHeavyActiveFrames = 12
 AtkHeavyRecoveryFrames = 15
 AtkHeavyDamage = 34
 AtkHeavyHitbox = Rect2(30, -180, 160, 140)
+DebugDrawBoxes = false
 
 [node name="仓鼠" type="AnimatedSprite2D" parent="Player1" unique_id=185176480]
 position = Vector2(0, -107)
 sprite_frames = SubResource("SpriteFrames_iruj8")
-animation = &"ATKHEAVY"
+animation = &"ENTER_CROUCH"
 frame = 4
 frame_progress = 1.0
 speed_scale = 2.0
