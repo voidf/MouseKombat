@@ -78,6 +78,7 @@ public partial class Player : Node2D
     // active-attack params resolved at attack start (light or heavy)
     private int _curStartup, _curActive, _curRecovery, _curDamage;
     private Rect2 _curHitbox;
+    private string _curAtkAnim = "";
 
     private float _vy = 0f;
     private float _jumpHVel = 0f;
@@ -309,6 +310,7 @@ public partial class Player : Node2D
         _curRecovery = recovery;
         _curDamage = damage;
         _curHitbox = hitbox;
+        _curAtkAnim = animName;
         PlayAnimSafe(animName);
     }
 
@@ -327,12 +329,13 @@ public partial class Player : Node2D
         if (State == PlayerState.Attack)
         {
             _atkFrame++;
-            // GD.Print($"_atkFrame{ _atkFrame} {_curStartup + _curActive + _curRecovery} {_curStartup} {_curActive} {_curRecovery}");
             if (_atkFrame >= _curStartup + _curActive + _curRecovery)
             {
+                // logic frames done -> actionable now. Do NOT snap to IDLE: let the attack
+                // clip keep playing until it finishes (art may run longer). _Process shows
+                // IDLE once the clip ends; any action this/next tick interrupts it naturally.
                 State = PlayerState.Idle;
                 _atkFrame = -1;
-                PlayAnimSafe(IdleAnimName);
             }
         }
         else if (State == PlayerState.Hurt)
@@ -430,7 +433,14 @@ public partial class Player : Node2D
 
         // keep the looping locomotion clip in sync with State (combat/jump/crouch clips
         // are one-shots fired by the logic tick at their transition)
-        if (State == PlayerState.Idle && anim.Animation != IdleAnimName) PlayAnimSafe(IdleAnimName);
+        if (State == PlayerState.Idle)
+        {
+            // attack tail: logic over but the (longer) attack clip may still be playing —
+            // let it finish; switch to IDLE only once it stops. Any other action changes
+            // State (Walk/Jump/Crouch/Attack) and replaces the clip, interrupting the tail.
+            bool atkTailPlaying = anim.IsPlaying() && anim.Animation == _curAtkAnim && !string.IsNullOrEmpty(_curAtkAnim);
+            if (!atkTailPlaying && anim.Animation != IdleAnimName) PlayAnimSafe(IdleAnimName);
+        }
         else if (State == PlayerState.Walk && anim.Animation != WalkAnimName) PlayAnimSafe(WalkAnimName);
 
         if (DebugDrawBoxes) QueueRedraw();
