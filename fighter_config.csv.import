@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://srlbjfn72kvw"
+
+[deps]
+
+files=["res://fighter_config.p1.translation", "res://fighter_config.p2.translation"]
+
+source_file="res://fighter_config.csv"
+dest_files=["res://fighter_config.p1.translation", "res://fighter_config.p2.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true
