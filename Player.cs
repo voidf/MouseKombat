@@ -9,6 +9,7 @@ public partial class Player : Node2D
     [Export] public string ActionAttack = "p1_atk";
     [Export] public string ActionAttackHeavy = "p1_atk_heavy";
     [Export] public string ActionUp = "p1_up";
+    [Export] public string ActionDown = "p1_down";
 
     [Export] public string IdleAnimName = "IDLE";
     [Export] public string WalkAnimName = "WALK";
@@ -17,6 +18,7 @@ public partial class Player : Node2D
     [Export] public string HurtAnimName = "HURT";
     [Export] public string DefAnimName = "DEF";
     [Export] public string JumpAnimName = "JUMP";
+    [Export] public string EnterCrouchAnimName = "ENTER_CROUCH"; // exit = this played backwards
 
     [Export] public float DefDamageMultiplier = 0.1f;
 
@@ -41,8 +43,10 @@ public partial class Player : Node2D
     [Export] public Rect2 AtkHeavyHitbox = new Rect2(20, -190, 190, 170);
 
     [Export] public Rect2 Hurtbox = new Rect2(-60, -200, 120, 200);
+    [Export] public Rect2 CrouchHurtbox = new Rect2(-60, -110, 120, 110); // lowered for dodging highs later
     [Export] public int HurtStunFrames = 14;
     [Export] public int DefHitStunFrames = 10;
+    [Export] public int CrouchEnterFrames = 8; // logic duration of enter/exit; set to match ENTER_CROUCH anim length
 
     [Export] public float JumpVelocity = 1350f;
     [Export] public float Gravity = 3600f;
@@ -51,7 +55,7 @@ public partial class Player : Node2D
 
     [Export] public bool DebugDrawBoxes = true;
 
-    public enum PlayerState { Idle, Walk, Attack, Hurt, Dead, DefenseHit, Jump }
+    public enum PlayerState { Idle, Walk, Attack, Hurt, Dead, DefenseHit, Jump, CrouchEnter, Crouch, CrouchExit }
 
     public int Hp { get; private set; }
     public PlayerState State { get; private set; } = PlayerState.Idle;
@@ -62,11 +66,13 @@ public partial class Player : Node2D
     public bool InAtkPressed { get; private set; }
     public bool InHeavyPressed { get; private set; }
     public bool InUpPressed { get; private set; }
+    public bool InDownHeld { get; private set; }
     public float DesiredDeltaX { get; set; }
 
     private int _atkFrame = -1;
     private int _hurtFrame = -1;
     private int _defHitFrame = -1;
+    private int _crouchFrame = 0;
     private bool _atkHitConsumed = false;
 
     // active-attack params resolved at attack start (light or heavy)
@@ -83,10 +89,13 @@ public partial class Player : Node2D
 
     public bool IsDirectionPressed => InLeft || InRight;
 
+    public bool IsCrouching =>
+        State == PlayerState.CrouchEnter || State == PlayerState.Crouch || State == PlayerState.CrouchExit;
+
     public bool IsDefendingInput => FacingRight ? InLeft : InRight;
 
     public bool IsDefending =>
-        (State == PlayerState.Idle || State == PlayerState.Walk)
+        (State == PlayerState.Idle || State == PlayerState.Walk || IsCrouching)
         && IsDefendingInput;
 
     public bool IsAttackingActive =>
@@ -95,7 +104,7 @@ public partial class Player : Node2D
         && _atkFrame < _curStartup + _curActive
         && !_atkHitConsumed;
 
-    public bool IsBusy => State == PlayerState.Attack || State == PlayerState.Hurt || State == PlayerState.Dead || State == PlayerState.DefenseHit || State == PlayerState.Jump;
+    public bool IsBusy => State == PlayerState.Attack || State == PlayerState.Hurt || State == PlayerState.Dead || State == PlayerState.DefenseHit || State == PlayerState.Jump || IsCrouching;
 
     public override void _Ready()
     {
@@ -111,7 +120,7 @@ public partial class Player : Node2D
     {
         if (State == PlayerState.Dead)
         {
-            InLeft = InRight = InAtkPressed = InHeavyPressed = InUpPressed = false;
+            InLeft = InRight = InAtkPressed = InHeavyPressed = InUpPressed = InDownHeld = false;
             return;
         }
         InLeft = Input.IsActionPressed(ActionLeft);
@@ -119,6 +128,7 @@ public partial class Player : Node2D
         InAtkPressed = Input.IsActionJustPressed(ActionAttack);
         InHeavyPressed = Input.IsActionJustPressed(ActionAttackHeavy);
         InUpPressed = Input.IsActionJustPressed(ActionUp);
+        InDownHeld = Input.IsActionPressed(ActionDown);
     }
 
     // towardSign: +1 if opponent on right, -1 if on left (== facing dir on ground)
@@ -164,6 +174,49 @@ public partial class Player : Node2D
             // if Hurt mid-air: land but keep Hurt; stun timer ends it
         }
         Position = pos;
+    }
+
+    public void TickCrouch()
+    {
+        switch (State)
+        {
+            case PlayerState.Idle:
+            case PlayerState.Walk:
+                if (!IsAirborne && InDownHeld)
+                {
+                    State = PlayerState.CrouchEnter;
+                    _crouchFrame = 0;
+                    PlayAnimSafe(EnterCrouchAnimName);
+                }
+                break;
+
+            case PlayerState.CrouchEnter:
+                if (!InDownHeld) { StartCrouchExit(); break; }
+                _crouchFrame++;
+                if (_crouchFrame >= CrouchEnterFrames)
+                    State = PlayerState.Crouch; // hold last frame (anim already rested there)
+                break;
+
+            case PlayerState.Crouch:
+                if (!InDownHeld) StartCrouchExit();
+                break;
+
+            case PlayerState.CrouchExit:
+                _crouchFrame++;
+                if (_crouchFrame >= CrouchEnterFrames)
+                {
+                    State = PlayerState.Idle;
+                    PlayAnimSafe(IdleAnimName);
+                }
+                break;
+        }
+    }
+
+    private void StartCrouchExit()
+    {
+        State = PlayerState.CrouchExit;
+        _crouchFrame = 0;
+        PlayAnimBackwardsSafe(EnterCrouchAnimName);
     }
 
     public void TickStartAttackIfRequested()
@@ -252,7 +305,8 @@ public partial class Player : Node2D
 
     public Rect2 GetWorldHurtbox()
     {
-        return new Rect2(GlobalPosition + Hurtbox.Position, Hurtbox.Size);
+        var box = IsCrouching ? CrouchHurtbox : Hurtbox;
+        return new Rect2(GlobalPosition + box.Position, box.Size);
     }
 
     public void ConsumeAttackHit() { _atkHitConsumed = true; }
@@ -296,12 +350,13 @@ public partial class Player : Node2D
         _atkFrame = -1;
         _hurtFrame = -1;
         _defHitFrame = -1;
+        _crouchFrame = 0;
         _atkHitConsumed = false;
         _vy = 0f;
         _jumpHVel = 0f;
         _curHitbox = AtkHitbox;
         _curDamage = AtkDamage;
-        InLeft = InRight = InAtkPressed = InHeavyPressed = InUpPressed = false;
+        InLeft = InRight = InAtkPressed = InHeavyPressed = InUpPressed = InDownHeld = false;
         DesiredDeltaX = 0;
         PlayAnimSafe(IdleAnimName);
     }
@@ -324,8 +379,9 @@ public partial class Player : Node2D
     {
         if (!DebugDrawBoxes) return;
 
-        DrawRect(Hurtbox, new Color(0, 1, 0, 0.25f), filled: true);
-        DrawRect(Hurtbox, new Color(0, 1, 0, 1f), filled: false, width: 2f);
+        var hurt = IsCrouching ? CrouchHurtbox : Hurtbox;
+        DrawRect(hurt, new Color(0, 1, 0, 0.25f), filled: true);
+        DrawRect(hurt, new Color(0, 1, 0, 1f), filled: false, width: 2f);
 
         var hb = (State == PlayerState.Attack) ? _curHitbox : AtkHitbox;
         if (!FacingRight) hb.Position = new Vector2(-hb.Position.X - hb.Size.X, hb.Position.Y);
@@ -350,5 +406,13 @@ public partial class Player : Node2D
         if (string.IsNullOrEmpty(name)) return;
         if (!anim.SpriteFrames.HasAnimation(name)) return;
         anim.Play(name);
+    }
+
+    private void PlayAnimBackwardsSafe(string name)
+    {
+        if (anim?.SpriteFrames == null) return;
+        if (string.IsNullOrEmpty(name)) return;
+        if (!anim.SpriteFrames.HasAnimation(name)) return;
+        anim.PlayBackwards(name);
     }
 }

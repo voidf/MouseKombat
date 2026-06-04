@@ -77,6 +77,9 @@ public partial class GameManager : Node2D
         p1.TickStartJumpIfRequested(p1.FacingRight ? 1 : -1);
         p2.TickStartJumpIfRequested(p2.FacingRight ? 1 : -1);
 
+        p1.TickCrouch();
+        p2.TickCrouch();
+
         ResolveMovement(delta);
 
         p1.TickApplyMovement();

@@ -1276,6 +1276,7 @@ ActionRight = "p2_right"
 ActionAttack = "p2_atk"
 ActionAttackHeavy = "p2_atk_heavy"
 ActionUp = "p2_up"
+ActionDown = "p2_down"
 AtkStartupFrames = 5
 AtkActiveFrames = 3
 AtkRecoveryFrames = 3
