@@ -11,6 +11,7 @@
 [ext_resource type="Texture2D" uid="uid://dli7cv1f4sj88" path="res://Art/dsAtk1Atlas.png" id="4_2xao8"]
 [ext_resource type="Texture2D" uid="uid://f43b1irdb6ba" path="res://Art/dsHurtAtlas.png" id="5_mklpb"]
 [ext_resource type="Texture2D" uid="uid://dymmwxv3o8jaj" path="res://Art/dsDefAtlas.png" id="5_o1vs4"]
+[ext_resource type="Texture2D" uid="uid://ndnh5x51kpsn" path="res://Art/dsCrouchIdleAtlas.png" id="6_8trbx"]
 [ext_resource type="Texture2D" uid="uid://cfjxdt2qtpwki" path="res://Art/dsCrouchAtlas.png" id="7_iruj8"]
 [ext_resource type="Texture2D" uid="uid://17pk6llub42w" path="res://Art/dsWinAtlas.png" id="7_o8y5o"]
 [ext_resource type="Texture2D" uid="uid://byc4ufhaaqgp" path="res://Art/csHurtAtlas.png" id="8_254nc"]
@@ -22,6 +23,7 @@
 [ext_resource type="Texture2D" uid="uid://dpxgbdmft2j3h" path="res://Art/csJumpAtlas.png" id="13_3pm86"]
 [ext_resource type="Texture2D" uid="uid://m288mxhdo1uj" path="res://Art/CsAtk2RWAtlas.png" id="14_c1nbd"]
 [ext_resource type="Texture2D" uid="uid://ccvaxdbd5lntw" path="res://Art/csCrouchAtlas.png" id="14_pypjs"]
+[ext_resource type="Texture2D" uid="uid://w7ko2375500q" path="res://Art/csCrouchIdleAtlas.png" id="17_e4xp5"]
 [ext_resource type="Script" uid="uid://ybt3nxx0m7r3" path="res://GameManager.cs" id="gm_script"]
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_jgbpc"]
@@ -63,6 +65,22 @@ region = Rect2(1536, 0, 512, 512)
 [sub_resource type="AtlasTexture" id="AtlasTexture_b2sm8"]
 atlas = ExtResource("4_2xao8")
 region = Rect2(2048, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_fmcpr"]
+atlas = ExtResource("6_8trbx")
+region = Rect2(0, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_0grqs"]
+atlas = ExtResource("6_8trbx")
+region = Rect2(512, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_jhpqf"]
+atlas = ExtResource("6_8trbx")
+region = Rect2(0, 512, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_n2i2w"]
+atlas = ExtResource("6_8trbx")
+region = Rect2(512, 512, 512, 512)
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_idh50"]
 atlas = ExtResource("5_o1vs4")
@@ -229,6 +247,23 @@ animations = [{
 "loop": false,
 "name": &"AtkU",
 "speed": 32.0
+}, {
+"frames": [{
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_fmcpr")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_0grqs")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_jhpqf")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_n2i2w")
+}],
+"loop": true,
+"name": &"CROUCH",
+"speed": 10.0
 }, {
 "frames": [{
 "duration": 1.0,
@@ -470,6 +505,22 @@ region = Rect2(1536, 0, 512, 512)
 atlas = ExtResource("2_0vut4")
 region = Rect2(2048, 0, 512, 512)
 
+[sub_resource type="AtlasTexture" id="AtlasTexture_7mv6p"]
+atlas = ExtResource("17_e4xp5")
+region = Rect2(0, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_6m3be"]
+atlas = ExtResource("17_e4xp5")
+region = Rect2(512, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_aptdm"]
+atlas = ExtResource("17_e4xp5")
+region = Rect2(0, 512, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_tul0i"]
+atlas = ExtResource("17_e4xp5")
+region = Rect2(512, 512, 512, 512)
+
 [sub_resource type="AtlasTexture" id="AtlasTexture_1deol"]
 atlas = ExtResource("9_nmseu")
 region = Rect2(0, 0, 512, 512)
@@ -710,6 +761,23 @@ animations = [{
 "loop": false,
 "name": &"AtkU",
 "speed": 60.0
+}, {
+"frames": [{
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_7mv6p")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_6m3be")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_aptdm")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_tul0i")
+}],
+"loop": true,
+"name": &"CROUCH",
+"speed": 10.0
 }, {
 "frames": [{
 "duration": 1.0,
@@ -1468,7 +1536,7 @@ CrouchEnterFrames = 3
 [node name="袋鼠" type="AnimatedSprite2D" parent="Player2" unique_id=344721729]
 position = Vector2(0, -167)
 sprite_frames = SubResource("SpriteFrames_jd2df")
-animation = &"HURT"
+animation = &"CROUCH"
 
 [node name="Player1" type="Node2D" parent="." unique_id=280155618 node_paths=PackedStringArray("anim")]
 position = Vector2(120, 560)
@@ -1479,7 +1547,7 @@ CrouchEnterFrames = 3
 [node name="仓鼠" type="AnimatedSprite2D" parent="Player1" unique_id=185176480]
 position = Vector2(0, -107)
 sprite_frames = SubResource("SpriteFrames_iruj8")
-animation = &"AtkO"
+animation = &"CROUCH"
 flip_h = true
 
 [node name="P2WinAnim" type="AnimatedSprite2D" parent="." unique_id=374502234]
