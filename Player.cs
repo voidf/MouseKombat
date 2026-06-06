@@ -34,6 +34,7 @@ public partial class Player : Node2D
     [Export] public int AtkRecoveryFrames = 10;
     [Export] public int AtkDamage = 10;
     [Export] public Rect2 AtkHitbox = new Rect2(20, -180, 140, 140);
+    [Export] public GuardHeight AtkGuard = GuardHeight.High; // High=block standing or crouching
 
     // Heavy attack (ATKHEAVY placeholder) — independent config
     [Export] public int AtkHeavyStartupFrames = 11;
@@ -41,9 +42,23 @@ public partial class Player : Node2D
     [Export] public int AtkHeavyRecoveryFrames = 22;
     [Export] public int AtkHeavyDamage = 20;
     [Export] public Rect2 AtkHeavyHitbox = new Rect2(20, -190, 190, 170);
+    [Export] public GuardHeight AtkHeavyGuard = GuardHeight.High;
 
-    [Export] public Rect2 Hurtbox = new Rect2(-60, -200, 120, 200);
-    [Export] public Rect2 CrouchHurtbox = new Rect2(-60, -110, 120, 110); // lowered for dodging highs later
+    // Segmented hurtboxes (local rects, flipped by facing like the hitbox).
+    // Hit detection tests the UNION of regions; per-region accessors exist for future
+    // region-targeted moves (e.g. a move that may only strike the standing Head).
+    [ExportGroup("Hurtboxes (standing)")]
+    [Export] public Rect2 HeadBox = new Rect2(-40, -200, 80, 55);
+    [Export] public Rect2 BodyBox = new Rect2(-55, -150, 110, 95);
+    [Export] public Rect2 ArmsBox = new Rect2(-65, -165, 130, 60);
+    [Export] public Rect2 LegsBox = new Rect2(-45, -70, 90, 70);
+    [ExportGroup("Hurtboxes (crouch)")]
+    [Export] public Rect2 CrouchHeadBox = new Rect2(-15, -110, 80, 55); // lowered + slightly forward
+    [Export] public Rect2 CrouchBodyBox = new Rect2(-55, -75, 110, 75);
+    [Export] public Rect2 CrouchArmsBox = new Rect2(-60, -90, 120, 55);
+    [Export] public Rect2 CrouchLegsBox = new Rect2(-45, -35, 90, 35);
+    [ExportGroup("")]
+
     [Export] public int HurtStunFrames = 14;
     [Export] public int DefHitStunFrames = 10;
     [Export] public int CrouchEnterFrames = 8; // logic duration of enter/exit; set to match ENTER_CROUCH anim length
@@ -56,6 +71,14 @@ public partial class Player : Node2D
     [Export] public bool DebugDrawBoxes = true;
 
     public enum PlayerState { Idle, Walk, Attack, Hurt, Dead, DefenseHit, Jump, Crouch, CrouchExit }
+
+    // Guard height of an attack (which stances can block it):
+    //   High = standing OR crouching block   (上段, most normals)
+    //   Mid  = standing block only           (中段, overhead — crouchers get hit)
+    //   Low  = crouching block only          (下段, low — standers get hit)
+    public enum GuardHeight { High, Mid, Low }
+
+    public enum HurtRegion { Head, Body, Arms, Legs }
 
     public int Hp { get; private set; }
     public PlayerState State { get; private set; } = PlayerState.Idle;
@@ -79,6 +102,7 @@ public partial class Player : Node2D
     private int _curStartup, _curActive, _curRecovery, _curDamage;
     private Rect2 _curHitbox;
     private string _curAtkAnim = "";
+    private GuardHeight _curGuard = GuardHeight.High;
 
     private float _vy = 0f;
     private float _jumpHVel = 0f;
@@ -87,6 +111,7 @@ public partial class Player : Node2D
     public bool IsAirborne => Position.Y < _groundY - 0.5f;
 
     public int CurrentAtkDamage => _curDamage;
+    public GuardHeight CurrentAtkGuard => _curGuard;
 
     public bool IsDirectionPressed => InLeft || InRight;
 
@@ -295,12 +320,12 @@ public partial class Player : Node2D
         if (State != PlayerState.Idle && State != PlayerState.Walk && State != PlayerState.CrouchExit) return;
 
         if (InAtkPressed)
-            StartGroundAttack(AtkStartupFrames, AtkActiveFrames, AtkRecoveryFrames, AtkDamage, AtkHitbox, AtkAnimName);
+            StartGroundAttack(AtkStartupFrames, AtkActiveFrames, AtkRecoveryFrames, AtkDamage, AtkHitbox, AtkAnimName, AtkGuard);
         else if (InHeavyPressed)
-            StartGroundAttack(AtkHeavyStartupFrames, AtkHeavyActiveFrames, AtkHeavyRecoveryFrames, AtkHeavyDamage, AtkHeavyHitbox, AtkHeavyAnimName);
+            StartGroundAttack(AtkHeavyStartupFrames, AtkHeavyActiveFrames, AtkHeavyRecoveryFrames, AtkHeavyDamage, AtkHeavyHitbox, AtkHeavyAnimName, AtkHeavyGuard);
     }
 
-    private void StartGroundAttack(int startup, int active, int recovery, int damage, Rect2 hitbox, string animName)
+    private void StartGroundAttack(int startup, int active, int recovery, int damage, Rect2 hitbox, string animName, GuardHeight guard)
     {
         State = PlayerState.Attack;
         _atkFrame = 0;
@@ -311,6 +336,7 @@ public partial class Player : Node2D
         _curDamage = damage;
         _curHitbox = hitbox;
         _curAtkAnim = animName;
+        _curGuard = guard;
         PlayAnimSafe(animName);
     }
 
@@ -362,27 +388,77 @@ public partial class Player : Node2D
 
     public Rect2 GetWorldHitbox()
     {
-        var local = _curHitbox;
+        return ToWorld(_curHitbox);
+    }
+
+    // local rect -> world, mirrored by facing (same convention as the hitbox)
+    private Rect2 ToWorld(Rect2 local)
+    {
         var pos = local.Position;
         if (!FacingRight) pos = new Vector2(-pos.X - local.Size.X, pos.Y);
         return new Rect2(GlobalPosition + pos, local.Size);
     }
 
+    private Rect2 RegionLocal(HurtRegion r)
+    {
+        if (IsCrouching)
+            return r switch
+            {
+                HurtRegion.Head => CrouchHeadBox,
+                HurtRegion.Body => CrouchBodyBox,
+                HurtRegion.Arms => CrouchArmsBox,
+                _ => CrouchLegsBox,
+            };
+        return r switch
+        {
+            HurtRegion.Head => HeadBox,
+            HurtRegion.Body => BodyBox,
+            HurtRegion.Arms => ArmsBox,
+            _ => LegsBox,
+        };
+    }
+
+    // world rect of one region — for future region-targeted moves
+    public Rect2 GetWorldHurt(HurtRegion r) => ToWorld(RegionLocal(r));
+
+    // precise hit test: does the incoming hitbox overlap ANY hurt region?
+    public bool HurtboxOverlaps(Rect2 worldHit)
+    {
+        return ToWorld(RegionLocal(HurtRegion.Head)).Intersects(worldHit)
+            || ToWorld(RegionLocal(HurtRegion.Body)).Intersects(worldHit)
+            || ToWorld(RegionLocal(HurtRegion.Arms)).Intersects(worldHit)
+            || ToWorld(RegionLocal(HurtRegion.Legs)).Intersects(worldHit);
+    }
+
+    // bounding union of all regions — used for body spacing / push resolution
     public Rect2 GetWorldHurtbox()
     {
-        var box = IsCrouching ? CrouchHurtbox : Hurtbox;
-        return new Rect2(GlobalPosition + box.Position, box.Size);
+        var a = ToWorld(RegionLocal(HurtRegion.Head));
+        a = a.Merge(ToWorld(RegionLocal(HurtRegion.Body)));
+        a = a.Merge(ToWorld(RegionLocal(HurtRegion.Arms)));
+        a = a.Merge(ToWorld(RegionLocal(HurtRegion.Legs)));
+        return a;
     }
 
     public void ConsumeAttackHit() { _atkHitConsumed = true; }
 
-    public void ApplyDamage(int dmg)
+    public void ApplyDamage(int dmg, GuardHeight guard)
     {
         if (State == PlayerState.Dead) return;
-        
-        bool isDefending = IsDefending;
-        int finalDamage = isDefending ? Mathf.Max(1, Mathf.RoundToInt(dmg * DefDamageMultiplier)) : dmg;
-        
+
+        // stance vs guard height: can the current stance block this attack?
+        bool holdingBack = IsDefendingInput;
+        bool standBlock = holdingBack && (State == PlayerState.Idle || State == PlayerState.Walk || State == PlayerState.CrouchExit);
+        bool crouchBlock = holdingBack && State == PlayerState.Crouch;
+        bool blocked = guard switch
+        {
+            GuardHeight.High => standBlock || crouchBlock, // 上段: either
+            GuardHeight.Mid => standBlock,                 // 中段: standing only
+            _ => crouchBlock,                               // 下段(Low): crouching only
+        };
+
+        int finalDamage = blocked ? Mathf.Max(1, Mathf.RoundToInt(dmg * DefDamageMultiplier)) : dmg;
+
         Hp = Mathf.Max(0, Hp - finalDamage);
         if (Hp == 0)
         {
@@ -390,8 +466,8 @@ public partial class Player : Node2D
             anim.Stop();
             return;
         }
-        
-        if (isDefending)
+
+        if (blocked)
         {
             State = PlayerState.DefenseHit;
             _defHitFrame = 0;
@@ -450,9 +526,11 @@ public partial class Player : Node2D
     {
         if (!DebugDrawBoxes) return;
 
-        var hurt = IsCrouching ? CrouchHurtbox : Hurtbox;
-        DrawRect(hurt, new Color(0, 1, 0, 0.25f), filled: true);
-        DrawRect(hurt, new Color(0, 1, 0, 1f), filled: false, width: 2f);
+        // hurt regions (local space; flip X by facing to match ToWorld)
+        DrawHurtRegion(HurtRegion.Head, new Color(0.2f, 1f, 0.4f));
+        DrawHurtRegion(HurtRegion.Body, new Color(0f, 0.8f, 1f));
+        DrawHurtRegion(HurtRegion.Arms, new Color(1f, 0.9f, 0.2f));
+        DrawHurtRegion(HurtRegion.Legs, new Color(0.8f, 0.4f, 1f));
 
         var hb = (State == PlayerState.Attack) ? _curHitbox : AtkHitbox;
         if (!FacingRight) hb.Position = new Vector2(-hb.Position.X - hb.Size.X, hb.Position.Y);
@@ -469,6 +547,14 @@ public partial class Player : Node2D
         DrawRect(hb, edge, filled: false, width: 2f);
 
         DrawCircle(Vector2.Zero, 3f, new Color(1, 1, 1, 1));
+    }
+
+    private void DrawHurtRegion(HurtRegion r, Color c)
+    {
+        var box = RegionLocal(r);
+        if (!FacingRight) box.Position = new Vector2(-box.Position.X - box.Size.X, box.Position.Y);
+        DrawRect(box, new Color(c.R, c.G, c.B, 0.18f), filled: true);
+        DrawRect(box, new Color(c.R, c.G, c.B, 0.9f), filled: false, width: 2f);
     }
 
     private void PlayAnimSafe(string name)

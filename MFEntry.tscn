@@ -1385,11 +1385,13 @@ AtkActiveFrames = 3
 AtkRecoveryFrames = 3
 AtkDamage = 8
 AtkHitbox = Rect2(20, -180, 80, 140)
+AtkGuard = 1
 AtkHeavyStartupFrames = 10
 AtkHeavyActiveFrames = 12
 AtkHeavyRecoveryFrames = 15
 AtkHeavyDamage = 34
 AtkHeavyHitbox = Rect2(30, -180, 160, 140)
+AtkHeavyGuard = 2
 CrouchEnterFrames = 3
 
 [node name="袋鼠" type="AnimatedSprite2D" parent="Player2" unique_id=344721729]
@@ -1406,11 +1408,13 @@ AtkActiveFrames = 3
 AtkRecoveryFrames = 3
 AtkDamage = 8
 AtkHitbox = Rect2(20, -180, 80, 140)
+AtkGuard = 1
 AtkHeavyStartupFrames = 10
 AtkHeavyActiveFrames = 12
 AtkHeavyRecoveryFrames = 15
 AtkHeavyDamage = 34
 AtkHeavyHitbox = Rect2(30, -180, 160, 140)
+AtkHeavyGuard = 2
 CrouchEnterFrames = 3
 
 [node name="仓鼠" type="AnimatedSprite2D" parent="Player1" unique_id=185176480]

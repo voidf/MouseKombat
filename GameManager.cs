@@ -250,9 +250,9 @@ public partial class GameManager : Node2D
     {
         if (!attacker.IsAttackingActive) return;
         if (defender.State == Player.PlayerState.Dead) return;
-        if (attacker.GetWorldHitbox().Intersects(defender.GetWorldHurtbox()))
+        if (defender.HurtboxOverlaps(attacker.GetWorldHitbox()))
         {
-            defender.ApplyDamage(attacker.CurrentAtkDamage);
+            defender.ApplyDamage(attacker.CurrentAtkDamage, attacker.CurrentAtkGuard);
             attacker.ConsumeAttackHit();
         }
     }
