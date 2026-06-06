@@ -220,11 +220,15 @@ public partial class GameManager : Node2D
 
     private void UpdateFacings()
     {
-        if (!p1.IsAirborne && p1.State != Player.PlayerState.Attack && p1.State != Player.PlayerState.Hurt && p1.State != Player.PlayerState.Dead && p1.State != Player.PlayerState.DefenseHit)
-            p1.FacingRight = p2.GlobalPosition.X >= p1.GlobalPosition.X;
-        if (!p2.IsAirborne && p2.State != Player.PlayerState.Attack && p2.State != Player.PlayerState.Hurt && p2.State != Player.PlayerState.Dead && p2.State != Player.PlayerState.DefenseHit)
-            p2.FacingRight = p1.GlobalPosition.X >= p2.GlobalPosition.X;
+        if (!p1.IsAirborne && CanTurn(p1)) p1.FacingRight = p2.GlobalPosition.X >= p1.GlobalPosition.X;
+        if (!p2.IsAirborne && CanTurn(p2)) p2.FacingRight = p1.GlobalPosition.X >= p2.GlobalPosition.X;
     }
+
+    private static bool CanTurn(Player p) =>
+        p.State != Player.PlayerState.Attack && p.State != Player.PlayerState.Hurt
+        && p.State != Player.PlayerState.Dead && p.State != Player.PlayerState.DefenseHit
+        && p.State != Player.PlayerState.Juggle && p.State != Player.PlayerState.AirHurt
+        && p.State != Player.PlayerState.Downed && p.State != Player.PlayerState.Wakeup;
 
     private static int SignFromInput(Player p)
     {
@@ -250,9 +254,11 @@ public partial class GameManager : Node2D
     {
         if (!attacker.IsAttackingActive) return;
         if (defender.State == Player.PlayerState.Dead) return;
+        if (defender.IsInvincible) return; // knocked down / waking up
         if (defender.HurtboxOverlaps(attacker.GetWorldHitbox()))
         {
-            defender.ApplyDamage(attacker.CurrentAtkDamage, attacker.CurrentAtkGuard);
+            int pushDir = attacker.GlobalPosition.X <= defender.GlobalPosition.X ? 1 : -1; // shove away from attacker
+            defender.ApplyDamage(attacker.CurrentMove, pushDir);
             attacker.ConsumeAttackHit();
         }
     }

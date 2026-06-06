@@ -37,6 +37,14 @@ public sealed class MoveDef
     public GuardHeight Guard = GuardHeight.High;
     public Rect2 Hitbox;
 
+    // launch / juggle: ground hit by a launcher -> juggle state. Air hits juggle too
+    // unless the move is a light normal (-> air reset). LaunchUp/Back set the trajectory.
+    public bool Launches = false;
+    public float LaunchUp = 1250f;   // initial upward speed (px/s) when this move launches/juggles
+    public float LaunchBack = 120f;  // horizontal knockback (px/s) away from attacker
+
+    public bool IsLight => Button == AttackButton.LP || Button == AttackButton.LK;
+
     // optional per-frame hurtbox overrides; default empty = use base regions
     public HurtKey[] HurtboxTimeline = System.Array.Empty<HurtKey>();
 
@@ -132,6 +140,7 @@ public static class MoveSets
                 Id = "5HK", AnimName = "AtkL", Button = AttackButton.HK,
                 Startup = 12, Active = 5, Recovery = 20, Damage = 16, Guard = GuardHeight.Mid,
                 Hitbox = new Rect2(20, -150, 190, 110),
+                Launches = true, // launcher: ground hit -> juggle
             },
         };
         AppendCrouchAndAir(moves);
@@ -178,6 +187,7 @@ public static class MoveSets
                 Id = "5HK", AnimName = "AtkL", Button = AttackButton.HK,
                 Startup = 12, Active = 5, Recovery = 20, Damage = 16, Guard = GuardHeight.Mid,
                 Hitbox = new Rect2(20, -150, 190, 110),
+                Launches = true, // launcher: ground hit -> juggle
             },
         };
         AppendCrouchAndAir(moves);

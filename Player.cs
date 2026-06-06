@@ -17,6 +17,11 @@ public partial class Player : Node2D
     [Export] public string JumpAnimName = "JUMP";
     [Export] public string EnterCrouchAnimName = "ENTER_CROUCH"; // transition; exit = played backwards
     [Export] public string CrouchIdleAnimName = "CROUCH";        // steady held crouch pose
+    [Export] public string LaunchRiseAnimName = "LAUNCH";   // juggle, rising
+    [Export] public string FallAnimName = "FALL";           // juggle, falling
+    [Export] public string KnockdownAnimName = "KNOCKDOWN"; // grounded after juggle (invincible)
+    [Export] public string WakeupAnimName = "WAKEUP";       // getting up (invincible until last frame)
+    [Export] public string AirHurtAnimName = "AIR_HURT";    // air reset (light air hit, lands on feet)
 
     [Export] public float DefDamageMultiplier = 0.1f;
 
@@ -47,6 +52,11 @@ public partial class Player : Node2D
     [Export] public int DefHitStunFrames = 10;
     [Export] public int CrouchEnterFrames = 8; // logic duration of enter/exit; set to match ENTER_CROUCH anim length
 
+    [Export] public int DownedFrames = 30;     // grounded knockdown wait before wakeup (invincible)
+    [Export] public int DownedMinFrames = 12;  // earliest an input may trigger wakeup
+    [Export] public int WakeupFrames = 24;     // wakeup anim length (invincible until its last frame)
+    [Export] public float AirResetPop = 350f;  // small upward pop on a light air hit (air reset)
+
     [Export] public float JumpVelocity = 1350f;
     [Export] public float Gravity = 3600f;
     [Export] public float ForwardJumpSpeed = 420f;
@@ -54,7 +64,7 @@ public partial class Player : Node2D
 
     [Export] public bool DebugDrawBoxes = true;
 
-    public enum PlayerState { Idle, Walk, Attack, Hurt, Dead, DefenseHit, Jump, Crouch, CrouchExit }
+    public enum PlayerState { Idle, Walk, Attack, Hurt, Dead, DefenseHit, Jump, Crouch, CrouchExit, Juggle, AirHurt, Downed, Wakeup }
 
     public enum HurtRegion { Head, Body, Arms, Legs }
 
@@ -76,6 +86,8 @@ public partial class Player : Node2D
     private int _hurtFrame = -1;
     private int _defHitFrame = -1;
     private int _crouchFrame = 0;
+    private int _downFrame = 0;
+    private int _wakeFrame = 0;
     private bool _atkHitConsumed = false;
 
     // active move (resolved from the move table at move start)
@@ -97,6 +109,11 @@ public partial class Player : Node2D
 
     public int CurrentAtkDamage => _curDamage;
     public GuardHeight CurrentAtkGuard => _curGuard;
+    public MoveDef CurrentMove => _curMove;
+
+    // Downed + Wakeup are fully invincible (invuln ends exactly on wakeup's last frame).
+    // Juggle/AirHurt are NOT invincible (can be juggled).
+    public bool IsInvincible => State == PlayerState.Downed || State == PlayerState.Wakeup;
 
     public bool IsDirectionPressed => InLeft || InRight;
 
@@ -114,7 +131,7 @@ public partial class Player : Node2D
         && _atkFrame < _curStartup + _curActive
         && !_atkHitConsumed;
 
-    public bool IsBusy => State == PlayerState.Attack || State == PlayerState.Hurt || State == PlayerState.Dead || State == PlayerState.DefenseHit || State == PlayerState.Jump || State == PlayerState.Crouch;
+    public bool IsBusy => State == PlayerState.Attack || State == PlayerState.Hurt || State == PlayerState.Dead || State == PlayerState.DefenseHit || State == PlayerState.Jump || State == PlayerState.Crouch || State == PlayerState.Juggle || State == PlayerState.AirHurt || State == PlayerState.Downed || State == PlayerState.Wakeup;
 
     private bool IsGroundFree =>
         State == PlayerState.Idle || State == PlayerState.Walk || State == PlayerState.Crouch || State == PlayerState.CrouchExit;
@@ -209,14 +226,14 @@ public partial class Player : Node2D
 
     public void TickVertical(double dt)
     {
-        // Runs for any above-ground player: jump arc, or falling while hurt mid-air.
-        if (State != PlayerState.Jump && !IsAirborne && _vy == 0f) return;
+        // Runs for any above-ground motion: jump arc, air normal, juggle, air reset, or hurt mid-air.
+        bool aerialState = State == PlayerState.Jump || State == PlayerState.Juggle || State == PlayerState.AirHurt
+            || (State == PlayerState.Attack && _airMove);
+        if (!aerialState && !IsAirborne && _vy == 0f) return;
 
         _vy += Gravity * (float)dt;
         var pos = Position;
-        // an active jump OR an air normal carries the horizontal jump velocity
-        if (State == PlayerState.Jump || (State == PlayerState.Attack && _airMove))
-            pos.X += _jumpHVel * (float)dt;
+        if (aerialState) pos.X += _jumpHVel * (float)dt;
         pos.Y += _vy * (float)dt;
 
         if (_vy > 0f && pos.Y >= _groundY)
@@ -225,25 +242,26 @@ public partial class Player : Node2D
             Position = pos;
             _vy = 0f;
             _jumpHVel = 0f;
-            if (State == PlayerState.Jump)
+            switch (State)
             {
-                if (InUpHeld && !InDownHeld)
-                    DoJump(FacingRight ? 1 : -1); // SF6 hold-up: re-jump on landing frame (dir = fwd/back)
-                else
-                {
-                    State = PlayerState.Idle;
-                    PlayAnimSafe(IdleAnimName);
-                }
+                case PlayerState.Jump:
+                    if (InUpHeld && !InDownHeld)
+                        DoJump(FacingRight ? 1 : -1); // hold-up: re-jump on landing frame
+                    else { State = PlayerState.Idle; PlayAnimSafe(IdleAnimName); }
+                    break;
+                case PlayerState.Attack: // air normal interrupted by landing
+                    _airMove = false; _atkFrame = -1;
+                    State = PlayerState.Idle; PlayAnimSafe(IdleAnimName);
+                    break;
+                case PlayerState.Juggle: // touch ground -> knockdown (invincible) -> wakeup
+                    State = PlayerState.Downed; _downFrame = 0;
+                    PlayAnimSafe(KnockdownAnimName);
+                    break;
+                case PlayerState.AirHurt: // air reset -> land on feet, recover
+                    State = PlayerState.Idle; PlayAnimSafe(IdleAnimName);
+                    break;
+                // Hurt mid-air: keep Hurt; stun timer ends it
             }
-            else if (State == PlayerState.Attack && _airMove)
-            {
-                // air normal interrupted by landing -> back to neutral
-                _airMove = false;
-                _atkFrame = -1;
-                State = PlayerState.Idle;
-                PlayAnimSafe(IdleAnimName);
-            }
-            // if Hurt mid-air: land but keep Hurt; stun timer ends it
             return;
         }
         Position = pos;
@@ -434,7 +452,32 @@ public partial class Player : Node2D
                 EndStunToNeutral();
             }
         }
+        else if (State == PlayerState.Downed)
+        {
+            // grounded & fully invincible. Wake on timeout, or earlier if the player inputs.
+            _downFrame++;
+            bool inputWake = _downFrame >= DownedMinFrames && WantsWakeup();
+            if (_downFrame >= DownedFrames || inputWake)
+            {
+                State = PlayerState.Wakeup;
+                _wakeFrame = 0;
+                PlayAnimSafe(WakeupAnimName);
+            }
+        }
+        else if (State == PlayerState.Wakeup)
+        {
+            // invincible through the whole anim; invuln ends exactly on its last frame
+            _wakeFrame++;
+            if (_wakeFrame >= WakeupFrames)
+            {
+                State = PlayerState.Idle; // vulnerable from here (reversal/buffer = future)
+                PlayAnimSafe(IdleAnimName);
+            }
+        }
     }
+
+    private bool WantsWakeup()
+        => InLeft || InRight || InUpHeld || InDownHeld || _buffer.PeekButton(2).HasValue;
 
     // After block/hit stun: return to crouch pose (no enter-transition replay) if still holding
     // down, else stand idle. This is the "block-then-back-to-crouch-last-frame" behavior.
@@ -524,23 +567,26 @@ public partial class Player : Node2D
 
     public void ConsumeAttackHit() { _atkHitConsumed = true; }
 
-    public void ApplyDamage(int dmg, GuardHeight guard)
+    // pushDir: +1 to shove the victim toward +x (away from the attacker), -1 toward -x.
+    public void ApplyDamage(MoveDef move, int pushDir)
     {
         if (State == PlayerState.Dead) return;
+        if (IsInvincible) return; // downed / waking up
 
-        // stance vs guard height: can the current stance block this attack?
+        bool airborne = IsAirborne || State == PlayerState.Juggle || State == PlayerState.AirHurt;
+
+        // blocking only when grounded & free & holding back
         bool holdingBack = IsDefendingInput;
-        bool standBlock = holdingBack && (State == PlayerState.Idle || State == PlayerState.Walk || State == PlayerState.CrouchExit);
-        bool crouchBlock = holdingBack && State == PlayerState.Crouch;
-        bool blocked = guard switch
+        bool standBlock = !airborne && holdingBack && (State == PlayerState.Idle || State == PlayerState.Walk || State == PlayerState.CrouchExit);
+        bool crouchBlock = !airborne && holdingBack && State == PlayerState.Crouch;
+        bool blocked = move.Guard switch
         {
-            GuardHeight.High => standBlock || crouchBlock, // 上段: either
-            GuardHeight.Mid => standBlock,                 // 中段: standing only
-            _ => crouchBlock,                               // 下段(Low): crouching only
+            GuardHeight.High => standBlock || crouchBlock,
+            GuardHeight.Mid => standBlock,
+            _ => crouchBlock,
         };
 
-        int finalDamage = blocked ? Mathf.Max(1, Mathf.RoundToInt(dmg * DefDamageMultiplier)) : dmg;
-
+        int finalDamage = blocked ? Mathf.Max(1, Mathf.RoundToInt(move.Damage * DefDamageMultiplier)) : move.Damage;
         Hp = Mathf.Max(0, Hp - finalDamage);
         if (Hp == 0)
         {
@@ -554,8 +600,28 @@ public partial class Player : Node2D
             State = PlayerState.DefenseHit;
             _defHitFrame = 0;
             PlayAnimSafe(DefAnimName);
+            return;
         }
-        else
+
+        // unblocked reaction
+        bool juggle = move.Launches || (airborne && !move.IsLight); // ground launcher, or any air hit except a light
+        if (juggle)
+        {
+            State = PlayerState.Juggle;
+            _airMove = false;
+            _vy = -move.LaunchUp;
+            _jumpHVel = pushDir * move.LaunchBack;
+            PlayAnimSafe(LaunchRiseAnimName);
+        }
+        else if (airborne) // light air hit -> air reset (flinch, lands on feet, recovers)
+        {
+            State = PlayerState.AirHurt;
+            _airMove = false;
+            _vy = -AirResetPop;
+            _jumpHVel = pushDir * move.LaunchBack * 0.4f;
+            PlayAnimSafe(AirHurtAnimName);
+        }
+        else // grounded normal hit
         {
             State = PlayerState.Hurt;
             _hurtFrame = 0;
@@ -574,6 +640,8 @@ public partial class Player : Node2D
         _hurtFrame = -1;
         _defHitFrame = -1;
         _crouchFrame = 0;
+        _downFrame = 0;
+        _wakeFrame = 0;
         _atkHitConsumed = false;
         _vy = 0f;
         _jumpHVel = 0f;
@@ -607,6 +675,12 @@ public partial class Player : Node2D
             // (Returning to Crouch after blockstun plays CROUCH directly — no re-transition.)
             bool entering = anim.IsPlaying() && anim.Animation == EnterCrouchAnimName;
             if (!entering && anim.Animation != CrouchIdleAnimName) PlayAnimSafe(CrouchIdleAnimName);
+        }
+        else if (State == PlayerState.Juggle)
+        {
+            // rising -> LAUNCH clip; once gravity pulls down -> FALL clip
+            string want = _vy < 0f ? LaunchRiseAnimName : FallAnimName;
+            if (anim.Animation != want) PlayAnimSafe(want);
         }
 
         if (DebugDrawBoxes) QueueRedraw();
