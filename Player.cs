@@ -81,6 +81,7 @@ public partial class Player : Node2D
     // active move (resolved from the move table at move start)
     private MoveSet _moves;
     private MoveDef _curMove;
+    private bool _airMove = false; // current Attack is an air normal (keeps jump arc, drops on landing)
     private InputBuffer _buffer = new InputBuffer(BufferWindow + 4);
     private int _curStartup, _curActive, _curRecovery, _curDamage;
     private int _curCancelFrom, _curCancelTo;
@@ -213,7 +214,9 @@ public partial class Player : Node2D
 
         _vy += Gravity * (float)dt;
         var pos = Position;
-        if (State == PlayerState.Jump) pos.X += _jumpHVel * (float)dt; // only an active jump carries horizontal
+        // an active jump OR an air normal carries the horizontal jump velocity
+        if (State == PlayerState.Jump || (State == PlayerState.Attack && _airMove))
+            pos.X += _jumpHVel * (float)dt;
         pos.Y += _vy * (float)dt;
 
         if (_vy > 0f && pos.Y >= _groundY)
@@ -231,6 +234,14 @@ public partial class Player : Node2D
                     State = PlayerState.Idle;
                     PlayAnimSafe(IdleAnimName);
                 }
+            }
+            else if (State == PlayerState.Attack && _airMove)
+            {
+                // air normal interrupted by landing -> back to neutral
+                _airMove = false;
+                _atkFrame = -1;
+                State = PlayerState.Idle;
+                PlayAnimSafe(IdleAnimName);
             }
             // if Hurt mid-air: land but keep Hurt; stun timer ends it
             return;
@@ -299,15 +310,19 @@ public partial class Player : Node2D
     {
         if (IsAirborne)
         {
-            // air attack: visual only for now (no hitbox / no state change), jump arc continues
+            // air normals: real moves (own anim + hitbox). Start only from a live jump;
+            // keeps the jump arc, drops back to neutral on landing (see TickVertical).
             if (State == PlayerState.Jump)
             {
                 var ab = _buffer.PeekButton(BufferWindow);
                 if (ab.HasValue)
                 {
-                    var am = _moves.Resolve(Stance.Stand, ab.Value);
-                    if (am != null) PlayAnimSafe(am.AnimName);
-                    _buffer.ConsumeButton(BufferWindow);
+                    var am = _moves.Resolve(Stance.Air, ab.Value);
+                    if (am != null)
+                    {
+                        _buffer.ConsumeButton(BufferWindow);
+                        StartMove(am);
+                    }
                 }
             }
             return;
@@ -353,6 +368,7 @@ public partial class Player : Node2D
     {
         State = PlayerState.Attack;
         _curMove = m;
+        _airMove = m.Stance == Stance.Air;
         _atkFrame = 0;
         _atkHitConsumed = false;
         _curStartup = m.Startup;
@@ -388,6 +404,7 @@ public partial class Player : Node2D
                 // playing as a tail; _Process swaps to IDLE once it ends. If holding down,
                 // settle into the crouch pose instead. Any action interrupts naturally.
                 _atkFrame = -1;
+                _airMove = false;
                 if (!IsAirborne && InDownHeld && !InUpHeld)
                 {
                     State = PlayerState.Crouch;
@@ -395,7 +412,7 @@ public partial class Player : Node2D
                 }
                 else
                 {
-                    State = PlayerState.Idle; // no PlayAnimSafe: let the attack clip tail out
+                    State = PlayerState.Idle; // grounded: let attack clip tail; airborne: fall as Idle
                 }
             }
         }
@@ -561,6 +578,7 @@ public partial class Player : Node2D
         _vy = 0f;
         _jumpHVel = 0f;
         _curMove = null;
+        _airMove = false;
         _buffer.Clear();
         InLeft = InRight = InUpHeld = InDownHeld = false;
         DesiredDeltaX = 0;
