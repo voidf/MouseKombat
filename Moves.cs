@@ -85,10 +85,14 @@ public static class MoveSets
     public static MoveSet ForCharacter(string characterId)
     {
         // both characters share the table for now; split when movesets diverge
-        return BuildDefault();
+        GD.Print($"{characterId}");
+        if (characterId == "Hamster")
+            return BuildCs();
+        else
+            return BuildDs();
     }
 
-    private static MoveSet BuildDefault()
+    private static MoveSet BuildCs()
     {
         // 6 standing normals. Light->Medium->Heavy gatling chains demonstrate the cancel system.
         // Guard tiers seeded for testing: 5HP = Mid (overhead, stand-block only), 5LK = Low (crouch-block only).
@@ -96,37 +100,82 @@ public static class MoveSets
         {
             new MoveDef {
                 Id = "5LP", AnimName = "AtkU", Button = AttackButton.LP,
-                Startup = 4, Active = 3, Recovery = 6, Damage = 6, Guard = GuardHeight.High,
-                Hitbox = new Rect2(20, -190, 90, 70),
+                Startup = 4, Active = 3, Recovery = 6, Damage = 6, Guard = GuardHeight.Mid,
+                Hitbox = new Rect2(50, -140, 80, 40),
                 CancelInto = new[] { "5MP", "5HP", "5LK", "5MK", "5HK" },
             },
             new MoveDef {
                 Id = "5MP", AnimName = "AtkI", Button = AttackButton.MP,
-                Startup = 6, Active = 3, Recovery = 10, Damage = 9, Guard = GuardHeight.High,
+                Startup = 6, Active = 3, Recovery = 10, Damage = 9, Guard = GuardHeight.Mid,
                 Hitbox = new Rect2(20, -195, 120, 75),
                 CancelInto = new[] { "5HP", "5MK", "5HK" },
             },
             new MoveDef {
                 Id = "5HP", AnimName = "AtkO", Button = AttackButton.HP,
-                Startup = 10, Active = 4, Recovery = 18, Damage = 14, Guard = GuardHeight.Mid, // overhead
+                Startup = 10, Active = 4, Recovery = 18, Damage = 14, Guard = GuardHeight.Mid,
                 Hitbox = new Rect2(20, -200, 170, 90),
                 CancelInto = new[] { "5HK" },
             },
             new MoveDef {
                 Id = "5LK", AnimName = "AtkJ", Button = AttackButton.LK,
-                Startup = 5, Active = 3, Recovery = 8, Damage = 6, Guard = GuardHeight.Low, // low
+                Startup = 5, Active = 3, Recovery = 8, Damage = 6, Guard = GuardHeight.Mid,
                 Hitbox = new Rect2(20, -70, 110, 60),
                 CancelInto = new[] { "5MP", "5HP", "5MK", "5HK" },
             },
             new MoveDef {
                 Id = "5MK", AnimName = "AtkK", Button = AttackButton.MK,
-                Startup = 7, Active = 4, Recovery = 12, Damage = 10, Guard = GuardHeight.High,
+                Startup = 7, Active = 4, Recovery = 12, Damage = 10, Guard = GuardHeight.Mid,
                 Hitbox = new Rect2(20, -120, 150, 80),
                 CancelInto = new[] { "5HP", "5HK" },
             },
             new MoveDef {
                 Id = "5HK", AnimName = "AtkL", Button = AttackButton.HK,
-                Startup = 12, Active = 5, Recovery = 20, Damage = 16, Guard = GuardHeight.High,
+                Startup = 12, Active = 5, Recovery = 20, Damage = 16, Guard = GuardHeight.Mid,
+                Hitbox = new Rect2(20, -150, 190, 110),
+            },
+        };
+        return new MoveSet(moves);
+    }
+
+    private static MoveSet BuildDs()
+    {
+        // 6 standing normals. Light->Medium->Heavy gatling chains demonstrate the cancel system.
+        // Guard tiers seeded for testing: 5HP = Mid (overhead, stand-block only), 5LK = Low (crouch-block only).
+        var moves = new List<MoveDef>
+        {
+            new MoveDef {
+                Id = "5LP", AnimName = "AtkU", Button = AttackButton.LP,
+                Startup = 4, Active = 3, Recovery = 6, Damage = 6, Guard = GuardHeight.Mid,
+                Hitbox = new Rect2(20, -190, 90, 70),
+                CancelInto = new[] { "5MP", "5HP", "5LK", "5MK", "5HK" },
+            },
+            new MoveDef {
+                Id = "5MP", AnimName = "AtkI", Button = AttackButton.MP,
+                Startup = 6, Active = 3, Recovery = 10, Damage = 9, Guard = GuardHeight.Mid,
+                Hitbox = new Rect2(20, -195, 120, 75),
+                CancelInto = new[] { "5HP", "5MK", "5HK" },
+            },
+            new MoveDef {
+                Id = "5HP", AnimName = "AtkO", Button = AttackButton.HP,
+                Startup = 10, Active = 4, Recovery = 18, Damage = 14, Guard = GuardHeight.Mid,
+                Hitbox = new Rect2(20, -200, 170, 90),
+                CancelInto = new[] { "5HK" },
+            },
+            new MoveDef {
+                Id = "5LK", AnimName = "AtkJ", Button = AttackButton.LK,
+                Startup = 5, Active = 3, Recovery = 8, Damage = 6, Guard = GuardHeight.Mid,
+                Hitbox = new Rect2(20, -70, 110, 60),
+                CancelInto = new[] { "5MP", "5HP", "5MK", "5HK" },
+            },
+            new MoveDef {
+                Id = "5MK", AnimName = "AtkK", Button = AttackButton.MK,
+                Startup = 7, Active = 4, Recovery = 12, Damage = 10, Guard = GuardHeight.Mid,
+                Hitbox = new Rect2(20, -120, 150, 80),
+                CancelInto = new[] { "5HP", "5HK" },
+            },
+            new MoveDef {
+                Id = "5HK", AnimName = "AtkL", Button = AttackButton.HK,
+                Startup = 12, Active = 5, Recovery = 20, Damage = 16, Guard = GuardHeight.Mid,
                 Hitbox = new Rect2(20, -150, 190, 110),
             },
         };
