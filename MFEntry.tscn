@@ -20,6 +20,7 @@
 [ext_resource type="Texture2D" uid="uid://dy046e3ahu0wm" path="res://Art/csAtk2Atlas.png" id="12_1dni5"]
 [ext_resource type="Texture2D" uid="uid://d3i0o1b50iiy4" path="res://Art/csAtk1RWAtlas.png" id="12_75jsd"]
 [ext_resource type="Texture2D" uid="uid://dpxgbdmft2j3h" path="res://Art/csJumpAtlas.png" id="13_3pm86"]
+[ext_resource type="Texture2D" uid="uid://m288mxhdo1uj" path="res://Art/CsAtk2RWAtlas.png" id="14_c1nbd"]
 [ext_resource type="Texture2D" uid="uid://ccvaxdbd5lntw" path="res://Art/csCrouchAtlas.png" id="14_pypjs"]
 [ext_resource type="Script" uid="uid://ybt3nxx0m7r3" path="res://GameManager.cs" id="gm_script"]
 
@@ -405,6 +406,50 @@ region = Rect2(1536, 0, 512, 512)
 atlas = ExtResource("2_0vut4")
 region = Rect2(2048, 0, 512, 512)
 
+[sub_resource type="AtlasTexture" id="AtlasTexture_daq0f"]
+atlas = ExtResource("14_c1nbd")
+region = Rect2(0, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_ch0qy"]
+atlas = ExtResource("14_c1nbd")
+region = Rect2(512, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_jvmp5"]
+atlas = ExtResource("14_c1nbd")
+region = Rect2(1024, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_fjq80"]
+atlas = ExtResource("14_c1nbd")
+region = Rect2(1536, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_0iryi"]
+atlas = ExtResource("14_c1nbd")
+region = Rect2(2048, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_4o4pv"]
+atlas = ExtResource("14_c1nbd")
+region = Rect2(2560, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_yypqe"]
+atlas = ExtResource("14_c1nbd")
+region = Rect2(3072, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_js4cw"]
+atlas = ExtResource("14_c1nbd")
+region = Rect2(3584, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_bthda"]
+atlas = ExtResource("14_c1nbd")
+region = Rect2(4096, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_tmcpv"]
+atlas = ExtResource("14_c1nbd")
+region = Rect2(4608, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_41nl7"]
+atlas = ExtResource("14_c1nbd")
+region = Rect2(5120, 0, 512, 512)
+
 [sub_resource type="AtlasTexture" id="AtlasTexture_gadnn"]
 atlas = ExtResource("12_1dni5")
 region = Rect2(0, 0, 512, 512)
@@ -560,10 +605,10 @@ region = Rect2(1024, 1024, 512, 512)
 [sub_resource type="SpriteFrames" id="SpriteFrames_iruj8"]
 animations = [{
 "frames": [{
-"duration": 4.0,
+"duration": 2.0,
 "texture": SubResource("AtlasTexture_o8et7")
 }, {
-"duration": 4.0,
+"duration": 2.0,
 "texture": SubResource("AtlasTexture_bpjnd")
 }, {
 "duration": 5.0,
@@ -609,6 +654,44 @@ animations = [{
 "speed": 16.0
 }, {
 "frames": [{
+"duration": 3.0,
+"texture": SubResource("AtlasTexture_daq0f")
+}, {
+"duration": 2.0,
+"texture": SubResource("AtlasTexture_ch0qy")
+}, {
+"duration": 2.0,
+"texture": SubResource("AtlasTexture_jvmp5")
+}, {
+"duration": 2.0,
+"texture": SubResource("AtlasTexture_fjq80")
+}, {
+"duration": 3.0,
+"texture": SubResource("AtlasTexture_0iryi")
+}, {
+"duration": 4.0,
+"texture": SubResource("AtlasTexture_4o4pv")
+}, {
+"duration": 4.0,
+"texture": SubResource("AtlasTexture_yypqe")
+}, {
+"duration": 4.0,
+"texture": SubResource("AtlasTexture_js4cw")
+}, {
+"duration": 4.0,
+"texture": SubResource("AtlasTexture_bthda")
+}, {
+"duration": 4.0,
+"texture": SubResource("AtlasTexture_tmcpv")
+}, {
+"duration": 4.0,
+"texture": SubResource("AtlasTexture_41nl7")
+}],
+"loop": false,
+"name": &"ATKHEAVY",
+"speed": 60.0
+}, {
+"frames": [{
 "duration": 1.0,
 "texture": SubResource("AtlasTexture_gadnn")
 }, {
@@ -625,7 +708,7 @@ animations = [{
 "texture": SubResource("AtlasTexture_lfvwl")
 }],
 "loop": false,
-"name": &"ATKHEAVY",
+"name": &"ATKHEAVYBAK",
 "speed": 10.0
 }, {
 "frames": [{
@@ -1420,7 +1503,7 @@ CrouchEnterFrames = 3
 [node name="仓鼠" type="AnimatedSprite2D" parent="Player1" unique_id=185176480]
 position = Vector2(0, -107)
 sprite_frames = SubResource("SpriteFrames_iruj8")
-animation = &"ATK"
+animation = &"ATKHEAVY"
 flip_h = true
 
 [node name="P2WinAnim" type="AnimatedSprite2D" parent="." unique_id=374502234]
