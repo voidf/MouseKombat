@@ -6,19 +6,17 @@ public partial class Player : Node2D
 
     [Export] public string ActionLeft = "p1_left";
     [Export] public string ActionRight = "p1_right";
-    [Export] public string ActionAttack = "p1_atk";
-    [Export] public string ActionAttackHeavy = "p1_atk_heavy";
     [Export] public string ActionUp = "p1_up";
     [Export] public string ActionDown = "p1_down";
+    [Export] public string InputPrefix = "p1"; // 6 attack buttons resolve to {prefix}_lp.._hk
 
     [Export] public string IdleAnimName = "IDLE";
     [Export] public string WalkAnimName = "WALK";
-    [Export] public string AtkAnimName = "ATK";
-    [Export] public string AtkHeavyAnimName = "ATKHEAVY";
     [Export] public string HurtAnimName = "HURT";
     [Export] public string DefAnimName = "DEF";
     [Export] public string JumpAnimName = "JUMP";
-    [Export] public string EnterCrouchAnimName = "ENTER_CROUCH"; // exit = this played backwards
+    [Export] public string EnterCrouchAnimName = "ENTER_CROUCH"; // transition; exit = played backwards
+    [Export] public string CrouchIdleAnimName = "CROUCH";        // steady held crouch pose
 
     [Export] public float DefDamageMultiplier = 0.1f;
 
@@ -28,21 +26,7 @@ public partial class Player : Node2D
     [Export] public int MaxHp = 100;
     [Export] public float WalkSpeedPxPerSec = 220f;
 
-    // Light attack (existing ATK)
-    [Export] public int AtkStartupFrames = 6;
-    [Export] public int AtkActiveFrames = 4;
-    [Export] public int AtkRecoveryFrames = 10;
-    [Export] public int AtkDamage = 10;
-    [Export] public Rect2 AtkHitbox = new Rect2(20, -180, 140, 140);
-    [Export] public GuardHeight AtkGuard = GuardHeight.High; // High=block standing or crouching
-
-    // Heavy attack (ATKHEAVY placeholder) — independent config
-    [Export] public int AtkHeavyStartupFrames = 11;
-    [Export] public int AtkHeavyActiveFrames = 5;
-    [Export] public int AtkHeavyRecoveryFrames = 22;
-    [Export] public int AtkHeavyDamage = 20;
-    [Export] public Rect2 AtkHeavyHitbox = new Rect2(20, -190, 190, 170);
-    [Export] public GuardHeight AtkHeavyGuard = GuardHeight.High;
+    [Export] public CharacterId Character = CharacterId.Hamster; // selects the C# move table
 
     // Segmented hurtboxes (local rects, flipped by facing like the hitbox).
     // Hit detection tests the UNION of regions; per-region accessors exist for future
@@ -72,13 +56,9 @@ public partial class Player : Node2D
 
     public enum PlayerState { Idle, Walk, Attack, Hurt, Dead, DefenseHit, Jump, Crouch, CrouchExit }
 
-    // Guard height of an attack (which stances can block it):
-    //   High = standing OR crouching block   (上段, most normals)
-    //   Mid  = standing block only           (中段, overhead — crouchers get hit)
-    //   Low  = crouching block only          (下段, low — standers get hit)
-    public enum GuardHeight { High, Mid, Low }
-
     public enum HurtRegion { Head, Body, Arms, Legs }
+
+    public enum CharacterId { Hamster, Kangaroo }
 
     public int Hp { get; private set; }
     public PlayerState State { get; private set; } = PlayerState.Idle;
@@ -86,11 +66,11 @@ public partial class Player : Node2D
 
     public bool InLeft { get; private set; }
     public bool InRight { get; private set; }
-    public bool InAtkPressed { get; private set; }
-    public bool InHeavyPressed { get; private set; }
     public bool InUpHeld { get; private set; }
     public bool InDownHeld { get; private set; }
     public float DesiredDeltaX { get; set; }
+
+    private const int BufferWindow = 8; // frames of input leniency / cancel buffering
 
     private int _atkFrame = -1;
     private int _hurtFrame = -1;
@@ -98,8 +78,12 @@ public partial class Player : Node2D
     private int _crouchFrame = 0;
     private bool _atkHitConsumed = false;
 
-    // active-attack params resolved at attack start (light or heavy)
+    // active move (resolved from the move table at move start)
+    private MoveSet _moves;
+    private MoveDef _curMove;
+    private InputBuffer _buffer = new InputBuffer(BufferWindow + 4);
     private int _curStartup, _curActive, _curRecovery, _curDamage;
+    private int _curCancelFrom, _curCancelTo;
     private Rect2 _curHitbox;
     private string _curAtkAnim = "";
     private GuardHeight _curGuard = GuardHeight.High;
@@ -139,8 +123,7 @@ public partial class Player : Node2D
         Hp = MaxHp;
         FacingRight = StartFacingRight;
         _groundY = Position.Y;
-        _curHitbox = AtkHitbox;
-        _curDamage = AtkDamage;
+        _moves = MoveSets.ForCharacter(Character.ToString());
         PlayAnimSafe(IdleAnimName);
     }
 
@@ -148,16 +131,32 @@ public partial class Player : Node2D
     {
         if (State == PlayerState.Dead)
         {
-            InLeft = InRight = InAtkPressed = InHeavyPressed = InUpHeld = InDownHeld = false;
+            InLeft = InRight = InUpHeld = InDownHeld = false;
+            _buffer.Push(null, 0, false, false);
             return;
         }
         InLeft = Input.IsActionPressed(ActionLeft);
         InRight = Input.IsActionPressed(ActionRight);
-        InAtkPressed = Input.IsActionJustPressed(ActionAttack);
-        InHeavyPressed = Input.IsActionJustPressed(ActionAttackHeavy);
         InUpHeld = Input.IsActionPressed(ActionUp);
         InDownHeld = Input.IsActionPressed(ActionDown);
+
+        AttackButton? btn = ReadPressedButton();
+        int dir = InLeft && !InRight ? -1 : (InRight && !InLeft ? 1 : 0);
+        _buffer.Push(btn, dir, InDownHeld, InUpHeld);
     }
+
+    private AttackButton? ReadPressedButton()
+    {
+        if (Input.IsActionJustPressed(InputPrefix + "_lp")) return AttackButton.LP;
+        if (Input.IsActionJustPressed(InputPrefix + "_mp")) return AttackButton.MP;
+        if (Input.IsActionJustPressed(InputPrefix + "_hp")) return AttackButton.HP;
+        if (Input.IsActionJustPressed(InputPrefix + "_lk")) return AttackButton.LK;
+        if (Input.IsActionJustPressed(InputPrefix + "_mk")) return AttackButton.MK;
+        if (Input.IsActionJustPressed(InputPrefix + "_hk")) return AttackButton.HK;
+        return null;
+    }
+
+    private Stance CurStance() => IsAirborne ? Stance.Air : (State == PlayerState.Crouch ? Stance.Crouch : Stance.Stand);
 
     // Apply numeric tuning from CSV column (key->value). Missing keys keep the engine export default.
     public void ApplyConfig(System.Collections.Generic.Dictionary<string, string> cfg)
@@ -166,14 +165,6 @@ public partial class Player : Node2D
         MaxHp = GetInt(cfg, "MaxHp", MaxHp);
         WalkSpeedPxPerSec = GetFloat(cfg, "WalkSpeedPxPerSec", WalkSpeedPxPerSec);
         DefDamageMultiplier = GetFloat(cfg, "DefDamageMultiplier", DefDamageMultiplier);
-        AtkStartupFrames = GetInt(cfg, "AtkStartupFrames", AtkStartupFrames);
-        AtkActiveFrames = GetInt(cfg, "AtkActiveFrames", AtkActiveFrames);
-        AtkRecoveryFrames = GetInt(cfg, "AtkRecoveryFrames", AtkRecoveryFrames);
-        AtkDamage = GetInt(cfg, "AtkDamage", AtkDamage);
-        AtkHeavyStartupFrames = GetInt(cfg, "AtkHeavyStartupFrames", AtkHeavyStartupFrames);
-        AtkHeavyActiveFrames = GetInt(cfg, "AtkHeavyActiveFrames", AtkHeavyActiveFrames);
-        AtkHeavyRecoveryFrames = GetInt(cfg, "AtkHeavyRecoveryFrames", AtkHeavyRecoveryFrames);
-        AtkHeavyDamage = GetInt(cfg, "AtkHeavyDamage", AtkHeavyDamage);
         HurtStunFrames = GetInt(cfg, "HurtStunFrames", HurtStunFrames);
         DefHitStunFrames = GetInt(cfg, "DefHitStunFrames", DefHitStunFrames);
         JumpVelocity = GetFloat(cfg, "JumpVelocity", JumpVelocity);
@@ -304,40 +295,76 @@ public partial class Player : Node2D
         }
     }
 
-    public void TickStartAttackIfRequested()
+    public void TickMoves()
     {
         if (IsAirborne)
         {
             // air attack: visual only for now (no hitbox / no state change), jump arc continues
             if (State == PlayerState.Jump)
             {
-                if (InAtkPressed) PlayAnimSafe(AtkAnimName);
-                else if (InHeavyPressed) PlayAnimSafe(AtkHeavyAnimName);
+                var ab = _buffer.PeekButton(BufferWindow);
+                if (ab.HasValue)
+                {
+                    var am = _moves.Resolve(Stance.Stand, ab.Value);
+                    if (am != null) PlayAnimSafe(am.AnimName);
+                    _buffer.ConsumeButton(BufferWindow);
+                }
             }
             return;
         }
 
-        if (State != PlayerState.Idle && State != PlayerState.Walk && State != PlayerState.CrouchExit) return;
+        if (State == PlayerState.Attack)
+        {
+            // cancel into a follow-up if buffered and allowed within the cancel window
+            if (_curMove != null && _atkFrame >= _curCancelFrom && _atkFrame <= _curCancelTo)
+            {
+                var cb = _buffer.PeekButton(BufferWindow);
+                if (cb.HasValue)
+                {
+                    var nm = _moves.Resolve(CurStance(), cb.Value);
+                    if (nm != null && System.Array.IndexOf(_curMove.CancelInto, nm.Id) >= 0)
+                    {
+                        _buffer.ConsumeButton(BufferWindow);
+                        StartMove(nm);
+                    }
+                }
+            }
+            return;
+        }
 
-        if (InAtkPressed)
-            StartGroundAttack(AtkStartupFrames, AtkActiveFrames, AtkRecoveryFrames, AtkDamage, AtkHitbox, AtkAnimName, AtkGuard);
-        else if (InHeavyPressed)
-            StartGroundAttack(AtkHeavyStartupFrames, AtkHeavyActiveFrames, AtkHeavyRecoveryFrames, AtkHeavyDamage, AtkHeavyHitbox, AtkHeavyAnimName, AtkHeavyGuard);
+        // actionable ground states -> start a move from a buffered button
+        if (State == PlayerState.Idle || State == PlayerState.Walk
+            || State == PlayerState.CrouchExit || State == PlayerState.Crouch)
+        {
+            var b = _buffer.PeekButton(BufferWindow);
+            if (b.HasValue)
+            {
+                var m = _moves.Resolve(CurStance(), b.Value);
+                if (m != null)
+                {
+                    _buffer.ConsumeButton(BufferWindow);
+                    StartMove(m);
+                }
+            }
+        }
     }
 
-    private void StartGroundAttack(int startup, int active, int recovery, int damage, Rect2 hitbox, string animName, GuardHeight guard)
+    private void StartMove(MoveDef m)
     {
         State = PlayerState.Attack;
+        _curMove = m;
         _atkFrame = 0;
         _atkHitConsumed = false;
-        _curStartup = startup;
-        _curActive = active;
-        _curRecovery = recovery;
-        _curDamage = damage;
-        _curHitbox = hitbox;
-        _curAtkAnim = animName;
-        _curGuard = guard;
-        PlayAnimSafe(animName);
+        _curStartup = m.Startup;
+        _curActive = m.Active;
+        _curRecovery = m.Recovery;
+        _curDamage = m.Damage;
+        _curGuard = m.Guard;
+        _curHitbox = m.Hitbox;
+        _curAtkAnim = m.AnimName;
+        _curCancelFrom = m.ResolvedCancelFrom;
+        _curCancelTo = m.ResolvedCancelTo;
+        PlayAnimSafe(m.AnimName);
     }
 
     public void TickApplyMovement()
@@ -357,11 +384,19 @@ public partial class Player : Node2D
             _atkFrame++;
             if (_atkFrame >= _curStartup + _curActive + _curRecovery)
             {
-                // logic frames done -> actionable now. Do NOT snap to IDLE: let the attack
-                // clip keep playing until it finishes (art may run longer). _Process shows
-                // IDLE once the clip ends; any action this/next tick interrupts it naturally.
-                State = PlayerState.Idle;
+                // logic frames done -> actionable now. Keep the (possibly longer) attack clip
+                // playing as a tail; _Process swaps to IDLE once it ends. If holding down,
+                // settle into the crouch pose instead. Any action interrupts naturally.
                 _atkFrame = -1;
+                if (!IsAirborne && InDownHeld && !InUpHeld)
+                {
+                    State = PlayerState.Crouch;
+                    PlayAnimSafe(CrouchIdleAnimName);
+                }
+                else
+                {
+                    State = PlayerState.Idle; // no PlayAnimSafe: let the attack clip tail out
+                }
             }
         }
         else if (State == PlayerState.Hurt)
@@ -369,9 +404,8 @@ public partial class Player : Node2D
             _hurtFrame++;
             if (_hurtFrame >= HurtStunFrames)
             {
-                State = PlayerState.Idle;
                 _hurtFrame = -1;
-                PlayAnimSafe(IdleAnimName);
+                EndStunToNeutral();
             }
         }
         else if (State == PlayerState.DefenseHit)
@@ -379,10 +413,25 @@ public partial class Player : Node2D
             _defHitFrame++;
             if (_defHitFrame >= DefHitStunFrames)
             {
-                State = PlayerState.Idle;
                 _defHitFrame = -1;
-                PlayAnimSafe(IdleAnimName);
+                EndStunToNeutral();
             }
+        }
+    }
+
+    // After block/hit stun: return to crouch pose (no enter-transition replay) if still holding
+    // down, else stand idle. This is the "block-then-back-to-crouch-last-frame" behavior.
+    private void EndStunToNeutral()
+    {
+        if (!IsAirborne && InDownHeld && !InUpHeld)
+        {
+            State = PlayerState.Crouch;
+            PlayAnimSafe(CrouchIdleAnimName); // steady pose directly, no ENTER_CROUCH
+        }
+        else
+        {
+            State = PlayerState.Idle;
+            PlayAnimSafe(IdleAnimName);
         }
     }
 
@@ -401,6 +450,22 @@ public partial class Player : Node2D
 
     private Rect2 RegionLocal(HurtRegion r)
     {
+        // optional per-frame hurtbox override from the active move (default: none)
+        if (State == PlayerState.Attack && _curMove != null && _curMove.HurtboxTimeline.Length > 0)
+        {
+            foreach (var k in _curMove.HurtboxTimeline)
+            {
+                if (_atkFrame >= k.From && _atkFrame <= k.To)
+                    return r switch
+                    {
+                        HurtRegion.Head => k.Head,
+                        HurtRegion.Body => k.Body,
+                        HurtRegion.Arms => k.Arms,
+                        _ => k.Legs,
+                    };
+            }
+        }
+
         if (IsCrouching)
             return r switch
             {
@@ -495,9 +560,9 @@ public partial class Player : Node2D
         _atkHitConsumed = false;
         _vy = 0f;
         _jumpHVel = 0f;
-        _curHitbox = AtkHitbox;
-        _curDamage = AtkDamage;
-        InLeft = InRight = InAtkPressed = InHeavyPressed = InUpHeld = InDownHeld = false;
+        _curMove = null;
+        _buffer.Clear();
+        InLeft = InRight = InUpHeld = InDownHeld = false;
         DesiredDeltaX = 0;
         PlayAnimSafe(IdleAnimName);
     }
@@ -518,6 +583,13 @@ public partial class Player : Node2D
             if (!atkTailPlaying && anim.Animation != IdleAnimName) PlayAnimSafe(IdleAnimName);
         }
         else if (State == PlayerState.Walk && anim.Animation != WalkAnimName) PlayAnimSafe(WalkAnimName);
+        else if (State == PlayerState.Crouch)
+        {
+            // ENTER_CROUCH transition plays once, then settle on the held CROUCH pose.
+            // (Returning to Crouch after blockstun plays CROUCH directly — no re-transition.)
+            bool entering = anim.IsPlaying() && anim.Animation == EnterCrouchAnimName;
+            if (!entering && anim.Animation != CrouchIdleAnimName) PlayAnimSafe(CrouchIdleAnimName);
+        }
 
         if (DebugDrawBoxes) QueueRedraw();
     }
@@ -532,19 +604,18 @@ public partial class Player : Node2D
         DrawHurtRegion(HurtRegion.Arms, new Color(1f, 0.9f, 0.2f));
         DrawHurtRegion(HurtRegion.Legs, new Color(0.8f, 0.4f, 1f));
 
-        var hb = (State == PlayerState.Attack) ? _curHitbox : AtkHitbox;
-        if (!FacingRight) hb.Position = new Vector2(-hb.Position.X - hb.Size.X, hb.Position.Y);
+        // hitbox: only while attacking (debug viz for every move)
+        if (State == PlayerState.Attack)
+        {
+            var hb = _curHitbox;
+            if (!FacingRight) hb.Position = new Vector2(-hb.Position.X - hb.Size.X, hb.Position.Y);
 
-        bool active = IsAttackingActive;
-        bool inWindup = State == PlayerState.Attack && !active;
-        Color fill = active ? new Color(1, 0, 0, 0.45f)
-                   : inWindup ? new Color(1, 0.6f, 0, 0.25f)
-                              : new Color(1, 1, 0, 0.12f);
-        Color edge = active ? new Color(1, 0, 0, 1f)
-                   : inWindup ? new Color(1, 0.6f, 0, 1f)
-                              : new Color(1, 1, 0, 0.6f);
-        DrawRect(hb, fill, filled: true);
-        DrawRect(hb, edge, filled: false, width: 2f);
+            bool active = IsAttackingActive;
+            Color fill = active ? new Color(1, 0, 0, 0.45f) : new Color(1, 0.6f, 0, 0.25f);
+            Color edge = active ? new Color(1, 0, 0, 1f) : new Color(1, 0.6f, 0, 1f);
+            DrawRect(hb, fill, filled: true);
+            DrawRect(hb, edge, filled: false, width: 2f);
+        }
 
         DrawCircle(Vector2.Zero, 3f, new Color(1, 1, 1, 1));
     }

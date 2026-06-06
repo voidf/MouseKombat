@@ -144,8 +144,8 @@ public partial class GameManager : Node2D
         ClampToStage(p1);
         ClampToStage(p2);
 
-        p1.TickStartAttackIfRequested();
-        p2.TickStartAttackIfRequested();
+        p1.TickMoves();
+        p2.TickMoves();
 
         p1.TickAdvanceTimers();
         p2.TickAdvanceTimers();

@@ -1459,22 +1459,10 @@ script = ExtResource("1_tu88n")
 anim = NodePath("袋鼠")
 ActionLeft = "p2_left"
 ActionRight = "p2_right"
-ActionAttack = "p2_atk"
-ActionAttackHeavy = "p2_atk_heavy"
 ActionUp = "p2_up"
 ActionDown = "p2_down"
-AtkStartupFrames = 5
-AtkActiveFrames = 3
-AtkRecoveryFrames = 3
-AtkDamage = 8
-AtkHitbox = Rect2(20, -180, 80, 140)
-AtkGuard = 1
-AtkHeavyStartupFrames = 10
-AtkHeavyActiveFrames = 12
-AtkHeavyRecoveryFrames = 15
-AtkHeavyDamage = 34
-AtkHeavyHitbox = Rect2(30, -180, 160, 140)
-AtkHeavyGuard = 2
+InputPrefix = "p2"
+Character = 1
 CrouchEnterFrames = 3
 
 [node name="袋鼠" type="AnimatedSprite2D" parent="Player2" unique_id=344721729]
@@ -1486,18 +1474,8 @@ animation = &"DEF"
 position = Vector2(120, 560)
 script = ExtResource("1_tu88n")
 anim = NodePath("仓鼠")
-AtkStartupFrames = 5
-AtkActiveFrames = 3
-AtkRecoveryFrames = 3
-AtkDamage = 8
-AtkHitbox = Rect2(20, -180, 80, 140)
-AtkGuard = 1
-AtkHeavyStartupFrames = 10
-AtkHeavyActiveFrames = 12
-AtkHeavyRecoveryFrames = 15
-AtkHeavyDamage = 34
-AtkHeavyHitbox = Rect2(30, -180, 160, 140)
-AtkHeavyGuard = 2
+InputPrefix = "p1"
+Character = 0
 CrouchEnterFrames = 3
 
 [node name="仓鼠" type="AnimatedSprite2D" parent="Player1" unique_id=185176480]
