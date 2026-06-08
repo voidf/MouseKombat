@@ -1,0 +1,15 @@
+[gd_scene format=3 uid="uid://beatkdd3xell4"]
+
+[ext_resource type="Texture2D" uid="uid://dkxq02qccvy0g" path="res://Art/VFX/Capsule.png" id="1_86poh"]
+
+[sub_resource type="ParticleProcessMaterial" id="ParticleProcessMaterial_2kbnw"]
+particle_flag_disable_z = true
+gravity = Vector3(0, 98, 0)
+scale_min = 0.049999997
+scale_max = 0.049999997
+
+[node name="FxHit" type="Node2D" unique_id=1571117347]
+
+[node name="GPUParticles2D" type="GPUParticles2D" parent="." unique_id=132196736]
+texture = ExtResource("1_86poh")
+process_material = SubResource("ParticleProcessMaterial_2kbnw")

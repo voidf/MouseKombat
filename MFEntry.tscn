@@ -1,8 +1,6 @@
 [gd_scene format=3 uid="uid://c6hrnln4c247g"]
 
 [ext_resource type="Texture2D" uid="uid://dju23nkdy2mj5" path="res://Art/csIdleAtlas.png" id="1_3kii0"]
-[ext_resource type="PackedScene" uid="uid://cqk1l3yxxy7fu" path="res://csProjectile.tscn" id="proj_cs"]
-[ext_resource type="PackedScene" uid="uid://cblwghenscetk" path="res://dsProjectile.tscn" id="proj_ds"]
 [ext_resource type="Script" uid="uid://c371721sxj4ig" path="res://Player.cs" id="1_tu88n"]
 [ext_resource type="Texture2D" uid="uid://dxbj4gu0oekt5" path="res://Art/csAtk1Atlas.png" id="2_0vut4"]
 [ext_resource type="Texture2D" uid="uid://bv3dc8cf3ldcu" path="res://Art/BG.png" id="2_jj8fq"]
@@ -26,7 +24,10 @@
 [ext_resource type="Texture2D" uid="uid://m288mxhdo1uj" path="res://Art/CsAtk2RWAtlas.png" id="14_c1nbd"]
 [ext_resource type="Texture2D" uid="uid://ccvaxdbd5lntw" path="res://Art/csCrouchAtlas.png" id="14_pypjs"]
 [ext_resource type="Texture2D" uid="uid://w7ko2375500q" path="res://Art/csCrouchIdleAtlas.png" id="17_e4xp5"]
+[ext_resource type="PackedScene" uid="uid://beatkdd3xell4" path="res://Art/VFX/FX_Hit.tscn" id="28_1qenb"]
 [ext_resource type="Script" uid="uid://ybt3nxx0m7r3" path="res://GameManager.cs" id="gm_script"]
+[ext_resource type="PackedScene" uid="uid://cqk1l3yxxy7fu" path="res://csProjectile.tscn" id="proj_cs"]
+[ext_resource type="PackedScene" uid="uid://cblwghenscetk" path="res://dsProjectile.tscn" id="proj_ds"]
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_jgbpc"]
 atlas = ExtResource("2_rxphb")
@@ -1681,3 +1682,5 @@ layout_mode = 0
 offset_right = 260.0
 offset_bottom = 24.0
 color = Color(0.25, 0.55, 0.95, 1)
+
+[node name="FxHit" parent="." unique_id=1571117347 instance=ExtResource("28_1qenb")]
