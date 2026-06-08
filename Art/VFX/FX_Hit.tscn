@@ -4,12 +4,18 @@
 
 [sub_resource type="ParticleProcessMaterial" id="ParticleProcessMaterial_2kbnw"]
 particle_flag_disable_z = true
-gravity = Vector3(0, 98, 0)
-scale_min = 0.049999997
-scale_max = 0.049999997
+direction = Vector3(0, 1, 0)
+spread = 180.0
+initial_velocity_min = 8.0
+initial_velocity_max = 12.0
+gravity = Vector3(0, 0, 0)
+scale_min = 0.0002
+scale_max = 0.0002
 
 [node name="FxHit" type="Node2D" unique_id=1571117347]
 
 [node name="GPUParticles2D" type="GPUParticles2D" parent="." unique_id=132196736]
 texture = ExtResource("1_86poh")
+lifetime = 0.25
+explosiveness = 1.0
 process_material = SubResource("ParticleProcessMaterial_2kbnw")
