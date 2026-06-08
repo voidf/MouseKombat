@@ -80,7 +80,10 @@ public partial class Player : Node2D
     public bool InDownHeld { get; private set; }
     public float DesiredDeltaX { get; set; }
 
-    private const int BufferWindow = 8; // frames of input leniency / cancel buffering
+    private const int BufferWindow = 8;  // frames of input leniency / cancel buffering
+    private const int MotionWindow = 16; // frames a motion (236/214) may span
+
+    [Export] public PackedScene ProjectileScene; // fireball scene spawned by motion specials
 
     private int _atkFrame = -1;
     private int _hurtFrame = -1;
@@ -94,7 +97,12 @@ public partial class Player : Node2D
     private MoveSet _moves;
     private MoveDef _curMove;
     private bool _airMove = false; // current Attack is an air normal (keeps jump arc, drops on landing)
-    private InputBuffer _buffer = new InputBuffer(BufferWindow + 4);
+    private bool _projectileSpawned = false; // current move already spawned its projectile
+    private bool _pendingProjectile = false;
+    private ProjectileSpec _pendingSpec;
+    private bool _pendingPopup = false;       // command-success popup queued for the HUD
+    private string _pendingPopupText = "";
+    private InputBuffer _buffer = new InputBuffer(MotionWindow + 2);
     private int _curStartup, _curActive, _curRecovery, _curDamage;
     private int _curCancelFrom, _curCancelTo;
     private Rect2 _curHitbox;
@@ -150,7 +158,7 @@ public partial class Player : Node2D
         if (State == PlayerState.Dead)
         {
             InLeft = InRight = InUpHeld = InDownHeld = false;
-            _buffer.Push(null, 0, false, false);
+            _buffer.Push(null, 5);
             return;
         }
         InLeft = Input.IsActionPressed(ActionLeft);
@@ -159,8 +167,18 @@ public partial class Player : Node2D
         InDownHeld = Input.IsActionPressed(ActionDown);
 
         AttackButton? btn = ReadPressedButton();
-        int dir = InLeft && !InRight ? -1 : (InRight && !InLeft ? 1 : 0);
-        _buffer.Push(btn, dir, InDownHeld, InUpHeld);
+        _buffer.Push(btn, RelativeNumpad());
+    }
+
+    // facing-relative numpad (1-9): forward = toward FacingRight, 5 = neutral
+    private int RelativeNumpad()
+    {
+        int fwd = FacingRight ? 1 : -1;
+        int h = (InRight ? 1 : 0) - (InLeft ? 1 : 0);
+        int rel = h * fwd;                                  // -1 back, 0, +1 forward
+        int v = (InUpHeld ? 1 : 0) - (InDownHeld ? 1 : 0);  // +1 up, -1 down
+        int rowBase = v < 0 ? 1 : (v > 0 ? 7 : 4);
+        return rowBase + (rel + 1);
     }
 
     private AttackButton? ReadPressedButton()
@@ -365,18 +383,27 @@ public partial class Player : Node2D
             return;
         }
 
-        // actionable ground states -> start a move from a buffered button
+        // actionable ground states -> start a move from a buffered button (special first, then normal)
         if (State == PlayerState.Idle || State == PlayerState.Walk
             || State == PlayerState.CrouchExit || State == PlayerState.Crouch)
         {
             var b = _buffer.PeekButton(BufferWindow);
             if (b.HasValue)
             {
-                var m = _moves.Resolve(CurStance(), b.Value);
-                if (m != null)
+                var sp = _moves.ResolveSpecial(_buffer, b.Value, MotionWindow);
+                if (sp != null)
                 {
                     _buffer.ConsumeButton(BufferWindow);
-                    StartMove(m);
+                    StartMove(sp);
+                }
+                else
+                {
+                    var m = _moves.Resolve(CurStance(), b.Value);
+                    if (m != null)
+                    {
+                        _buffer.ConsumeButton(BufferWindow);
+                        StartMove(m);
+                    }
                 }
             }
         }
@@ -387,6 +414,7 @@ public partial class Player : Node2D
         State = PlayerState.Attack;
         _curMove = m;
         _airMove = m.Stance == Stance.Air;
+        _projectileSpawned = false;
         _atkFrame = 0;
         _atkHitConsumed = false;
         _curStartup = m.Startup;
@@ -399,6 +427,26 @@ public partial class Player : Node2D
         _curCancelFrom = m.ResolvedCancelFrom;
         _curCancelTo = m.ResolvedCancelTo;
         PlayAnimSafe(m.AnimName);
+
+        if (m.Motion != MotionInput.None) // 搓招成功 -> queue HUD popup
+        {
+            _pendingPopup = true;
+            _pendingPopupText = m.CommandLabel;
+        }
+    }
+
+    public bool ConsumeProjectileSpawn(out ProjectileSpec spec)
+    {
+        if (_pendingProjectile) { _pendingProjectile = false; spec = _pendingSpec; return true; }
+        spec = default;
+        return false;
+    }
+
+    public bool ConsumeCommandSuccess(out string text)
+    {
+        if (_pendingPopup) { _pendingPopup = false; text = _pendingPopupText; return true; }
+        text = null;
+        return false;
     }
 
     public void TickApplyMovement()
@@ -416,6 +464,14 @@ public partial class Player : Node2D
         if (State == PlayerState.Attack)
         {
             _atkFrame++;
+            // spawn the move's projectile once, at its scheduled frame
+            if (_curMove != null && _curMove.SpawnsProjectile && !_projectileSpawned
+                && _atkFrame >= _curMove.ProjectileSpawnFrame)
+            {
+                _pendingProjectile = true;
+                _pendingSpec = _curMove.Projectile;
+                _projectileSpawned = true;
+            }
             if (_atkFrame >= _curStartup + _curActive + _curRecovery)
             {
                 // logic frames done -> actionable now. Keep the (possibly longer) attack clip
@@ -647,6 +703,9 @@ public partial class Player : Node2D
         _jumpHVel = 0f;
         _curMove = null;
         _airMove = false;
+        _projectileSpawned = false;
+        _pendingProjectile = false;
+        _pendingPopup = false;
         _buffer.Clear();
         InLeft = InRight = InUpHeld = InDownHeld = false;
         DesiredDeltaX = 0;

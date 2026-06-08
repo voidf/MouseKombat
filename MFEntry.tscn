@@ -1,6 +1,8 @@
 [gd_scene format=3 uid="uid://c6hrnln4c247g"]
 
 [ext_resource type="Texture2D" uid="uid://dju23nkdy2mj5" path="res://Art/csIdleAtlas.png" id="1_3kii0"]
+[ext_resource type="PackedScene" uid="uid://cqk1l3yxxy7fu" path="res://csProjectile.tscn" id="proj_cs"]
+[ext_resource type="PackedScene" uid="uid://cblwghenscetk" path="res://dsProjectile.tscn" id="proj_ds"]
 [ext_resource type="Script" uid="uid://c371721sxj4ig" path="res://Player.cs" id="1_tu88n"]
 [ext_resource type="Texture2D" uid="uid://dxbj4gu0oekt5" path="res://Art/csAtk1Atlas.png" id="2_0vut4"]
 [ext_resource type="Texture2D" uid="uid://bv3dc8cf3ldcu" path="res://Art/BG.png" id="2_jj8fq"]
@@ -1532,6 +1534,7 @@ ActionDown = "p2_down"
 InputPrefix = "p2"
 Character = 1
 CrouchEnterFrames = 3
+ProjectileScene = ExtResource("proj_ds")
 
 [node name="袋鼠" type="AnimatedSprite2D" parent="Player2" unique_id=344721729]
 position = Vector2(0, -167)
@@ -1543,6 +1546,7 @@ position = Vector2(120, 560)
 script = ExtResource("1_tu88n")
 anim = NodePath("仓鼠")
 CrouchEnterFrames = 3
+ProjectileScene = ExtResource("proj_cs")
 
 [node name="仓鼠" type="AnimatedSprite2D" parent="Player1" unique_id=185176480]
 position = Vector2(0, -107)

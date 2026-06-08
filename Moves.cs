@@ -13,6 +13,19 @@ public enum Stance { Stand, Crouch, Air }
 //   Low  = crouching block only          (下段, low — standers get hit)
 public enum GuardHeight { High, Mid, Low }
 
+// Motion command (facing-relative): Qcf = 236 (↓↘→), Qcb = 214 (↓↙←).
+public enum MotionInput { None, Qcf, Qcb }
+
+// Spawned projectile config — reused for ground/air fireballs by varying the values.
+public struct ProjectileSpec
+{
+    public float Speed;        // uniform horizontal px/s
+    public Vector2 Offset;     // spawn offset from owner (x measured forward, flipped by facing)
+    public int Damage;
+    public GuardHeight Guard;  // hit height (High/Mid/Low) — reused for high/low fireballs
+    public float MaxDistance;  // travel before self-destruct
+}
+
 // One entry of a move's optional per-frame hurtbox timeline.
 // While the attack's frame counter is within [From, To], these region rects
 // override the character's base hurtboxes. Empty timeline => no change (default).
@@ -45,6 +58,17 @@ public sealed class MoveDef
 
     public bool IsLight => Button == AttackButton.LP || Button == AttackButton.LK;
 
+    // Motion special: if Motion != None this move is matched by (motion + a punch) before normals.
+    // AnyPunch = any of LP/MP/HP triggers it (the classic "236+P").
+    public MotionInput Motion = MotionInput.None;
+    public bool AnyPunch = false;
+    public string CommandLabel = ""; // shown in the training-room style success popup, e.g. "↓↘→+P"
+
+    // Projectile: spawn one at ProjectileSpawnFrame during this move (no melee hitbox needed).
+    public bool SpawnsProjectile = false;
+    public int ProjectileSpawnFrame = 0;
+    public ProjectileSpec Projectile;
+
     // optional per-frame hurtbox overrides; default empty = use base regions
     public HurtKey[] HurtboxTimeline = System.Array.Empty<HurtKey>();
 
@@ -64,6 +88,7 @@ public sealed class MoveSet
 {
     private readonly Dictionary<int, MoveDef> _byCommand = new();
     private readonly Dictionary<string, MoveDef> _byId = new();
+    private readonly List<MoveDef> _specials = new(); // motion moves, checked before normals
 
     private static int Key(Stance s, AttackButton b) => (int)s * 6 + (int)b;
 
@@ -71,16 +96,29 @@ public sealed class MoveSet
     {
         foreach (var m in moves)
         {
-            _byCommand[Key(m.Stance, m.Button)] = m;
             _byId[m.Id] = m;
+            if (m.Motion != MotionInput.None) _specials.Add(m);
+            else _byCommand[Key(m.Stance, m.Button)] = m;
         }
     }
 
-    // resolve a command to a move; Crouch falls back to the Stand version if no crouch-specific one exists
+    // resolve a normal command; Crouch falls back to the Stand version if no crouch-specific one exists
     public MoveDef Resolve(Stance stance, AttackButton button)
     {
         if (_byCommand.TryGetValue(Key(stance, button), out var m)) return m;
         if (stance == Stance.Crouch && _byCommand.TryGetValue(Key(Stance.Stand, button), out var s)) return s;
+        return null;
+    }
+
+    // resolve a motion special given the pressed button + the input history; null if none match
+    public MoveDef ResolveSpecial(InputBuffer buffer, AttackButton button, int window)
+    {
+        bool isPunch = button == AttackButton.LP || button == AttackButton.MP || button == AttackButton.HP;
+        foreach (var sp in _specials)
+        {
+            bool btnOk = sp.AnyPunch ? isPunch : sp.Button == button;
+            if (btnOk && buffer.HasMotion(sp.Motion, window)) return sp;
+        }
         return null;
     }
 
@@ -262,10 +300,23 @@ public static class MoveSets
             Startup = 10, Active = 6, Recovery = 12, Damage = 15, Guard = GuardHeight.High,
             Hitbox = new Rect2(20, -50, 160, 120),
         });
+
+        // ---- motion special: QCF + any punch -> fireball (抬手招, no melee hitbox; Active=0) ----
+        moves.Add(new MoveDef {
+            Id = "236P", AnimName = "AtkHadou", Button = AttackButton.LP, Stance = Stance.Stand,
+            Motion = MotionInput.Qcf, AnyPunch = true, CommandLabel = "↓↘→+P",
+            Startup = 12, Active = 0, Recovery = 24, Damage = 0, Guard = GuardHeight.High,
+            Hitbox = new Rect2(0, 0, 0, 0), // no melee judgement; the projectile carries offense
+            SpawnsProjectile = true, ProjectileSpawnFrame = 12,
+            Projectile = new ProjectileSpec {
+                Speed = 520f, Offset = new Vector2(95, -150),
+                Damage = 12, Guard = GuardHeight.High, MaxDistance = 900f,
+            },
+        });
     }
 }
 
-// Per-player rolling input history: leniency buffering now, substrate for motion inputs later.
+// Per-player rolling input history: button leniency + facing-relative motion recognition.
 public sealed class InputBuffer
 {
     private struct Slot
@@ -273,17 +324,17 @@ public sealed class InputBuffer
         public bool HasBtn;
         public AttackButton Btn;
         public bool Consumed;
-        public int Dir;   // -1 left, 0, +1 right
-        public bool Down, Up;
+        public int Num; // facing-relative numpad direction 1-9 (5 = neutral)
     }
 
     private readonly Slot[] _slots;
     private int _head = -1; // index of most-recently pushed frame
     private int _count;
 
-    public InputBuffer(int size = 12) { _slots = new Slot[size]; }
+    public InputBuffer(int size = 16) { _slots = new Slot[size]; }
 
-    public void Push(AttackButton? btn, int dir, bool down, bool up)
+    // num: facing-relative numpad (1-9). btn: a just-pressed attack button this frame, or null.
+    public void Push(AttackButton? btn, int num)
     {
         _head = (_head + 1) % _slots.Length;
         _slots[_head] = new Slot
@@ -291,9 +342,7 @@ public sealed class InputBuffer
             HasBtn = btn.HasValue,
             Btn = btn ?? default,
             Consumed = false,
-            Dir = dir,
-            Down = down,
-            Up = up,
+            Num = num,
         };
         if (_count < _slots.Length) _count++;
     }
@@ -319,6 +368,32 @@ public sealed class InputBuffer
             int idx = (_head - i + _slots.Length) % _slots.Length;
             if (_slots[idx].HasBtn && !_slots[idx].Consumed) { _slots[idx].Consumed = true; return; }
         }
+    }
+
+    // facing-relative motion match within the last `window` frames.
+    // Qcf (236): see down(2) -> then a forward-ish(3 or 6) -> ending forward, in order. Lenient.
+    public bool HasMotion(MotionInput motion, int window)
+    {
+        if (motion == MotionInput.None) return false;
+        int n = Mathf.Min(window, _count);
+        // walk newest->oldest; require a "forward" then an earlier "down".
+        bool sawForward = false;
+        for (int i = 0; i < n; i++)
+        {
+            int idx = (_head - i + _slots.Length) % _slots.Length;
+            int num = _slots[idx].Num;
+            if (!sawForward)
+            {
+                // forward = 6, down-forward = 3 (down-forward also counts as the corner)
+                if (num == 6 || num == 3) sawForward = true;
+            }
+            else
+            {
+                // after a forward, an earlier down (2/1/3) completes the quarter-circle
+                if (num == 2 || num == 1 || num == 3) return true;
+            }
+        }
+        return false;
     }
 
     public void Clear()

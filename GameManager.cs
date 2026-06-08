@@ -150,10 +150,58 @@ public partial class GameManager : Node2D
         p1.TickAdvanceTimers();
         p2.TickAdvanceTimers();
 
+        ProcessSpecials();
+
         ResolveHits();
 
         UpdateHpBars();
         CheckKO();
+    }
+
+    // spawn queued projectiles and show queued command-success popups
+    private void ProcessSpecials()
+    {
+        if (p1.ConsumeProjectileSpawn(out var s1)) SpawnProjectile(p1, s1, p2);
+        if (p2.ConsumeProjectileSpawn(out var s2)) SpawnProjectile(p2, s2, p1);
+        if (p1.ConsumeCommandSuccess(out var t1)) ShowCommandPopup(0, t1);
+        if (p2.ConsumeCommandSuccess(out var t2)) ShowCommandPopup(1, t2);
+    }
+
+    private void SpawnProjectile(Player owner, ProjectileSpec spec, Player target)
+    {
+        if (owner.ProjectileScene == null) return;
+        var proj = owner.ProjectileScene.Instantiate<Projectile>();
+        int dir = owner.FacingRight ? 1 : -1;
+        var off = new Vector2(spec.Offset.X * dir, spec.Offset.Y); // x measured forward
+        proj.Position = owner.GlobalPosition + off;
+        AddChild(proj);
+        proj.Init(dir, spec, target);
+    }
+
+    private void ShowCommandPopup(int playerIndex, string text)
+    {
+        if (string.IsNullOrEmpty(text)) return;
+        var hud = GetNodeOrNull<CanvasLayer>("HUD");
+        if (hud == null) return;
+
+        var label = new Label();
+        label.Text = text + " 成功";
+        GD.Print($"popup: {label.Text}");
+        label.AddThemeFontSizeOverride("font_size", 18);
+        label.Position = new Vector2(playerIndex == 0 ? 20 : 520, 52);
+        hud.AddChild(label);
+
+        var t = CreateTween();
+        t.TweenInterval(0.9);
+        t.TweenProperty(label, "modulate:a", 0f, 0.4f).SetTrans(Tween.TransitionType.Linear);
+        var lref = label;
+        t.TweenCallback(Callable.From(() => lref.QueueFree()));
+    }
+
+    private void FreeProjectiles()
+    {
+        foreach (var child in GetChildren())
+            if (child is Projectile p) p.QueueFree();
     }
 
     private void ResolveMovement(double dt)
@@ -346,6 +394,7 @@ public partial class GameManager : Node2D
         RestoreLabel(p2WinLine2, _p2L2Home);
         if (p1WinAnim != null) { p1WinAnim.Visible = false; p1WinAnim.Stop(); }
         if (p2WinAnim != null) { p2WinAnim.Visible = false; p2WinAnim.Stop(); }
+        FreeProjectiles();
         p1.ResetForNewRound(P1StartPos, true);
         p2.ResetForNewRound(P2StartPos, false);
         UpdateHpBars();
