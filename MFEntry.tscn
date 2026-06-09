@@ -26,7 +26,7 @@
 [ext_resource type="Texture2D" uid="uid://w7ko2375500q" path="res://Art/csCrouchIdleAtlas.png" id="17_e4xp5"]
 [ext_resource type="Texture2D" uid="uid://b00fvsvs1gk4c" path="res://Art/csFallAtlas.png" id="20_1qenb"]
 [ext_resource type="Texture2D" uid="uid://caijtwrbdvf53" path="res://Art/csLaunchAtlas.png" id="23_avf1r"]
-[ext_resource type="PackedScene" uid="uid://beatkdd3xell4" path="res://Art/VFX/FX_Hit.tscn" id="28_1qenb"]
+[ext_resource type="PackedScene" uid="uid://beatkdd3xell4" path="res://Art/VFX/FX_Hit.tscn" id="fx_hit"]
 [ext_resource type="Script" uid="uid://ybt3nxx0m7r3" path="res://GameManager.cs" id="gm_script"]
 [ext_resource type="PackedScene" uid="uid://cqk1l3yxxy7fu" path="res://csProjectile.tscn" id="proj_cs"]
 [ext_resource type="PackedScene" uid="uid://cblwghenscetk" path="res://dsProjectile.tscn" id="proj_ds"]
@@ -1551,6 +1551,12 @@ animations = [{
 "speed": 60.0
 }]
 
+[sub_resource type="Environment" id="Environment_erxer"]
+background_mode = 3
+glow_enabled = true
+glow_intensity = 1.13
+glow_blend_mode = 0
+
 [node name="Node2D" type="Node2D" unique_id=929041593 node_paths=PackedStringArray("p1", "p2", "hp1Fill", "hp2Fill", "p1WinAnim", "p2WinAnim", "p1WinLine1", "p1WinLine2", "p2WinLine1", "p2WinLine2")]
 script = ExtResource("gm_script")
 p1 = NodePath("Player1")
@@ -1563,8 +1569,10 @@ p1WinLine1 = NodePath("P1WinTextLine1")
 p1WinLine2 = NodePath("P1WinTextLine2")
 p2WinLine1 = NodePath("P2WinTextLine1")
 p2WinLine2 = NodePath("P2WinTextLine2")
+HitFxScene = ExtResource("fx_hit")
 
 [node name="TextureRect" type="TextureRect" parent="." unique_id=1018519470]
+visible = false
 custom_minimum_size = Vector2(800, 600)
 offset_right = 40.0
 offset_bottom = 40.0
@@ -1732,4 +1740,5 @@ offset_right = 260.0
 offset_bottom = 24.0
 color = Color(0.25, 0.55, 0.95, 1)
 
-[node name="FxHit" parent="." unique_id=1571117347 instance=ExtResource("28_1qenb")]
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=1690509259]
+environment = SubResource("Environment_erxer")

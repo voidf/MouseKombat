@@ -624,10 +624,11 @@ public partial class Player : Node2D
     public void ConsumeAttackHit() { _atkHitConsumed = true; }
 
     // pushDir: +1 to shove the victim toward +x (away from the attacker), -1 toward -x.
-    public void ApplyDamage(MoveDef move, int pushDir)
+    // Returns true if a clean (unblocked) hit connected — used to spawn the hit VFX.
+    public bool ApplyDamage(MoveDef move, int pushDir)
     {
-        if (State == PlayerState.Dead) return;
-        if (IsInvincible) return; // downed / waking up
+        if (State == PlayerState.Dead) return false;
+        if (IsInvincible) return false; // downed / waking up
 
         bool airborne = IsAirborne || State == PlayerState.Juggle || State == PlayerState.AirHurt;
 
@@ -648,7 +649,7 @@ public partial class Player : Node2D
         {
             State = PlayerState.Dead;
             anim.Stop();
-            return;
+            return !blocked;
         }
 
         if (blocked)
@@ -656,7 +657,7 @@ public partial class Player : Node2D
             State = PlayerState.DefenseHit;
             _defHitFrame = 0;
             PlayAnimSafe(DefAnimName);
-            return;
+            return false;
         }
 
         // unblocked reaction
@@ -683,6 +684,7 @@ public partial class Player : Node2D
             _hurtFrame = 0;
             PlayAnimSafe(HurtAnimName);
         }
+        return true;
     }
 
     public void ResetForNewRound(Vector2 startPos, bool facingRight)

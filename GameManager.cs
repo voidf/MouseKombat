@@ -31,6 +31,9 @@ public partial class GameManager : Node2D
     [Export] public float StageMinX = 40f;
     [Export] public float StageMaxX = 760f;
 
+    [Export] public PackedScene HitFxScene;        // FX_Hit.tscn — spawned on a confirmed (unblocked) hit
+    [Export] public float HitFxLifetime = 0.2f;    // seconds before the spawned FX is freed
+
     private enum Phase { Fighting, Win, Resetting }
     private Phase _phase = Phase.Fighting;
 
@@ -303,12 +306,40 @@ public partial class GameManager : Node2D
         if (!attacker.IsAttackingActive) return;
         if (defender.State == Player.PlayerState.Dead) return;
         if (defender.IsInvincible) return; // knocked down / waking up
-        if (defender.HurtboxOverlaps(attacker.GetWorldHitbox()))
+        var hitBox = attacker.GetWorldHitbox();
+        if (defender.HurtboxOverlaps(hitBox))
         {
             int pushDir = attacker.GlobalPosition.X <= defender.GlobalPosition.X ? 1 : -1; // shove away from attacker
-            defender.ApplyDamage(attacker.CurrentMove, pushDir);
+            bool clean = defender.ApplyDamage(attacker.CurrentMove, pushDir);
             attacker.ConsumeAttackHit();
+            if (clean) SpawnHitFx(HitContactPoint(hitBox, defender)); // not on block
         }
+    }
+
+    // center of the hitbox ∩ hurtbox overlap (industry-standard spark placement);
+    // falls back to the midpoint of the two box centers if the bounding intersection is empty.
+    private static Vector2 HitContactPoint(Rect2 hitBox, Player defender)
+    {
+        var inter = hitBox.Intersection(defender.GetWorldHurtbox());
+        if (inter.Size.X > 0f && inter.Size.Y > 0f)
+            return inter.Position + inter.Size * 0.5f;
+        return (hitBox.GetCenter() + defender.GetWorldHurtbox().GetCenter()) * 0.5f;
+    }
+
+    private void SpawnHitFx(Vector2 worldPos)
+    {
+        if (HitFxScene == null) return;
+        var fx = HitFxScene.Instantiate<Node2D>();
+        fx.GlobalPosition = worldPos;
+        AddChild(fx);
+
+        // FX particles ship with emitting=false so instances are inert until triggered — fire them now.
+        foreach (var n in fx.FindChildren("*", "GPUParticles2D", true, false))
+            if (n is GpuParticles2D ps) ps.Restart();
+
+        var timer = GetTree().CreateTimer(HitFxLifetime);
+        var fxRef = fx;
+        timer.Timeout += () => { if (IsInstanceValid(fxRef)) fxRef.QueueFree(); };
     }
 
     private void UpdateHpBars()

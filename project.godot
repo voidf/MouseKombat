@@ -21,6 +21,11 @@ run/main_scene="uid://c6hrnln4c247g"
 config/features=PackedStringArray("4.6", "C#", "Mobile")
 config/icon="uid://betfal31o5rh8"
 
+[autoload]
+
+VFX="*uid://ecyiymmaj3jv"
+EnvVFX="*uid://qomyut16hnoi"
+
 [display]
 
 window/size/viewport_width=800
@@ -31,6 +36,10 @@ window/stretch/mode="viewport"
 [dotnet]
 
 project/assembly_name="MouseKombat"
+
+[editor_plugins]
+
+enabled=PackedStringArray()
 
 [input]
 
@@ -142,5 +151,5 @@ p2_down={
 [rendering]
 
 rendering_device/driver.windows="d3d12"
-renderer/rendering_method="mobile"
 textures/vram_compression/import_etc2_astc=true
+viewport/hdr_2d=true
