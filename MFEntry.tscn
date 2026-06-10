@@ -26,14 +26,14 @@
 [ext_resource type="Texture2D" uid="uid://w7ko2375500q" path="res://Art/csCrouchIdleAtlas.png" id="17_e4xp5"]
 [ext_resource type="Texture2D" uid="uid://b00fvsvs1gk4c" path="res://Art/csFallAtlas.png" id="20_1qenb"]
 [ext_resource type="Texture2D" uid="uid://caijtwrbdvf53" path="res://Art/csLaunchAtlas.png" id="23_avf1r"]
-[ext_resource type="PackedScene" uid="uid://beatkdd3xell4" path="res://Art/VFX/FX_Hit.tscn" id="fx_hit"]
+[ext_resource type="AudioStream" uid="uid://ciwvkt5pcw5y3" path="res://Art/BGM/BGM_InCombat.ogg" id="bgm_combat"]
 [ext_resource type="PackedScene" uid="uid://dy1yok0d038u2" path="res://Art/VFX/FX_Guard.tscn" id="fx_guard"]
-[ext_resource type="AudioStream" path="res://Art/BGM/BGM_InCombat.ogg" id="bgm_combat"]
-[ext_resource type="AudioStream" path="res://Art/SFX/SFX_Hit.ogg" id="sfx_hit"]
-[ext_resource type="AudioStream" path="res://Art/SFX/SFX_Guard.wav" id="sfx_guard"]
+[ext_resource type="PackedScene" uid="uid://beatkdd3xell4" path="res://Art/VFX/FX_Hit.tscn" id="fx_hit"]
 [ext_resource type="Script" uid="uid://ybt3nxx0m7r3" path="res://GameManager.cs" id="gm_script"]
 [ext_resource type="PackedScene" uid="uid://cqk1l3yxxy7fu" path="res://csProjectile.tscn" id="proj_cs"]
 [ext_resource type="PackedScene" uid="uid://cblwghenscetk" path="res://dsProjectile.tscn" id="proj_ds"]
+[ext_resource type="AudioStream" uid="uid://dbt50p4kq2yur" path="res://Art/SFX/SFX_Guard.wav" id="sfx_guard"]
+[ext_resource type="AudioStream" uid="uid://26abicf4m7mx" path="res://Art/SFX/SFX_Hit.ogg" id="sfx_hit"]
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_jgbpc"]
 atlas = ExtResource("2_rxphb")
@@ -1580,7 +1580,6 @@ SfxHit = NodePath("SfxHit")
 SfxGuard = NodePath("SfxGuard")
 
 [node name="TextureRect" type="TextureRect" parent="." unique_id=1018519470]
-visible = false
 custom_minimum_size = Vector2(800, 600)
 offset_right = 40.0
 offset_bottom = 40.0
@@ -1751,15 +1750,13 @@ color = Color(0.25, 0.55, 0.95, 1)
 [node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=1690509259]
 environment = SubResource("Environment_erxer")
 
-[node name="Bgm" type="AudioStreamPlayer" parent="."]
+[node name="Bgm" type="AudioStreamPlayer" parent="." unique_id=471064812]
 stream = ExtResource("bgm_combat")
+volume_db = -9.567
 autoplay = true
-bus = &"Master"
 
-[node name="SfxHit" type="AudioStreamPlayer" parent="."]
+[node name="SfxHit" type="AudioStreamPlayer" parent="." unique_id=176566228]
 stream = ExtResource("sfx_hit")
-bus = &"Master"
 
-[node name="SfxGuard" type="AudioStreamPlayer" parent="."]
+[node name="SfxGuard" type="AudioStreamPlayer" parent="." unique_id=2116235897]
 stream = ExtResource("sfx_guard")
-bus = &"Master"
