@@ -21,11 +21,6 @@ run/main_scene="uid://c6hrnln4c247g"
 config/features=PackedStringArray("4.6", "C#", "Mobile")
 config/icon="uid://betfal31o5rh8"
 
-[autoload]
-
-VFX="*uid://ecyiymmaj3jv"
-EnvVFX="*uid://qomyut16hnoi"
-
 [display]
 
 window/size/viewport_width=800
