@@ -70,6 +70,8 @@ public partial class Player : Node2D
 
     public enum CharacterId { Hamster, Kangaroo }
 
+    public enum HitResult { None, Blocked, Hit } // outcome of ApplyDamage, drives FX/SFX
+
     public int Hp { get; private set; }
     public PlayerState State { get; private set; } = PlayerState.Idle;
     public bool FacingRight { get; set; } = true;
@@ -624,11 +626,11 @@ public partial class Player : Node2D
     public void ConsumeAttackHit() { _atkHitConsumed = true; }
 
     // pushDir: +1 to shove the victim toward +x (away from the attacker), -1 toward -x.
-    // Returns true if a clean (unblocked) hit connected — used to spawn the hit VFX.
-    public bool ApplyDamage(MoveDef move, int pushDir)
+    // Returns Hit (clean), Blocked, or None — drives hit/guard FX & SFX.
+    public HitResult ApplyDamage(MoveDef move, int pushDir)
     {
-        if (State == PlayerState.Dead) return false;
-        if (IsInvincible) return false; // downed / waking up
+        if (State == PlayerState.Dead) return HitResult.None;
+        if (IsInvincible) return HitResult.None; // downed / waking up
 
         bool airborne = IsAirborne || State == PlayerState.Juggle || State == PlayerState.AirHurt;
 
@@ -649,7 +651,7 @@ public partial class Player : Node2D
         {
             State = PlayerState.Dead;
             anim.Stop();
-            return !blocked;
+            return blocked ? HitResult.Blocked : HitResult.Hit;
         }
 
         if (blocked)
@@ -657,7 +659,7 @@ public partial class Player : Node2D
             State = PlayerState.DefenseHit;
             _defHitFrame = 0;
             PlayAnimSafe(DefAnimName);
-            return false;
+            return HitResult.Blocked;
         }
 
         // unblocked reaction
@@ -684,7 +686,7 @@ public partial class Player : Node2D
             _hurtFrame = 0;
             PlayAnimSafe(HurtAnimName);
         }
-        return true;
+        return HitResult.Hit;
     }
 
     public void ResetForNewRound(Vector2 startPos, bool facingRight)

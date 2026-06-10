@@ -32,7 +32,12 @@ public partial class GameManager : Node2D
     [Export] public float StageMaxX = 760f;
 
     [Export] public PackedScene HitFxScene;        // FX_Hit.tscn — spawned on a confirmed (unblocked) hit
-    [Export] public float HitFxLifetime = 0.2f;    // seconds before the spawned FX is freed
+    [Export] public PackedScene GuardFxScene;      // FX_Guard.tscn — spawned on a block
+    [Export] public float HitFxLifetime = 0.2f;    // seconds before a spawned FX is freed
+
+    [Export] public AudioStreamPlayer Bgm;         // looped combat BGM
+    [Export] public AudioStreamPlayer SfxHit;      // played on a clean hit
+    [Export] public AudioStreamPlayer SfxGuard;    // played on a block
 
     private enum Phase { Fighting, Win, Resetting }
     private Phase _phase = Phase.Fighting;
@@ -40,6 +45,7 @@ public partial class GameManager : Node2D
     public override void _Ready()
     {
         LoadAndApplyConfig();
+        StartBgm();
 
         if (p1WinAnim != null)
         {
@@ -301,6 +307,13 @@ public partial class GameManager : Node2D
         TryHit(p2, p1);
     }
 
+    private void StartBgm()
+    {
+        if (Bgm == null) return;
+        Bgm.Finished += () => Bgm.Play(); // loop regardless of the stream's import loop setting
+        if (!Bgm.Playing) Bgm.Play();
+    }
+
     private void TryHit(Player attacker, Player defender)
     {
         if (!attacker.IsAttackingActive) return;
@@ -310,9 +323,23 @@ public partial class GameManager : Node2D
         if (defender.HurtboxOverlaps(hitBox))
         {
             int pushDir = attacker.GlobalPosition.X <= defender.GlobalPosition.X ? 1 : -1; // shove away from attacker
-            bool clean = defender.ApplyDamage(attacker.CurrentMove, pushDir);
+            var res = defender.ApplyDamage(attacker.CurrentMove, pushDir);
             attacker.ConsumeAttackHit();
-            if (clean) SpawnHitFx(HitContactPoint(hitBox, defender)); // not on block
+            if (res == Player.HitResult.None) return;
+
+            var pt = HitContactPoint(hitBox, defender);
+            // FX oriented by the DEFENDER's facing: art authored facing-left; mirror when facing right.
+            bool flip = defender.FacingRight;
+            if (res == Player.HitResult.Hit)
+            {
+                SpawnFx(HitFxScene, pt, flip);
+                SfxHit?.Play();
+            }
+            else // Blocked
+            {
+                SpawnFx(GuardFxScene, pt, flip);
+                SfxGuard?.Play();
+            }
         }
     }
 
@@ -326,14 +353,16 @@ public partial class GameManager : Node2D
         return (hitBox.GetCenter() + defender.GetWorldHurtbox().GetCenter()) * 0.5f;
     }
 
-    private void SpawnHitFx(Vector2 worldPos)
+    // flip = mirror on X (directional FX faces the correct way for the defender)
+    private void SpawnFx(PackedScene scene, Vector2 worldPos, bool flip)
     {
-        if (HitFxScene == null) return;
-        var fx = HitFxScene.Instantiate<Node2D>();
+        if (scene == null) return;
+        var fx = scene.Instantiate<Node2D>();
         fx.GlobalPosition = worldPos;
+        fx.Scale = new Vector2(flip ? -1f : 1f, 1f);
         AddChild(fx);
 
-        // FX particles ship with emitting=false so instances are inert until triggered — fire them now.
+        // FX particles ship inert (emitting=false / not yet restarted) — fire them now.
         foreach (var n in fx.FindChildren("*", "GPUParticles2D", true, false))
             if (n is GpuParticles2D ps) ps.Restart();
 

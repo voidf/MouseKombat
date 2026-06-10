@@ -1,0 +1,24 @@
+[remap]
+
+importer="wav"
+type="AudioStreamWAV"
+uid="uid://nj71oj7ahvf4"
+path="res://.godot/imported/Seamless Loopbase (1).wav-607f4bf6b3bd0e7823d847b10cb0fd2a.sample"
+
+[deps]
+
+source_file="res://Art/BGM/Seamless Loopbase (1).wav"
+dest_files=["res://.godot/imported/Seamless Loopbase (1).wav-607f4bf6b3bd0e7823d847b10cb0fd2a.sample"]
+
+[params]
+
+force/8_bit=false
+force/mono=false
+force/max_rate=false
+force/max_rate_hz=44100
+edit/trim=false
+edit/normalize=false
+edit/loop_mode=0
+edit/loop_begin=0
+edit/loop_end=-1
+compress/mode=2
