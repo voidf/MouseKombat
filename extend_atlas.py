@@ -61,18 +61,18 @@ if __name__ == "__main__":
     # --- 你可以在这里配置参数 ---
     
     # 1. 输入文件路径 (替换成你的文件名)
-    input_file = "Art/dsWalkAtlas.png"  
-    output_file = "Art/dsWalkAtlas_extended.png"
+    input_file = r"D:\[L1]SETU\nszyGallery\gif\Ds_Kick_1\Ds_Kick_123.003.png"
+    output_file = r"D:\[L1]SETU\nszyGallery\gif\Ds_Kick_1\Ds_Kick_1p.003.png"
 
     # 2. 当前每个格子的分辨率 (比如看你的图1是 3x3 排列，如果是256x256的总图，那每个格子大概是 85x85 等，请根据你实际美术导出时的单个格子大小填写)
     # 比如：如果原图总共 256x256，包含 2x2 个格子，那单格就是 128
-    current_grid_width = 384   
-    current_grid_height = 384  
+    current_grid_width = 1024   
+    current_grid_height = 1024  
 
     # 3. 你希望将【每个格子】扩展到的目标分辨率
     # 比如：如果你希望最终整张大图是 512x512，且依然是 2x2 个格子，那么目标单格就是 512 / 2 = 256
-    target_grid_width = 512    
-    target_grid_height = 512   
+    target_grid_width = 512
+    target_grid_height = 512
 
     # 执行转换
     if os.path.exists(input_file):

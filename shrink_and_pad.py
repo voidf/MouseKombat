@@ -53,10 +53,10 @@ def process_images(input_dir, output_dir, target_canvas_size=512, target_content
 if __name__ == "__main__":
     # --- 参数配置 ---
     # 输入目录：'.' 代表当前脚本所在目录，你也可以换成绝对路径如 "C:/Users/Game/Sprites"
-    input_directory = r"D:\[L1]SETU\nszyGallery\gif\Cs_Atk_2"  
+    input_directory = r"D:\[L1]SETU\nszyGallery\gif\Ds_Kick_3"  
     
     # 输出目录：处理后的图片会存放在该文件夹下，避免覆盖原图
-    output_directory = "./processed_frames"  
+    output_directory = r"D:\[L1]SETU\nszyGallery\gif\Ds_Kick_3p"
 
     # 运行处理
     process_images(
