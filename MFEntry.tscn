@@ -25,9 +25,8 @@
 [ext_resource type="Texture2D" uid="uid://m288mxhdo1uj" path="res://Art/CsAtk2RWAtlas.png" id="14_c1nbd"]
 [ext_resource type="Texture2D" uid="uid://ccvaxdbd5lntw" path="res://Art/csCrouchAtlas.png" id="14_pypjs"]
 [ext_resource type="Texture2D" uid="uid://w7ko2375500q" path="res://Art/csCrouchIdleAtlas.png" id="17_e4xp5"]
-[ext_resource type="Texture2D" uid="uid://b00fvsvs1gk4c" path="res://Art/csFallAtlas.png" id="20_1qenb"]
 [ext_resource type="Texture2D" uid="uid://caijtwrbdvf53" path="res://Art/csLaunchAtlas.png" id="23_avf1r"]
-[ext_resource type="Texture2D" uid="uid://cqpegcgiqvhif" path="res://Art/csGroundAtlas.png" id="29_oc36o"]
+[ext_resource type="Texture2D" uid="uid://ds7bfxt7l1oqj" path="res://Art/csWakeUpAtlas.png" id="29_oc36o"]
 [ext_resource type="AudioStream" uid="uid://ciwvkt5pcw5y3" path="res://Art/BGM/BGM_InCombat.ogg" id="bgm_combat"]
 [ext_resource type="PackedScene" uid="uid://dy1yok0d038u2" path="res://Art/VFX/FX_Guard.tscn" id="fx_guard"]
 [ext_resource type="PackedScene" uid="uid://beatkdd3xell4" path="res://Art/VFX/FX_Hit.tscn" id="fx_hit"]
@@ -695,11 +694,11 @@ atlas = ExtResource("14_pypjs")
 region = Rect2(2048, 0, 512, 512)
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_jk1pc"]
-atlas = ExtResource("20_1qenb")
+atlas = ExtResource("29_oc36o")
 region = Rect2(0, 0, 512, 512)
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_tjtos"]
-atlas = ExtResource("20_1qenb")
+atlas = ExtResource("29_oc36o")
 region = Rect2(512, 0, 512, 512)
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_bgo5y"]
@@ -772,19 +771,19 @@ region = Rect2(2048, 0, 512, 512)
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_qf68l"]
 atlas = ExtResource("29_oc36o")
-region = Rect2(0, 0, 512, 512)
+region = Rect2(1024, 0, 512, 512)
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_alrng"]
 atlas = ExtResource("29_oc36o")
-region = Rect2(512, 0, 512, 512)
+region = Rect2(1536, 0, 512, 512)
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_1e352"]
 atlas = ExtResource("29_oc36o")
-region = Rect2(0, 512, 512, 512)
+region = Rect2(2048, 0, 512, 512)
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_vpexw"]
 atlas = ExtResource("29_oc36o")
-region = Rect2(512, 512, 512, 512)
+region = Rect2(0, 512, 512, 512)
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_qriqf"]
 atlas = ExtResource("23_avf1r")
@@ -797,6 +796,22 @@ region = Rect2(512, 0, 512, 512)
 [sub_resource type="AtlasTexture" id="AtlasTexture_gvvf7"]
 atlas = ExtResource("23_avf1r")
 region = Rect2(1024, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_tjia8"]
+atlas = ExtResource("29_oc36o")
+region = Rect2(512, 512, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_wp0v0"]
+atlas = ExtResource("29_oc36o")
+region = Rect2(1024, 512, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_f4u0r"]
+atlas = ExtResource("29_oc36o")
+region = Rect2(1536, 512, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_1cdj3"]
+atlas = ExtResource("29_oc36o")
+region = Rect2(2048, 512, 512, 512)
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_75jsd"]
 atlas = ExtResource("2_tu88n")
@@ -1098,6 +1113,23 @@ animations = [{
 "loop": false,
 "name": &"LAUNCH",
 "speed": 7.0
+}, {
+"frames": [{
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_tjia8")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_wp0v0")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_f4u0r")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_1cdj3")
+}],
+"loop": false,
+"name": &"WAKEUP",
+"speed": 8.0
 }, {
 "frames": [{
 "duration": 1.0,
@@ -1785,7 +1817,7 @@ ProjectileScene = ExtResource("proj_cs")
 [node name="仓鼠" type="AnimatedSprite2D" parent="Player1" unique_id=185176480]
 position = Vector2(0, -107)
 sprite_frames = SubResource("SpriteFrames_iruj8")
-animation = &"KNOCKDOWN"
+animation = &"WAKEUP"
 frame = 3
 frame_progress = 1.0
 flip_h = true
