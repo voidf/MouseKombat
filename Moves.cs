@@ -182,6 +182,18 @@ public static class MoveSets
             },
         };
         AppendCrouchAndAir(moves);
+        // ---- motion special: QCF + any punch -> fireball (抬手招, no melee hitbox; Active=0) ----
+        moves.Add(new MoveDef {
+            Id = "236P", AnimName = "AtkHadou", Button = AttackButton.LP, Stance = Stance.Stand,
+            Motion = MotionInput.Qcf, AnyPunch = true, CommandLabel = "↓↘→+P",
+            Startup = 12, Active = 0, Recovery = 24, Damage = 0, Guard = GuardHeight.High,
+            Hitbox = new Rect2(0, 0, 0, 0), // no melee judgement; the projectile carries offense
+            SpawnsProjectile = true, ProjectileSpawnFrame = 12,
+            Projectile = new ProjectileSpec {
+                Speed = 520f, Offset = new Vector2(95, -150),
+                Damage = 12, Guard = GuardHeight.High, MaxDistance = 900f,
+            },
+        });
         return new MoveSet(moves);
     }
 
@@ -229,6 +241,18 @@ public static class MoveSets
             },
         };
         AppendCrouchAndAir(moves);
+        // ---- motion special: QCF + any punch -> fireball (抬手招, no melee hitbox; Active=0) ----
+        moves.Add(new MoveDef {
+            Id = "236P", AnimName = "AtkHadou", Button = AttackButton.LP, Stance = Stance.Stand,
+            Motion = MotionInput.Qcf, AnyPunch = true, CommandLabel = "↓↘→+P",
+            Startup = 12, Active = 0, Recovery = 24, Damage = 0, Guard = GuardHeight.High,
+            Hitbox = new Rect2(0, 0, 0, 0), // no melee judgement; the projectile carries offense
+            SpawnsProjectile = true, ProjectileSpawnFrame = 12,
+            Projectile = new ProjectileSpec {
+                Speed = 520f, Offset = new Vector2(95, -50),
+                Damage = 12, Guard = GuardHeight.Low, MaxDistance = 900f,
+            },
+        });
         return new MoveSet(moves);
     }
 
@@ -301,18 +325,7 @@ public static class MoveSets
             Hitbox = new Rect2(20, -50, 160, 120),
         });
 
-        // ---- motion special: QCF + any punch -> fireball (抬手招, no melee hitbox; Active=0) ----
-        moves.Add(new MoveDef {
-            Id = "236P", AnimName = "AtkHadou", Button = AttackButton.LP, Stance = Stance.Stand,
-            Motion = MotionInput.Qcf, AnyPunch = true, CommandLabel = "↓↘→+P",
-            Startup = 12, Active = 0, Recovery = 24, Damage = 0, Guard = GuardHeight.High,
-            Hitbox = new Rect2(0, 0, 0, 0), // no melee judgement; the projectile carries offense
-            SpawnsProjectile = true, ProjectileSpawnFrame = 12,
-            Projectile = new ProjectileSpec {
-                Speed = 520f, Offset = new Vector2(95, -150),
-                Damage = 12, Guard = GuardHeight.High, MaxDistance = 900f,
-            },
-        });
+
     }
 }
 
