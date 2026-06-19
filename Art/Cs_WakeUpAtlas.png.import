@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://dn2ccqknrxnua"
-path="res://.godot/imported/csGroundAtlas.png-24d254aa8d6b12d26070a524d7478043.ctex"
+uid="uid://bult5v8uuuvvp"
+path="res://.godot/imported/Cs_WakeUpAtlas.png-1341a830651bd0322bb4618608babe46.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://Art/csGroundAtlas.png"
-dest_files=["res://.godot/imported/csGroundAtlas.png-24d254aa8d6b12d26070a524d7478043.ctex"]
+source_file="res://Art/Cs_WakeUpAtlas.png"
+dest_files=["res://.godot/imported/Cs_WakeUpAtlas.png-1341a830651bd0322bb4618608babe46.ctex"]
 
 [params]
 

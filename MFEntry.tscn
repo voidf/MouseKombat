@@ -28,7 +28,7 @@
 [ext_resource type="Texture2D" uid="uid://c2x2g2xpq2y7x" path="res://Art/csHadouAtlas.png" id="18_oc36o"]
 [ext_resource type="Texture2D" uid="uid://caijtwrbdvf53" path="res://Art/csLaunchAtlas.png" id="23_avf1r"]
 [ext_resource type="Texture2D" uid="uid://ds7bfxt7l1oqj" path="res://Art/csWakeUpAtlas.png" id="29_oc36o"]
-[ext_resource type="Texture2D" uid="uid://dn2ccqknrxnua" path="res://Art/csGroundAtlas.png" id="30_qnl1m"]
+[ext_resource type="Texture2D" uid="uid://bult5v8uuuvvp" path="res://Art/Cs_WakeUpAtlas.png" id="30_qnl1m"]
 [ext_resource type="AudioStream" uid="uid://ciwvkt5pcw5y3" path="res://Art/BGM/BGM_InCombat.ogg" id="bgm_combat"]
 [ext_resource type="PackedScene" uid="uid://dy1yok0d038u2" path="res://Art/VFX/FX_Guard.tscn" id="fx_guard"]
 [ext_resource type="PackedScene" uid="uid://beatkdd3xell4" path="res://Art/VFX/FX_Hit.tscn" id="fx_hit"]
@@ -843,6 +843,18 @@ region = Rect2(512, 0, 512, 512)
 atlas = ExtResource("23_avf1r")
 region = Rect2(1024, 0, 512, 512)
 
+[sub_resource type="AtlasTexture" id="AtlasTexture_prx81"]
+atlas = ExtResource("30_qnl1m")
+region = Rect2(0, 1024, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_e7g01"]
+atlas = ExtResource("30_qnl1m")
+region = Rect2(512, 1024, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_j6frv"]
+atlas = ExtResource("30_qnl1m")
+region = Rect2(1024, 1024, 512, 512)
+
 [sub_resource type="AtlasTexture" id="AtlasTexture_tjia8"]
 atlas = ExtResource("29_oc36o")
 region = Rect2(512, 512, 512, 512)
@@ -1205,6 +1217,20 @@ animations = [{
 }, {
 "frames": [{
 "duration": 1.0,
+"texture": SubResource("AtlasTexture_prx81")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_e7g01")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_j6frv")
+}],
+"loop": false,
+"name": &"WAKEUP",
+"speed": 8.0
+}, {
+"frames": [{
+"duration": 1.0,
 "texture": SubResource("AtlasTexture_tjia8")
 }, {
 "duration": 1.0,
@@ -1217,7 +1243,7 @@ animations = [{
 "texture": SubResource("AtlasTexture_1cdj3")
 }],
 "loop": false,
-"name": &"WAKEUP",
+"name": &"WAKEUPBAK",
 "speed": 8.0
 }, {
 "frames": [{
@@ -1892,9 +1918,7 @@ ProjectileScene = ExtResource("proj_ds")
 [node name="袋鼠" type="AnimatedSprite2D" parent="Player2" unique_id=344721729]
 position = Vector2(0, -167)
 sprite_frames = SubResource("SpriteFrames_jd2df")
-animation = &"AtkJ"
-frame = 3
-frame_progress = 1.0
+animation = &"CROUCH"
 
 [node name="Player1" type="Node2D" parent="." unique_id=280155618 node_paths=PackedStringArray("anim")]
 position = Vector2(120, 560)
@@ -1906,9 +1930,7 @@ ProjectileScene = ExtResource("proj_cs")
 [node name="仓鼠" type="AnimatedSprite2D" parent="Player1" unique_id=185176480]
 position = Vector2(0, -107)
 sprite_frames = SubResource("SpriteFrames_iruj8")
-animation = &"KNOCKDOWN"
-frame = 5
-frame_progress = 1.0
+animation = &"LAUNCH"
 flip_h = true
 
 [node name="P2WinAnim" type="AnimatedSprite2D" parent="." unique_id=374502234]
