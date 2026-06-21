@@ -206,37 +206,37 @@ region = Rect2(0, 512, 512, 512)
 atlas = ExtResource("5_mklpb")
 region = Rect2(512, 512, 512, 512)
 
-[sub_resource type="AtlasTexture" id="AtlasTexture_aaxfx"]
+[sub_resource type="AtlasTexture" id="AtlasTexture_7bci8"]
 atlas = ExtResource("3_0q8lf")
 region = Rect2(0, 0, 512, 512)
 
-[sub_resource type="AtlasTexture" id="AtlasTexture_avf1r"]
+[sub_resource type="AtlasTexture" id="AtlasTexture_m320m"]
 atlas = ExtResource("3_0q8lf")
 region = Rect2(512, 0, 512, 512)
 
-[sub_resource type="AtlasTexture" id="AtlasTexture_1qenb"]
+[sub_resource type="AtlasTexture" id="AtlasTexture_3wq0g"]
 atlas = ExtResource("3_0q8lf")
 region = Rect2(1024, 0, 512, 512)
 
-[sub_resource type="AtlasTexture" id="AtlasTexture_kdngc"]
+[sub_resource type="AtlasTexture" id="AtlasTexture_12sw5"]
 atlas = ExtResource("3_0q8lf")
 region = Rect2(1536, 0, 512, 512)
 
-[sub_resource type="AtlasTexture" id="AtlasTexture_erxer"]
+[sub_resource type="AtlasTexture" id="AtlasTexture_axgr6"]
 atlas = ExtResource("3_0q8lf")
-region = Rect2(0, 512, 512, 512)
+region = Rect2(2048, 0, 512, 512)
 
-[sub_resource type="AtlasTexture" id="AtlasTexture_olpok"]
+[sub_resource type="AtlasTexture" id="AtlasTexture_00xnf"]
 atlas = ExtResource("3_0q8lf")
-region = Rect2(512, 512, 512, 512)
+region = Rect2(1536, 0, 512, 512)
 
-[sub_resource type="AtlasTexture" id="AtlasTexture_y2ekq"]
+[sub_resource type="AtlasTexture" id="AtlasTexture_aks1m"]
 atlas = ExtResource("3_0q8lf")
-region = Rect2(1024, 512, 512, 512)
+region = Rect2(1024, 0, 512, 512)
 
-[sub_resource type="AtlasTexture" id="AtlasTexture_gixib"]
+[sub_resource type="AtlasTexture" id="AtlasTexture_cj4k3"]
 atlas = ExtResource("3_0q8lf")
-region = Rect2(1536, 512, 512, 512)
+region = Rect2(512, 0, 512, 512)
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_guner"]
 atlas = ExtResource("8_lv44l")
@@ -461,28 +461,28 @@ animations = [{
 }, {
 "frames": [{
 "duration": 1.0,
-"texture": SubResource("AtlasTexture_aaxfx")
+"texture": SubResource("AtlasTexture_7bci8")
 }, {
 "duration": 1.0,
-"texture": SubResource("AtlasTexture_avf1r")
+"texture": SubResource("AtlasTexture_m320m")
 }, {
 "duration": 1.0,
-"texture": SubResource("AtlasTexture_1qenb")
+"texture": SubResource("AtlasTexture_3wq0g")
 }, {
 "duration": 1.0,
-"texture": SubResource("AtlasTexture_kdngc")
+"texture": SubResource("AtlasTexture_12sw5")
 }, {
 "duration": 1.0,
-"texture": SubResource("AtlasTexture_erxer")
+"texture": SubResource("AtlasTexture_axgr6")
 }, {
 "duration": 1.0,
-"texture": SubResource("AtlasTexture_olpok")
+"texture": SubResource("AtlasTexture_00xnf")
 }, {
 "duration": 1.0,
-"texture": SubResource("AtlasTexture_y2ekq")
+"texture": SubResource("AtlasTexture_aks1m")
 }, {
 "duration": 1.0,
-"texture": SubResource("AtlasTexture_gixib")
+"texture": SubResource("AtlasTexture_cj4k3")
 }],
 "loop": true,
 "name": &"IDLE",
@@ -1918,7 +1918,9 @@ ProjectileScene = ExtResource("proj_ds")
 [node name="袋鼠" type="AnimatedSprite2D" parent="Player2" unique_id=344721729]
 position = Vector2(0, -167)
 sprite_frames = SubResource("SpriteFrames_jd2df")
-animation = &"CROUCH"
+animation = &"IDLE"
+frame = 1
+frame_progress = 0.59054327
 
 [node name="Player1" type="Node2D" parent="." unique_id=280155618 node_paths=PackedStringArray("anim")]
 position = Vector2(120, 560)
