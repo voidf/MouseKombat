@@ -1926,6 +1926,7 @@ frame_progress = 0.59054327
 position = Vector2(120, 560)
 script = ExtResource("1_tu88n")
 anim = NodePath("仓鼠")
+ReverseWalkBackward = true
 CrouchEnterFrames = 3
 ProjectileScene = ExtResource("proj_cs")
 

@@ -12,6 +12,8 @@ public partial class Player : Node2D
 
     [Export] public string IdleAnimName = "IDLE";
     [Export] public string WalkAnimName = "WALK";
+    // when on, walking backward (away from the opponent) plays WALK in reverse; off = always forward.
+    [Export] public bool ReverseWalkBackward = false;
     [Export] public string HurtAnimName = "HURT";
     [Export] public string DefAnimName = "DEF";
     [Export] public string JumpAnimName = "JUMP";
@@ -109,6 +111,7 @@ public partial class Player : Node2D
     private int _curCancelFrom, _curCancelTo;
     private Rect2 _curHitbox;
     private string _curAtkAnim = "";
+    private bool _walkPlayingBack = false; // tracks WALK reverse playback so we don't retrigger each frame
     private GuardHeight _curGuard = GuardHeight.High;
 
     private float _vy = 0f;
@@ -731,7 +734,17 @@ public partial class Player : Node2D
             bool atkTailPlaying = anim.IsPlaying() && anim.Animation == _curAtkAnim && !string.IsNullOrEmpty(_curAtkAnim);
             if (!atkTailPlaying && anim.Animation != IdleAnimName) PlayAnimSafe(IdleAnimName);
         }
-        else if (State == PlayerState.Walk && anim.Animation != WalkAnimName) PlayAnimSafe(WalkAnimName);
+        else if (State == PlayerState.Walk)
+        {
+            // backward = moving away from the opponent (same test as block input).
+            bool back = ReverseWalkBackward && IsDefendingInput;
+            if (anim.Animation != WalkAnimName || _walkPlayingBack != back)
+            {
+                if (back) PlayAnimBackwardsSafe(WalkAnimName);
+                else PlayAnimSafe(WalkAnimName);
+                _walkPlayingBack = back;
+            }
+        }
         else if (State == PlayerState.Crouch)
         {
             // ENTER_CROUCH transition plays once, then settle on the held CROUCH pose.
