@@ -440,7 +440,7 @@ animations = [{
 }],
 "loop": false,
 "name": &"ENTER_CROUCH",
-"speed": 120.0
+"speed": 60.0
 }, {
 "frames": [{
 "duration": 1.0,
@@ -1082,7 +1082,7 @@ animations = [{
 }],
 "loop": false,
 "name": &"ENTER_CROUCH",
-"speed": 120.0
+"speed": 60.0
 }, {
 "frames": [{
 "duration": 1.0,
@@ -1918,9 +1918,7 @@ ProjectileScene = ExtResource("proj_ds")
 [node name="袋鼠" type="AnimatedSprite2D" parent="Player2" unique_id=344721729]
 position = Vector2(0, -167)
 sprite_frames = SubResource("SpriteFrames_jd2df")
-animation = &"IDLE"
-frame = 1
-frame_progress = 0.59054327
+animation = &"AtkJ"
 
 [node name="Player1" type="Node2D" parent="." unique_id=280155618 node_paths=PackedStringArray("anim")]
 position = Vector2(120, 560)
@@ -1933,7 +1931,7 @@ ProjectileScene = ExtResource("proj_cs")
 [node name="仓鼠" type="AnimatedSprite2D" parent="Player1" unique_id=185176480]
 position = Vector2(0, -107)
 sprite_frames = SubResource("SpriteFrames_iruj8")
-animation = &"LAUNCH"
+animation = &"ENTER_CROUCH"
 flip_h = true
 
 [node name="P2WinAnim" type="AnimatedSprite2D" parent="." unique_id=374502234]
