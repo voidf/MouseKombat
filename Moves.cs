@@ -58,6 +58,11 @@ public sealed class MoveDef
 
     public bool IsLight => Button == AttackButton.LP || Button == AttackButton.LK;
 
+    // Simultaneous-press trigger (e.g. throw = LP+LK). Non-null => matched by ResolveThrow
+    // before specials/normals; the two buttons must land within a frame gap (SF6 ~2 frames).
+    public AttackButton[] ComboButtons = null;
+    public bool Unblockable = false; // throws ignore guard
+
     // Motion special: if Motion != None this move is matched by (motion + a punch) before normals.
     // AnyPunch = any of LP/MP/HP triggers it (the classic "236+P").
     public MotionInput Motion = MotionInput.None;
@@ -89,6 +94,7 @@ public sealed class MoveSet
     private readonly Dictionary<int, MoveDef> _byCommand = new();
     private readonly Dictionary<string, MoveDef> _byId = new();
     private readonly List<MoveDef> _specials = new(); // motion moves, checked before normals
+    private readonly List<MoveDef> _combos = new();   // simultaneous-press moves (throws), checked first
 
     private static int Key(Stance s, AttackButton b) => (int)s * 6 + (int)b;
 
@@ -97,7 +103,8 @@ public sealed class MoveSet
         foreach (var m in moves)
         {
             _byId[m.Id] = m;
-            if (m.Motion != MotionInput.None) _specials.Add(m);
+            if (m.ComboButtons != null) _combos.Add(m);
+            else if (m.Motion != MotionInput.None) _specials.Add(m);
             else _byCommand[Key(m.Stance, m.Button)] = m;
         }
     }
@@ -122,8 +129,20 @@ public sealed class MoveSet
         return null;
     }
 
-    public MoveDef ById(string id) => id != null && _byId.TryGetValue(id, out var m) ? m : null;
-}
+    // resolve a throw (simultaneous button pair) given the input history; consumes the pair on match.
+    // gap = max frames the two presses may straddle (SF6-style ~2). null if none match.
+    public MoveDef ResolveThrow(InputBuffer buffer, int window, int gap)
+    {
+        foreach (var c in _combos)
+        {
+            if (c.ComboButtons.Length >= 2 &&
+                buffer.TryConsumeButtonPair(c.ComboButtons[0], c.ComboButtons[1], window, gap))
+                return c;
+        }
+        return null;
+    }
+
+    public MoveDef ById(string id) => id != null && _byId.TryGetValue(id, out var m) ? m : null;}
 
 // Factory for character move tables. Edit here — readable top to bottom, no Inspector hunting.
 public static class MoveSets
@@ -325,7 +344,13 @@ public static class MoveSets
             Hitbox = new Rect2(20, -50, 160, 120),
         });
 
-
+        // ---- throw: LP+LK within ~2 frames (SF6 classic). Unblockable, short range, stand stance. ----
+        moves.Add(new MoveDef {
+            Id = "THROW", AnimName = "AtkThrow", Button = AttackButton.LP, Stance = Stance.Stand,
+            ComboButtons = new[] { AttackButton.LP, AttackButton.LK }, Unblockable = true,
+            Startup = 5, Active = 2, Recovery = 20, Damage = 18, Guard = GuardHeight.High,
+            Hitbox = new Rect2(20, -170, 95, 150), // close-range grab box
+        });
     }
 }
 
@@ -334,8 +359,7 @@ public sealed class InputBuffer
 {
     private struct Slot
     {
-        public bool HasBtn;
-        public AttackButton Btn;
+        public int Mask;       // bit i set = AttackButton i just-pressed this frame
         public bool Consumed;
         public int Num; // facing-relative numpad direction 1-9 (5 = neutral)
     }
@@ -346,41 +370,78 @@ public sealed class InputBuffer
 
     public InputBuffer(int size = 16) { _slots = new Slot[size]; }
 
-    // num: facing-relative numpad (1-9). btn: a just-pressed attack button this frame, or null.
-    public void Push(AttackButton? btn, int num)
+    private static int Bit(AttackButton b) => 1 << (int)b;
+
+    // num: facing-relative numpad (1-9). mask: bitset of attack buttons just-pressed this frame.
+    public void Push(int mask, int num)
     {
         _head = (_head + 1) % _slots.Length;
         _slots[_head] = new Slot
         {
-            HasBtn = btn.HasValue,
-            Btn = btn ?? default,
+            Mask = mask,
             Consumed = false,
             Num = num,
         };
         if (_count < _slots.Length) _count++;
     }
 
-    // most recent unconsumed button press within the last `window` frames; null if none
+    // most recent unconsumed button press within the last `window` frames; null if none.
+    // When a frame holds several buttons, the lowest (enum order) wins — same priority as before.
     public AttackButton? PeekButton(int window)
     {
         int n = Mathf.Min(window, _count);
         for (int i = 0; i < n; i++)
         {
             int idx = (_head - i + _slots.Length) % _slots.Length;
-            if (_slots[idx].HasBtn && !_slots[idx].Consumed) return _slots[idx].Btn;
+            if (!_slots[idx].Consumed && _slots[idx].Mask != 0)
+            {
+                for (int b = 0; b < 6; b++)
+                    if ((_slots[idx].Mask & (1 << b)) != 0) return (AttackButton)b;
+            }
         }
         return null;
     }
 
-    // mark the button returned by the matching PeekButton as used
+    // mark the slot returned by the matching PeekButton as used
     public void ConsumeButton(int window)
     {
         int n = Mathf.Min(window, _count);
         for (int i = 0; i < n; i++)
         {
             int idx = (_head - i + _slots.Length) % _slots.Length;
-            if (_slots[idx].HasBtn && !_slots[idx].Consumed) { _slots[idx].Consumed = true; return; }
+            if (!_slots[idx].Consumed && _slots[idx].Mask != 0) { _slots[idx].Consumed = true; return; }
         }
+    }
+
+    // frames-ago index (0 = newest) of the newest unconsumed slot holding button `b`; -1 none.
+    private int FindButtonSlot(AttackButton b, int window)
+    {
+        int n = Mathf.Min(window, _count);
+        for (int i = 0; i < n; i++)
+        {
+            int idx = (_head - i + _slots.Length) % _slots.Length;
+            if (!_slots[idx].Consumed && (_slots[idx].Mask & Bit(b)) != 0) return i;
+        }
+        return -1;
+    }
+
+    private void MarkConsumedAt(int framesAgo)
+    {
+        int idx = (_head - framesAgo + _slots.Length) % _slots.Length;
+        _slots[idx].Consumed = true;
+    }
+
+    // throw input: both buttons present (unconsumed) within `gap` frames of each other,
+    // scanning the last `window` frames. Same-frame (gamepad macro) => gap 0. Consumes both on match.
+    public bool TryConsumeButtonPair(AttackButton a, AttackButton b, int window, int gap)
+    {
+        int ia = FindButtonSlot(a, window);
+        int ib = FindButtonSlot(b, window);
+        if (ia < 0 || ib < 0) return false;
+        if (Mathf.Abs(ia - ib) > gap) return false;
+        MarkConsumedAt(ia);
+        MarkConsumedAt(ib);
+        return true;
     }
 
     // facing-relative motion match within the last `window` frames.

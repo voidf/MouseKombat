@@ -90,6 +90,7 @@ public partial class Player : Node2D
 
     private const int BufferWindow = 8;  // frames of input leniency / cancel buffering
     private const int MotionWindow = 16; // frames a motion (236/214) may span
+    private const int ThrowGap = 2;      // max frames between the two throw buttons (SF6 ~2)
 
     [Export] public PackedScene ProjectileScene; // fireball scene spawned by motion specials
 
@@ -167,7 +168,7 @@ public partial class Player : Node2D
         if (State == PlayerState.Dead)
         {
             InLeft = InRight = InUpHeld = InDownHeld = false;
-            _buffer.Push(null, 5);
+            _buffer.Push(0, 5);
             return;
         }
 
@@ -178,9 +179,10 @@ public partial class Player : Node2D
             InRight = Source.Right;
             InUpHeld = Source.Up;
             InDownHeld = Source.Down;
-            // first just-pressed button this frame (priority = AttackButton order)
-            AttackButton? srcBtn = Source.JustPressedButtons.Count > 0 ? Source.JustPressedButtons[0] : (AttackButton?)null;
-            _buffer.Push(srcBtn, RelativeNumpad());
+            // full set of buttons just-pressed this frame (so LP+LK throws are detectable)
+            int mask = 0;
+            foreach (var b in Source.JustPressedButtons) mask |= 1 << (int)b;
+            _buffer.Push(mask, RelativeNumpad());
             return;
         }
 
@@ -189,8 +191,7 @@ public partial class Player : Node2D
         InUpHeld = Input.IsActionPressed(ActionUp);
         InDownHeld = Input.IsActionPressed(ActionDown);
 
-        AttackButton? btn = ReadPressedButton();
-        _buffer.Push(btn, RelativeNumpad());
+        _buffer.Push(ReadPressedMask(), RelativeNumpad());
     }
 
     // facing-relative numpad (1-9): forward = toward FacingRight, 5 = neutral
@@ -204,15 +205,17 @@ public partial class Player : Node2D
         return rowBase + (rel + 1);
     }
 
-    private AttackButton? ReadPressedButton()
+    // InputMap fallback: bitset of the 6 attack buttons just-pressed this frame (LP+LK throws detectable)
+    private int ReadPressedMask()
     {
-        if (Input.IsActionJustPressed(InputPrefix + "_lp")) return AttackButton.LP;
-        if (Input.IsActionJustPressed(InputPrefix + "_mp")) return AttackButton.MP;
-        if (Input.IsActionJustPressed(InputPrefix + "_hp")) return AttackButton.HP;
-        if (Input.IsActionJustPressed(InputPrefix + "_lk")) return AttackButton.LK;
-        if (Input.IsActionJustPressed(InputPrefix + "_mk")) return AttackButton.MK;
-        if (Input.IsActionJustPressed(InputPrefix + "_hk")) return AttackButton.HK;
-        return null;
+        int m = 0;
+        if (Input.IsActionJustPressed(InputPrefix + "_lp")) m |= 1 << (int)AttackButton.LP;
+        if (Input.IsActionJustPressed(InputPrefix + "_mp")) m |= 1 << (int)AttackButton.MP;
+        if (Input.IsActionJustPressed(InputPrefix + "_hp")) m |= 1 << (int)AttackButton.HP;
+        if (Input.IsActionJustPressed(InputPrefix + "_lk")) m |= 1 << (int)AttackButton.LK;
+        if (Input.IsActionJustPressed(InputPrefix + "_mk")) m |= 1 << (int)AttackButton.MK;
+        if (Input.IsActionJustPressed(InputPrefix + "_hk")) m |= 1 << (int)AttackButton.HK;
+        return m;
     }
 
     private Stance CurStance() => IsAirborne ? Stance.Air : (State == PlayerState.Crouch ? Stance.Crouch : Stance.Stand);
@@ -410,6 +413,10 @@ public partial class Player : Node2D
         if (State == PlayerState.Idle || State == PlayerState.Walk
             || State == PlayerState.CrouchExit || State == PlayerState.Crouch)
         {
+            // throw (LP+LK within ThrowGap) has top priority; consumes the pair itself.
+            var th = _moves.ResolveThrow(_buffer, BufferWindow, ThrowGap);
+            if (th != null) { StartMove(th); return; }
+
             var b = _buffer.PeekButton(BufferWindow);
             if (b.HasValue)
             {
@@ -665,6 +672,7 @@ public partial class Player : Node2D
             GuardHeight.Mid => standBlock,
             _ => crouchBlock,
         };
+        if (move.Unblockable) blocked = false; // throws ignore guard
 
         int finalDamage = blocked ? Mathf.Max(1, Mathf.RoundToInt(move.Damage * DefDamageMultiplier)) : move.Damage;
         Hp = Mathf.Max(0, Hp - finalDamage);
