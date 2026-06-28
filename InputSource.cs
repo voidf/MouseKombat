@@ -98,7 +98,7 @@ public sealed class KeyboardSource : InputSourceBase
     public static KeyboardSource RightSeat() => new KeyboardSource(
         "kbR",
         left: (int)Key.Left, right: (int)Key.Right, up: (int)Key.Up, down: (int)Key.Down,
-        btn: new[] { (int)Key.Kp1, (int)Key.Kp2, (int)Key.Kp3, (int)Key.Kp4, (int)Key.Kp5, (int)Key.Kp6 },
+        btn: new[] { (int)Key.Kp4, (int)Key.Kp5, (int)Key.Kp6, (int)Key.Kp1, (int)Key.Kp2, (int)Key.Kp3 },
         confirm: (int)Key.Kp1, cancel: (int)Key.Kp2, cancelLabel: "小键盘2");
 
     public override void Poll()
