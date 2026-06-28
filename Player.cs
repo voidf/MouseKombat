@@ -10,6 +10,10 @@ public partial class Player : Node2D
     [Export] public string ActionDown = "p1_down";
     [Export] public string InputPrefix = "p1"; // 6 attack buttons resolve to {prefix}_lp.._hk
 
+    // Device binding injected by GameManager from the ready screen. When null (e.g. MFEntry
+    // opened directly in the editor) input falls back to the InputMap actions above.
+    public IInputSource Source;
+
     [Export] public string IdleAnimName = "IDLE";
     [Export] public string WalkAnimName = "WALK";
     // when on, walking backward (away from the opponent) plays WALK in reverse; off = always forward.
@@ -166,6 +170,20 @@ public partial class Player : Node2D
             _buffer.Push(null, 5);
             return;
         }
+
+        if (Source != null)
+        {
+            Source.Poll();
+            InLeft = Source.Left;
+            InRight = Source.Right;
+            InUpHeld = Source.Up;
+            InDownHeld = Source.Down;
+            // first just-pressed button this frame (priority = AttackButton order)
+            AttackButton? srcBtn = Source.JustPressedButtons.Count > 0 ? Source.JustPressedButtons[0] : (AttackButton?)null;
+            _buffer.Push(srcBtn, RelativeNumpad());
+            return;
+        }
+
         InLeft = Input.IsActionPressed(ActionLeft);
         InRight = Input.IsActionPressed(ActionRight);
         InUpHeld = Input.IsActionPressed(ActionUp);

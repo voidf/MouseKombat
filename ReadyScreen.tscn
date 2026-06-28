@@ -1,0 +1,164 @@
+[gd_scene load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://ReadyScreen.cs" id="1_rs"]
+[ext_resource type="Texture2D" uid="uid://dju23nkdy2mj5" path="res://Art/csIdleAtlas.png" id="2_cs"]
+[ext_resource type="Texture2D" uid="uid://c6384cvmwe3ui" path="res://Art/dsIdleAtlas.png" id="3_ds"]
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_cs"]
+atlas = ExtResource("2_cs")
+region = Rect2(0, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_ds"]
+atlas = ExtResource("3_ds")
+region = Rect2(0, 0, 512, 512)
+
+[node name="ReadyScreen" type="Control" node_paths=PackedStringArray("P1Portrait", "P2Portrait", "P1Status", "P2Status", "P1Prompt", "P2Prompt", "P1CancelHint", "P2CancelHint", "StartLabel")]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("1_rs")
+P1Portrait = NodePath("P1Portrait")
+P2Portrait = NodePath("P2Portrait")
+P1Status = NodePath("P1Status")
+P2Status = NodePath("P2Status")
+P1Prompt = NodePath("P1Prompt")
+P2Prompt = NodePath("P2Prompt")
+P1CancelHint = NodePath("P1CancelHint")
+P2CancelHint = NodePath("P2CancelHint")
+StartLabel = NodePath("StartLabel")
+
+[node name="BG" type="ColorRect" parent="."]
+layout_mode = 0
+offset_right = 800.0
+offset_bottom = 600.0
+color = Color(0.08, 0.09, 0.12, 1)
+
+[node name="Title" type="Label" parent="."]
+layout_mode = 0
+offset_left = 0.0
+offset_top = 36.0
+offset_right = 800.0
+offset_bottom = 84.0
+theme_override_font_sizes/font_size = 34
+text = "选择机位 / READY"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="P1Label" type="Label" parent="."]
+layout_mode = 0
+offset_left = 100.0
+offset_top = 104.0
+offset_right = 356.0
+offset_bottom = 136.0
+theme_override_font_sizes/font_size = 24
+text = "P1 · 仓鼠"
+horizontal_alignment = 1
+
+[node name="P1Portrait" type="TextureRect" parent="."]
+layout_mode = 0
+offset_left = 100.0
+offset_top = 140.0
+offset_right = 356.0
+offset_bottom = 396.0
+modulate = Color(0.45, 0.45, 0.45, 1)
+texture = SubResource("AtlasTexture_cs")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="P1Status" type="Label" parent="."]
+layout_mode = 0
+offset_left = 100.0
+offset_top = 404.0
+offset_right = 356.0
+offset_bottom = 436.0
+theme_override_colors/font_color = Color(0.3, 1, 0.45, 1)
+theme_override_font_sizes/font_size = 26
+text = "准备中"
+horizontal_alignment = 1
+
+[node name="P1Prompt" type="Label" parent="."]
+layout_mode = 0
+offset_left = 60.0
+offset_top = 444.0
+offset_right = 396.0
+offset_bottom = 476.0
+theme_override_font_sizes/font_size = 16
+text = "按手柄A / 键盘J / 数字键1 锁定该角色"
+horizontal_alignment = 1
+
+[node name="P1CancelHint" type="Label" parent="."]
+layout_mode = 0
+offset_left = 60.0
+offset_top = 444.0
+offset_right = 396.0
+offset_bottom = 476.0
+theme_override_colors/font_color = Color(0.8, 0.8, 0.85, 1)
+theme_override_font_sizes/font_size = 16
+text = "按 K 取消准备"
+horizontal_alignment = 1
+
+[node name="P2Label" type="Label" parent="."]
+layout_mode = 0
+offset_left = 444.0
+offset_top = 104.0
+offset_right = 700.0
+offset_bottom = 136.0
+theme_override_font_sizes/font_size = 24
+text = "P2 · 袋鼠"
+horizontal_alignment = 1
+
+[node name="P2Portrait" type="TextureRect" parent="."]
+layout_mode = 0
+offset_left = 444.0
+offset_top = 140.0
+offset_right = 700.0
+offset_bottom = 396.0
+modulate = Color(0.45, 0.45, 0.45, 1)
+texture = SubResource("AtlasTexture_ds")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="P2Status" type="Label" parent="."]
+layout_mode = 0
+offset_left = 444.0
+offset_top = 404.0
+offset_right = 700.0
+offset_bottom = 436.0
+theme_override_colors/font_color = Color(0.3, 1, 0.45, 1)
+theme_override_font_sizes/font_size = 26
+text = "准备中"
+horizontal_alignment = 1
+
+[node name="P2Prompt" type="Label" parent="."]
+layout_mode = 0
+offset_left = 404.0
+offset_top = 444.0
+offset_right = 740.0
+offset_bottom = 476.0
+theme_override_font_sizes/font_size = 16
+text = "按手柄A / 键盘J / 数字键1 锁定该角色"
+horizontal_alignment = 1
+
+[node name="P2CancelHint" type="Label" parent="."]
+layout_mode = 0
+offset_left = 404.0
+offset_top = 444.0
+offset_right = 740.0
+offset_bottom = 476.0
+theme_override_colors/font_color = Color(0.8, 0.8, 0.85, 1)
+theme_override_font_sizes/font_size = 16
+text = "按 B 取消准备"
+horizontal_alignment = 1
+
+[node name="StartLabel" type="Label" parent="."]
+layout_mode = 0
+offset_left = 0.0
+offset_top = 528.0
+offset_right = 800.0
+offset_bottom = 572.0
+theme_override_colors/font_color = Color(1, 0.9, 0.3, 1)
+theme_override_font_sizes/font_size = 30
+text = "按确认键开始游戏"
+horizontal_alignment = 1
+vertical_alignment = 1

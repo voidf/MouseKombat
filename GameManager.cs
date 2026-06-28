@@ -47,6 +47,13 @@ public partial class GameManager : Node2D
         LoadAndApplyConfig();
         StartBgm();
 
+        // device bindings chosen in the ready screen; null Source => InputMap fallback
+        if (GameSession.Configured)
+        {
+            if (p1 != null) p1.Source = GameSession.P1;
+            if (p2 != null) p2.Source = GameSession.P2;
+        }
+
         if (p1WinAnim != null)
         {
             p1WinAnim.Visible = false;
