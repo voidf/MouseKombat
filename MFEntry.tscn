@@ -26,6 +26,7 @@
 [ext_resource type="Texture2D" uid="uid://m288mxhdo1uj" path="res://Art/CsAtk2RWAtlas.png" id="14_c1nbd"]
 [ext_resource type="Texture2D" uid="uid://ccvaxdbd5lntw" path="res://Art/csCrouchAtlas.png" id="14_pypjs"]
 [ext_resource type="Texture2D" uid="uid://w7ko2375500q" path="res://Art/csCrouchIdleAtlas.png" id="17_e4xp5"]
+[ext_resource type="Texture2D" uid="uid://d00wea7rjju1x" path="res://Art/dsLaunchedAtlas.png" id="17_if60x"]
 [ext_resource type="Texture2D" uid="uid://c2x2g2xpq2y7x" path="res://Art/csHadouAtlas.png" id="18_oc36o"]
 [ext_resource type="Texture2D" uid="uid://caijtwrbdvf53" path="res://Art/csLaunchAtlas.png" id="23_avf1r"]
 [ext_resource type="Texture2D" uid="uid://ds7bfxt7l1oqj" path="res://Art/csWakeUpAtlas.png" id="29_oc36o"]
@@ -278,6 +279,18 @@ region = Rect2(1536, 0, 512, 512)
 [sub_resource type="AtlasTexture" id="AtlasTexture_jh7mc"]
 atlas = ExtResource("8_lv44l")
 region = Rect2(2048, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_ty43y"]
+atlas = ExtResource("17_if60x")
+region = Rect2(0, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_brqyf"]
+atlas = ExtResource("17_if60x")
+region = Rect2(512, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_wxrjr"]
+atlas = ExtResource("17_if60x")
+region = Rect2(1024, 0, 512, 512)
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_jd2df"]
 atlas = ExtResource("3_48u4o")
@@ -548,6 +561,20 @@ animations = [{
 "loop": false,
 "name": &"JUMP",
 "speed": 10.0
+}, {
+"frames": [{
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_ty43y")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_brqyf")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_wxrjr")
+}],
+"loop": false,
+"name": &"LAUNCH",
+"speed": 7.0
 }, {
 "frames": [{
 "duration": 1.0,
@@ -1959,7 +1986,7 @@ ProjectileScene = ExtResource("proj_ds")
 [node name="袋鼠" type="AnimatedSprite2D" parent="Player2" unique_id=344721729]
 position = Vector2(0, -167)
 sprite_frames = SubResource("SpriteFrames_jd2df")
-animation = &"AtkHadou"
+animation = &"LAUNCH"
 
 [node name="Player1" type="Node2D" parent="." unique_id=280155618 node_paths=PackedStringArray("anim")]
 position = Vector2(120, 560)
@@ -1972,7 +1999,7 @@ ProjectileScene = ExtResource("proj_cs")
 [node name="仓鼠" type="AnimatedSprite2D" parent="Player1" unique_id=185176480]
 position = Vector2(0, -107)
 sprite_frames = SubResource("SpriteFrames_iruj8")
-animation = &"AtkHadou"
+animation = &"LAUNCH"
 flip_h = true
 
 [node name="P2WinAnim" type="AnimatedSprite2D" parent="." unique_id=374502234]
