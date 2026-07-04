@@ -209,7 +209,7 @@ public static class MoveSets
             Hitbox = new Rect2(0, 0, 0, 0), // no melee judgement; the projectile carries offense
             SpawnsProjectile = true, ProjectileSpawnFrame = 12,
             Projectile = new ProjectileSpec {
-                Speed = 520f, Offset = new Vector2(95, -150),
+                Speed = 520f, Offset = new Vector2(95, -130),
                 Damage = 12, Guard = GuardHeight.High, MaxDistance = 900f,
             },
         });

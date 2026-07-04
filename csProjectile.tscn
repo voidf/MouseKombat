@@ -28,7 +28,7 @@ animations = [{
 [node name="CsProjectile" type="Node2D" unique_id=1040458690 node_paths=PackedStringArray("anim")]
 script = ExtResource("proj_script")
 anim = NodePath("AnimatedSprite2D")
-Hitbox = Rect2(-84.5, -54.5, 169, 109)
+Hitbox = Rect2(-55, -40, 110, 80)
 
 [node name="AnimatedSprite2D" type="AnimatedSprite2D" parent="." unique_id=1673249657]
 sprite_frames = SubResource("SpriteFrames_vkqvy")
