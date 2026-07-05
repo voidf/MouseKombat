@@ -24,6 +24,7 @@
 [ext_resource type="Texture2D" uid="uid://dy046e3ahu0wm" path="res://Art/csAtk2Atlas.png" id="12_1dni5"]
 [ext_resource type="Texture2D" uid="uid://d3i0o1b50iiy4" path="res://Art/csAtk1RWAtlas.png" id="12_75jsd"]
 [ext_resource type="Texture2D" uid="uid://dpxgbdmft2j3h" path="res://Art/csJumpAtlas.png" id="13_3pm86"]
+[ext_resource type="Texture2D" uid="uid://b07epewjl4nle" path="res://Art/dsCrouchDefAtlas.png" id="13_iqq4e"]
 [ext_resource type="Texture2D" uid="uid://m288mxhdo1uj" path="res://Art/CsAtk2RWAtlas.png" id="14_c1nbd"]
 [ext_resource type="Texture2D" uid="uid://ccvaxdbd5lntw" path="res://Art/csCrouchAtlas.png" id="14_pypjs"]
 [ext_resource type="Texture2D" uid="uid://w7ko2375500q" path="res://Art/csCrouchIdleAtlas.png" id="17_e4xp5"]
@@ -195,6 +196,14 @@ region = Rect2(0, 512, 512, 512)
 [sub_resource type="AtlasTexture" id="AtlasTexture_n2i2w"]
 atlas = ExtResource("6_8trbx")
 region = Rect2(512, 512, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_xbty3"]
+atlas = ExtResource("13_iqq4e")
+region = Rect2(0, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_62a2w"]
+atlas = ExtResource("13_iqq4e")
+region = Rect2(512, 0, 512, 512)
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_idh50"]
 atlas = ExtResource("5_o1vs4")
@@ -538,6 +547,17 @@ animations = [{
 }],
 "loop": true,
 "name": &"CROUCH",
+"speed": 10.0
+}, {
+"frames": [{
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_xbty3")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_62a2w")
+}],
+"loop": false,
+"name": &"CROUCHDEF",
 "speed": 10.0
 }, {
 "frames": [{
@@ -2396,7 +2416,7 @@ ProjectileScene = ExtResource("proj_ds")
 [node name="袋鼠" type="AnimatedSprite2D" parent="Player2" unique_id=344721729]
 position = Vector2(0, -167)
 sprite_frames = SubResource("SpriteFrames_jd2df")
-animation = &"AirAtkL"
+animation = &"CROUCHDEF"
 
 [node name="Player1" type="Node2D" parent="." unique_id=280155618 node_paths=PackedStringArray("anim")]
 position = Vector2(120, 560)
@@ -2409,7 +2429,7 @@ ProjectileScene = ExtResource("proj_cs")
 [node name="仓鼠" type="AnimatedSprite2D" parent="Player1" unique_id=185176480]
 position = Vector2(0, -107)
 sprite_frames = SubResource("SpriteFrames_iruj8")
-animation = &"AirAtkL"
+animation = &"CROUCHDEF"
 flip_h = true
 
 [node name="P2WinAnim" type="AnimatedSprite2D" parent="." unique_id=374502234]
