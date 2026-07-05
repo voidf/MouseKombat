@@ -28,7 +28,9 @@
 [ext_resource type="Texture2D" uid="uid://w7ko2375500q" path="res://Art/csCrouchIdleAtlas.png" id="17_e4xp5"]
 [ext_resource type="Texture2D" uid="uid://d00wea7rjju1x" path="res://Art/dsLaunchedAtlas.png" id="17_if60x"]
 [ext_resource type="Texture2D" uid="uid://c2x2g2xpq2y7x" path="res://Art/csHadouAtlas.png" id="18_oc36o"]
+[ext_resource type="Texture2D" uid="uid://cwu2t4axus7eu" path="res://Art/csAirAtkAtlas.png" id="20_f0f4p"]
 [ext_resource type="Texture2D" uid="uid://caijtwrbdvf53" path="res://Art/csLaunchAtlas.png" id="23_avf1r"]
+[ext_resource type="Texture2D" uid="uid://dhb0y5csmykmu" path="res://Art/csCrouchDefAtlas.png" id="26_5px7w"]
 [ext_resource type="Texture2D" uid="uid://ds7bfxt7l1oqj" path="res://Art/csWakeUpAtlas.png" id="29_oc36o"]
 [ext_resource type="Texture2D" uid="uid://bult5v8uuuvvp" path="res://Art/Cs_WakeUpAtlas.png" id="30_qnl1m"]
 [ext_resource type="Texture2D" uid="uid://daxubxj8dqqrv" path="res://Art/Ds_Win_Atlas.png" id="35_splm5"]
@@ -710,6 +712,18 @@ animations = [{
 "speed": 10.0
 }]
 
+[sub_resource type="AtlasTexture" id="AtlasTexture_vbe1m"]
+atlas = ExtResource("20_f0f4p")
+region = Rect2(0, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_whvsl"]
+atlas = ExtResource("20_f0f4p")
+region = Rect2(512, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_7kcq5"]
+atlas = ExtResource("20_f0f4p")
+region = Rect2(1024, 0, 512, 512)
+
 [sub_resource type="AtlasTexture" id="AtlasTexture_vmty1"]
 atlas = ExtResource("18_oc36o")
 region = Rect2(0, 0, 512, 512)
@@ -861,6 +875,14 @@ region = Rect2(0, 512, 512, 512)
 [sub_resource type="AtlasTexture" id="AtlasTexture_tul0i"]
 atlas = ExtResource("17_e4xp5")
 region = Rect2(512, 512, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_t7bec"]
+atlas = ExtResource("26_5px7w")
+region = Rect2(0, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_oplel"]
+atlas = ExtResource("26_5px7w")
+region = Rect2(512, 0, 512, 512)
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_1deol"]
 atlas = ExtResource("9_nmseu")
@@ -1085,6 +1107,20 @@ region = Rect2(1024, 1024, 512, 512)
 [sub_resource type="SpriteFrames" id="SpriteFrames_iruj8"]
 animations = [{
 "frames": [{
+"duration": 9.0,
+"texture": SubResource("AtlasTexture_vbe1m")
+}, {
+"duration": 6.0,
+"texture": SubResource("AtlasTexture_whvsl")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_7kcq5")
+}],
+"loop": false,
+"name": &"AirAtkL",
+"speed": 60.0
+}, {
+"frames": [{
 "duration": 6.0,
 "texture": SubResource("AtlasTexture_vmty1")
 }, {
@@ -1226,6 +1262,17 @@ animations = [{
 }],
 "loop": true,
 "name": &"CROUCH",
+"speed": 10.0
+}, {
+"frames": [{
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_t7bec")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_oplel")
+}],
+"loop": false,
+"name": &"CROUCHDEF",
 "speed": 10.0
 }, {
 "frames": [{
@@ -2342,7 +2389,7 @@ ProjectileScene = ExtResource("proj_cs")
 [node name="仓鼠" type="AnimatedSprite2D" parent="Player1" unique_id=185176480]
 position = Vector2(0, -107)
 sprite_frames = SubResource("SpriteFrames_iruj8")
-animation = &"WAKEUP"
+animation = &"AirAtkL"
 flip_h = true
 
 [node name="P2WinAnim" type="AnimatedSprite2D" parent="." unique_id=374502234]

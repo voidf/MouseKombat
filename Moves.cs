@@ -165,42 +165,74 @@ public static class MoveSets
         {
             new MoveDef {
                 Id = "5LP", AnimName = "AtkU", Button = AttackButton.LP,
-                Startup = 4, Active = 3, Recovery = 6, Damage = 6, Guard = GuardHeight.Mid,
+                Startup = 4, Active = 3, Recovery = 6, Damage = 6, Guard = GuardHeight.High,
                 Hitbox = new Rect2(50, -140, 80, 40),
                 CancelInto = new[] { "5MP", "5HP", "5LK", "5MK", "5HK" },
             },
             new MoveDef {
                 Id = "5MP", AnimName = "AtkI", Button = AttackButton.MP,
-                Startup = 6, Active = 3, Recovery = 10, Damage = 9, Guard = GuardHeight.Mid,
+                Startup = 6, Active = 3, Recovery = 10, Damage = 9, Guard = GuardHeight.High,
                 Hitbox = new Rect2(20, -195, 120, 75),
                 CancelInto = new[] { "5HP", "5MK", "5HK" },
             },
             new MoveDef {
                 Id = "5HP", AnimName = "AtkO", Button = AttackButton.HP,
-                Startup = 10, Active = 4, Recovery = 18, Damage = 14, Guard = GuardHeight.Mid,
+                Startup = 10, Active = 4, Recovery = 18, Damage = 14, Guard = GuardHeight.High,
                 Hitbox = new Rect2(20, -200, 170, 90),
                 CancelInto = new[] { "5HK" },
             },
             new MoveDef {
                 Id = "5LK", AnimName = "AtkJ", Button = AttackButton.LK,
-                Startup = 5, Active = 3, Recovery = 8, Damage = 6, Guard = GuardHeight.Mid,
+                Startup = 5, Active = 3, Recovery = 8, Damage = 6, Guard = GuardHeight.High,
                 Hitbox = new Rect2(20, -70, 110, 60),
                 CancelInto = new[] { "5MP", "5HP", "5MK", "5HK" },
             },
             new MoveDef {
                 Id = "5MK", AnimName = "AtkK", Button = AttackButton.MK,
-                Startup = 7, Active = 4, Recovery = 12, Damage = 10, Guard = GuardHeight.Mid,
+                Startup = 7, Active = 4, Recovery = 12, Damage = 10, Guard = GuardHeight.High,
                 Hitbox = new Rect2(20, -120, 150, 80),
                 CancelInto = new[] { "5HP", "5HK" },
             },
             new MoveDef {
                 Id = "5HK", AnimName = "AtkL", Button = AttackButton.HK,
-                Startup = 12, Active = 5, Recovery = 20, Damage = 16, Guard = GuardHeight.Mid,
+                Startup = 12, Active = 5, Recovery = 20, Damage = 16, Guard = GuardHeight.High,
                 Hitbox = new Rect2(20, -150, 190, 110),
                 Launches = true, // launcher: ground hit -> juggle
             },
+            // AirAtk
+            new MoveDef {
+                Id = "jLP", AnimName = "AirAtkL", Button = AttackButton.LP, Stance = Stance.Air,
+                Startup = 9, Active = 6, Recovery = 12, Damage = 15, Guard = GuardHeight.High,
+                Hitbox = new Rect2(20, -100, 100, 60),
+            },
+            new MoveDef {
+                Id = "jMP", AnimName = "AirAtkL", Button = AttackButton.MP, Stance = Stance.Air,
+                Startup = 9, Active = 6, Recovery = 12, Damage = 15, Guard = GuardHeight.High,
+                Hitbox = new Rect2(20, -100, 100, 60),
+            },
+            new MoveDef {
+                Id = "jHP", AnimName = "AirAtkL", Button = AttackButton.HP, Stance = Stance.Air,
+                Startup = 9, Active = 6, Recovery = 12, Damage = 15, Guard = GuardHeight.High,
+                Hitbox = new Rect2(20, -100, 100, 60),
+            },
+            new MoveDef {
+                Id = "jLK", AnimName = "AirAtkL", Button = AttackButton.LK, Stance = Stance.Air,
+                Startup = 9, Active = 6, Recovery = 12, Damage = 15, Guard = GuardHeight.High,
+                Hitbox = new Rect2(20, -100, 100, 60),
+            },
+            new MoveDef {
+                Id = "jMK", AnimName = "AirAtkL", Button = AttackButton.MK, Stance = Stance.Air,
+                Startup = 9, Active = 6, Recovery = 12, Damage = 15, Guard = GuardHeight.High,
+                Hitbox = new Rect2(20, -100, 100, 60),
+            },
+            new MoveDef {
+                Id = "jHK", AnimName = "AirAtkL", Button = AttackButton.HK, Stance = Stance.Air,
+                Startup = 9, Active = 6, Recovery = 12, Damage = 15, Guard = GuardHeight.High,
+                Hitbox = new Rect2(20, -100, 100, 60),
+            },
         };
-        AppendCrouchAndAir(moves);
+
+        AppendCrouchAndThrow(moves);
         // ---- motion special: QCF + any punch -> fireball (抬手招, no melee hitbox; Active=0) ----
         moves.Add(new MoveDef {
             Id = "236P", AnimName = "AtkHadou", Button = AttackButton.LP, Stance = Stance.Stand,
@@ -224,42 +256,73 @@ public static class MoveSets
         {
             new MoveDef {
                 Id = "5LP", AnimName = "AtkU", Button = AttackButton.LP,
-                Startup = 4, Active = 3, Recovery = 6, Damage = 6, Guard = GuardHeight.Mid,
+                Startup = 4, Active = 3, Recovery = 6, Damage = 6, Guard = GuardHeight.High,
                 Hitbox = new Rect2(20, -190, 90, 70),
                 CancelInto = new[] { "5MP", "5HP", "5LK", "5MK", "5HK" },
             },
             new MoveDef {
                 Id = "5MP", AnimName = "AtkI", Button = AttackButton.MP,
-                Startup = 6, Active = 3, Recovery = 10, Damage = 9, Guard = GuardHeight.Mid,
+                Startup = 6, Active = 3, Recovery = 10, Damage = 9, Guard = GuardHeight.High,
                 Hitbox = new Rect2(20, -195, 120, 75),
                 CancelInto = new[] { "5HP", "5MK", "5HK" },
             },
             new MoveDef {
                 Id = "5HP", AnimName = "AtkO", Button = AttackButton.HP,
-                Startup = 10, Active = 4, Recovery = 18, Damage = 14, Guard = GuardHeight.Mid,
+                Startup = 10, Active = 4, Recovery = 18, Damage = 14, Guard = GuardHeight.High,
                 Hitbox = new Rect2(20, -200, 170, 90),
                 CancelInto = new[] { "5HK" },
             },
             new MoveDef {
                 Id = "5LK", AnimName = "AtkJ", Button = AttackButton.LK,
-                Startup = 5, Active = 3, Recovery = 8, Damage = 6, Guard = GuardHeight.Mid,
+                Startup = 5, Active = 3, Recovery = 8, Damage = 6, Guard = GuardHeight.High,
                 Hitbox = new Rect2(20, -70, 110, 60),
                 CancelInto = new[] { "5MP", "5HP", "5MK", "5HK" },
             },
             new MoveDef {
                 Id = "5MK", AnimName = "AtkK", Button = AttackButton.MK,
-                Startup = 7, Active = 4, Recovery = 12, Damage = 10, Guard = GuardHeight.Mid,
+                Startup = 7, Active = 4, Recovery = 12, Damage = 10, Guard = GuardHeight.High,
                 Hitbox = new Rect2(20, -120, 150, 80),
                 CancelInto = new[] { "5HP", "5HK" },
             },
             new MoveDef {
                 Id = "5HK", AnimName = "AtkL", Button = AttackButton.HK,
-                Startup = 12, Active = 5, Recovery = 20, Damage = 16, Guard = GuardHeight.Mid,
+                Startup = 12, Active = 5, Recovery = 20, Damage = 16, Guard = GuardHeight.High,
                 Hitbox = new Rect2(20, -150, 190, 110),
                 Launches = true, // launcher: ground hit -> juggle
             },
+            // AirAtk
+            new MoveDef {
+                Id = "jLP", AnimName = "AirAtkL", Button = AttackButton.LP, Stance = Stance.Air,
+                Startup = 9, Active = 6, Recovery = 12, Damage = 15, Guard = GuardHeight.High,
+                Hitbox = new Rect2(20, -100, 100, 60),
+            },
+            new MoveDef {
+                Id = "jMP", AnimName = "AirAtkL", Button = AttackButton.MP, Stance = Stance.Air,
+                Startup = 9, Active = 6, Recovery = 12, Damage = 15, Guard = GuardHeight.High,
+                Hitbox = new Rect2(20, -100, 100, 60),
+            },
+            new MoveDef {
+                Id = "jHP", AnimName = "AirAtkL", Button = AttackButton.HP, Stance = Stance.Air,
+                Startup = 9, Active = 6, Recovery = 12, Damage = 15, Guard = GuardHeight.High,
+                Hitbox = new Rect2(20, -100, 100, 60),
+            },
+            new MoveDef {
+                Id = "jLK", AnimName = "AirAtkL", Button = AttackButton.LK, Stance = Stance.Air,
+                Startup = 9, Active = 6, Recovery = 12, Damage = 15, Guard = GuardHeight.High,
+                Hitbox = new Rect2(20, -100, 100, 60),
+            },
+            new MoveDef {
+                Id = "jMK", AnimName = "AirAtkL", Button = AttackButton.MK, Stance = Stance.Air,
+                Startup = 9, Active = 6, Recovery = 12, Damage = 15, Guard = GuardHeight.High,
+                Hitbox = new Rect2(20, -100, 100, 60),
+            },
+            new MoveDef {
+                Id = "jHK", AnimName = "AirAtkL", Button = AttackButton.HK, Stance = Stance.Air,
+                Startup = 9, Active = 6, Recovery = 12, Damage = 15, Guard = GuardHeight.High,
+                Hitbox = new Rect2(20, -100, 100, 60),
+            },
         };
-        AppendCrouchAndAir(moves);
+        AppendCrouchAndThrow(moves);
         // ---- motion special: QCF + any punch -> fireball (抬手招, no melee hitbox; Active=0) ----
         moves.Add(new MoveDef {
             Id = "236P", AnimName = "AtkHadou", Button = AttackButton.LP, Stance = Stance.Stand,
@@ -278,7 +341,7 @@ public static class MoveSets
     // Crouch normals (down stance, Low guard — must crouch-block) and air normals
     // (jump stance, High guard — block standing OR crouching). Shared placeholder data
     // for both characters; split into per-character versions when they diverge.
-    private static void AppendCrouchAndAir(List<MoveDef> moves)
+    private static void AppendCrouchAndThrow(List<MoveDef> moves)
     {
         // ---- crouching normals: Id "2xx" (FG: 2 = down), Low guard, anims Cr* ----
         moves.Add(new MoveDef {
@@ -310,38 +373,6 @@ public static class MoveSets
             Id = "2HK", AnimName = "CrAtkL", Button = AttackButton.HK, Stance = Stance.Crouch,
             Startup = 12, Active = 5, Recovery = 22, Damage = 15, Guard = GuardHeight.Low,
             Hitbox = new Rect2(20, -40, 180, 50), // sweep
-        });
-
-        // ---- air normals: Id "jxx" (jump), High guard, anims Air* ----
-        moves.Add(new MoveDef {
-            Id = "jLP", AnimName = "AirAtkU", Button = AttackButton.LP, Stance = Stance.Air,
-            Startup = 4, Active = 4, Recovery = 6, Damage = 5, Guard = GuardHeight.High,
-            Hitbox = new Rect2(20, -40, 90, 80),
-        });
-        moves.Add(new MoveDef {
-            Id = "jMP", AnimName = "AirAtkI", Button = AttackButton.MP, Stance = Stance.Air,
-            Startup = 6, Active = 4, Recovery = 8, Damage = 8, Guard = GuardHeight.High,
-            Hitbox = new Rect2(20, -50, 110, 90),
-        });
-        moves.Add(new MoveDef {
-            Id = "jHP", AnimName = "AirAtkO", Button = AttackButton.HP, Stance = Stance.Air,
-            Startup = 8, Active = 5, Recovery = 10, Damage = 13, Guard = GuardHeight.High,
-            Hitbox = new Rect2(20, -60, 140, 110),
-        });
-        moves.Add(new MoveDef {
-            Id = "jLK", AnimName = "AirAtkJ", Button = AttackButton.LK, Stance = Stance.Air,
-            Startup = 5, Active = 4, Recovery = 6, Damage = 5, Guard = GuardHeight.High,
-            Hitbox = new Rect2(20, -30, 100, 90),
-        });
-        moves.Add(new MoveDef {
-            Id = "jMK", AnimName = "AirAtkK", Button = AttackButton.MK, Stance = Stance.Air,
-            Startup = 7, Active = 5, Recovery = 9, Damage = 10, Guard = GuardHeight.High,
-            Hitbox = new Rect2(20, -40, 130, 100),
-        });
-        moves.Add(new MoveDef {
-            Id = "jHK", AnimName = "AirAtkL", Button = AttackButton.HK, Stance = Stance.Air,
-            Startup = 10, Active = 6, Recovery = 12, Damage = 15, Guard = GuardHeight.High,
-            Hitbox = new Rect2(20, -50, 160, 120),
         });
 
         // ---- throw: LP+LK within ~2 frames (SF6 classic). Unblockable, short range, stand stance. ----
