@@ -12,6 +12,7 @@
 [ext_resource type="Texture2D" uid="uid://f43b1irdb6ba" path="res://Art/dsHurtAtlas.png" id="5_mklpb"]
 [ext_resource type="Texture2D" uid="uid://dymmwxv3o8jaj" path="res://Art/dsDefAtlas.png" id="5_o1vs4"]
 [ext_resource type="Texture2D" uid="uid://ndnh5x51kpsn" path="res://Art/dsCrouchIdleAtlas.png" id="6_8trbx"]
+[ext_resource type="Texture2D" uid="uid://d2so8cg5ev5om" path="res://Art/dsAirAtkAtlas.png" id="7_7hena"]
 [ext_resource type="Texture2D" uid="uid://cfjxdt2qtpwki" path="res://Art/dsCrouchAtlas.png" id="7_iruj8"]
 [ext_resource type="Texture2D" uid="uid://c3pjtusuglldb" path="res://Art/dsAtkHadouAtlas.png" id="7_lcr1l"]
 [ext_resource type="Texture2D" uid="uid://dgnyxpxfswxkg" path="res://Art/dsKickPPAtlas.png" id="7_njj45"]
@@ -42,6 +43,14 @@
 [ext_resource type="PackedScene" uid="uid://cblwghenscetk" path="res://dsProjectile.tscn" id="proj_ds"]
 [ext_resource type="AudioStream" uid="uid://dbt50p4kq2yur" path="res://Art/SFX/SFX_Guard.wav" id="sfx_guard"]
 [ext_resource type="AudioStream" uid="uid://26abicf4m7mx" path="res://Art/SFX/SFX_Hit.ogg" id="sfx_hit"]
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_l8k6s"]
+atlas = ExtResource("7_7hena")
+region = Rect2(0, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_4ttey"]
+atlas = ExtResource("7_7hena")
+region = Rect2(512, 0, 512, 512)
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_6l5pn"]
 atlas = ExtResource("7_lcr1l")
@@ -377,6 +386,17 @@ region = Rect2(3072, 0, 512, 512)
 
 [sub_resource type="SpriteFrames" id="SpriteFrames_jd2df"]
 animations = [{
+"frames": [{
+"duration": 9.0,
+"texture": SubResource("AtlasTexture_l8k6s")
+}, {
+"duration": 6.0,
+"texture": SubResource("AtlasTexture_4ttey")
+}],
+"loop": false,
+"name": &"AirAtkL",
+"speed": 60.0
+}, {
 "frames": [{
 "duration": 5.0,
 "texture": SubResource("AtlasTexture_6l5pn")
@@ -2376,7 +2396,7 @@ ProjectileScene = ExtResource("proj_ds")
 [node name="袋鼠" type="AnimatedSprite2D" parent="Player2" unique_id=344721729]
 position = Vector2(0, -167)
 sprite_frames = SubResource("SpriteFrames_jd2df")
-animation = &"WAKEUP"
+animation = &"AirAtkL"
 
 [node name="Player1" type="Node2D" parent="." unique_id=280155618 node_paths=PackedStringArray("anim")]
 position = Vector2(120, 560)
