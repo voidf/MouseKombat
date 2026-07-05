@@ -19,7 +19,8 @@ public partial class Player : Node2D
     // when on, walking backward (away from the opponent) plays WALK in reverse; off = always forward.
     [Export] public bool ReverseWalkBackward = false;
     [Export] public string HurtAnimName = "HURT";
-    [Export] public string DefAnimName = "DEF";
+    [Export] public string DefAnimName = "DEF";              // standing block-hit
+    [Export] public string CrouchDefAnimName = "CROUCHDEF";  // crouching block-hit
     [Export] public string JumpAnimName = "JUMP";
     [Export] public string EnterCrouchAnimName = "ENTER_CROUCH"; // transition; exit = played backwards
     [Export] public string CrouchIdleAnimName = "CROUCH";        // steady held crouch pose
@@ -687,7 +688,7 @@ public partial class Player : Node2D
         {
             State = PlayerState.DefenseHit;
             _defHitFrame = 0;
-            PlayAnimSafe(DefAnimName);
+            PlayAnimSafe(crouchBlock ? CrouchDefAnimName : DefAnimName);
             return HitResult.Blocked;
         }
 

@@ -14,16 +14,18 @@ public partial class Projectile : Node2D
     private float _maxDistance = 900f;
     private float _traveled = 0f;
     private Player _target;
+    private GameManager _gm;       // owner; routes hit spark + SFX (same path as melee)
     private MoveDef _hit;          // synthetic hit data reused by Player.ApplyDamage
     private bool _dead = false;
 
     // Called by the spawner right after instancing.
-    public void Init(int dir, ProjectileSpec spec, Player target)
+    public void Init(int dir, ProjectileSpec spec, Player target, GameManager gm)
     {
         _dir = dir < 0 ? -1 : 1;
         _speed = spec.Speed;
         _maxDistance = spec.MaxDistance;
         _target = target;
+        _gm = gm;
         _hit = new MoveDef { Damage = spec.Damage, Guard = spec.Guard, Button = AttackButton.HP }; // non-light: no air-reset, no juggle
 
         if (anim == null) anim = GetNodeOrNull<AnimatedSprite2D>("AnimatedSprite2D");
@@ -49,8 +51,8 @@ public partial class Projectile : Node2D
         if (_target != null && _target.State != Player.PlayerState.Dead && !_target.IsInvincible
             && _target.HurtboxOverlaps(GetWorldHitbox()))
         {
-            _target.ApplyDamage(_hit, _dir);
-            OnHit();
+            var res = _target.ApplyDamage(_hit, _dir);
+            OnHit(res);
             Destroy();
             return;
         }
@@ -79,9 +81,14 @@ public partial class Projectile : Node2D
         QueueFree();
     }
 
-    // ---- presentation hooks: wire particles / SFX here later ----
+    // ---- presentation hooks ----
     private void OnSpawned() { /* TODO: spawn VFX, play launch SFX */ }
-    private void OnHit() { /* TODO: hit spark VFX, impact SFX */ }
+    // Hit spark + impact SFX routed through GameManager so a fireball impact reads
+    // like a normal strike (and a blocked one plays the guard spark + guard SFX).
+    private void OnHit(Player.HitResult res)
+    {
+        _gm?.PlayHitFeedback(res, GetWorldHitbox(), _target);
+    }
     private void OnExpired() { /* TODO: fizzle VFX */ }
 
     public override void _Draw()

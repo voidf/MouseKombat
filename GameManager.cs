@@ -38,6 +38,9 @@ public partial class GameManager : Node2D
     [Export] public AudioStreamPlayer Bgm;         // looped combat BGM
     [Export] public AudioStreamPlayer SfxHit;      // played on a clean hit
     [Export] public AudioStreamPlayer SfxGuard;    // played on a block
+    // ± fractional pitch offset randomized per play for the two hit SFX (0 = off).
+    // e.g. 0.12 => PitchScale in [0.88, 1.12]. Applied to SfxHit and SfxGuard.
+    [Export] public float SfxPitchVariation = 0.12f;
 
     private enum Phase { Fighting, Win, Resetting }
     private Phase _phase = Phase.Fighting;
@@ -191,7 +194,7 @@ public partial class GameManager : Node2D
         var off = new Vector2(spec.Offset.X * dir, spec.Offset.Y); // x measured forward
         proj.Position = owner.GlobalPosition + off;
         AddChild(proj);
-        proj.Init(dir, spec, target);
+        proj.Init(dir, spec, target, this);
     }
 
     private void ShowCommandPopup(int playerIndex, string text)
@@ -332,22 +335,40 @@ public partial class GameManager : Node2D
             int pushDir = attacker.GlobalPosition.X <= defender.GlobalPosition.X ? 1 : -1; // shove away from attacker
             var res = defender.ApplyDamage(attacker.CurrentMove, pushDir);
             attacker.ConsumeAttackHit();
-            if (res == Player.HitResult.None) return;
-
-            var pt = HitContactPoint(hitBox, defender);
-            // FX oriented by the DEFENDER's facing: art authored facing-left; mirror when facing right.
-            bool flip = defender.FacingRight;
-            if (res == Player.HitResult.Hit)
-            {
-                SpawnFx(HitFxScene, pt, flip);
-                SfxHit?.Play();
-            }
-            else // Blocked
-            {
-                SpawnFx(GuardFxScene, pt, flip);
-                SfxGuard?.Play();
-            }
+            PlayHitFeedback(res, hitBox, defender);
         }
+    }
+
+    // Spawns the hit/guard spark + plays the matching SFX at the contact point.
+    // Shared by melee (TryHit) and projectiles (Projectile.OnHit) so a fireball
+    // impact reads identically to a normal strike (and a blocked one to a block).
+    public void PlayHitFeedback(Player.HitResult res, Rect2 hitBox, Player defender)
+    {
+        if (res == Player.HitResult.None) return;
+
+        var pt = HitContactPoint(hitBox, defender);
+        // FX oriented by the DEFENDER's facing: art authored facing-left; mirror when facing right.
+        bool flip = defender.FacingRight;
+        if (res == Player.HitResult.Hit)
+        {
+            SpawnFx(HitFxScene, pt, flip);
+            PlaySfx(SfxHit);
+        }
+        else // Blocked
+        {
+            SpawnFx(GuardFxScene, pt, flip);
+            PlaySfx(SfxGuard);
+        }
+    }
+
+    // Plays a one-shot SFX with a random pitch offset (± SfxPitchVariation) so
+    // repeated hits don't sound machine-gun identical.
+    private void PlaySfx(AudioStreamPlayer p)
+    {
+        if (p == null) return;
+        float v = SfxPitchVariation;
+        p.PitchScale = v > 0f ? Mathf.Max(0.01f, 1f + (GD.Randf() * 2f - 1f) * v) : 1f;
+        p.Play();
     }
 
     // center of the hitbox ∩ hurtbox overlap (industry-standard spark placement);
