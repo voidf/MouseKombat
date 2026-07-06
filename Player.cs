@@ -271,6 +271,11 @@ public partial class Player : Node2D
 
     public void TickVertical(double dt)
     {
+        // Grounded displacement specials (MotionTimeline) fully own their Y via TickMoveDisplacement —
+        // skip gravity so the two don't fight. (They report IsAirborne while rising, which would
+        // otherwise trip the gravity path below.)
+        if (State == PlayerState.Attack && _curMove != null && _curMove.MotionTimeline.Length > 0) return;
+
         // Runs for any above-ground motion: jump arc, air normal, juggle, air reset, or hurt mid-air.
         bool aerialState = State == PlayerState.Jump || State == PlayerState.Juggle || State == PlayerState.AirHurt
             || (State == PlayerState.Attack && _airMove);
@@ -490,6 +495,26 @@ public partial class Player : Node2D
             State = (InLeft ^ InRight) ? PlayerState.Walk : PlayerState.Idle;
     }
 
+    // Self-motion for displacement moves (dragon-punch etc): adds the active move's MotionTimeline
+    // segment for the current attack frame. X is mirrored by facing (forward-relative); Y is clamped
+    // to the floor so the move never sinks below ground. The move end (TickAdvanceTimers) snaps Y
+    // back to the ground. Call once per fixed tick, after TickMoves (which may start the move).
+    public void TickMoveDisplacement()
+    {
+        if (State != PlayerState.Attack || _curMove == null || _curMove.MotionTimeline.Length == 0) return;
+        int fwd = FacingRight ? 1 : -1;
+        foreach (var k in _curMove.MotionTimeline)
+        {
+            if (_atkFrame < k.From || _atkFrame > k.To) continue;
+            var p = Position;
+            p.X += k.PerFrame.X * fwd;      // forward-relative
+            p.Y += k.PerFrame.Y;           // -up / +down (screen space)
+            if (p.Y > _groundY) p.Y = _groundY; // never below the floor
+            Position = p;
+            break; // first matching (non-overlapping) segment wins
+        }
+    }
+
     public void TickAdvanceTimers()
     {
         if (State == PlayerState.Attack)
@@ -508,8 +533,10 @@ public partial class Player : Node2D
                 // logic frames done -> actionable now. Keep the (possibly longer) attack clip
                 // playing as a tail; _Process swaps to IDLE once it ends. If holding down,
                 // settle into the crouch pose instead. Any action interrupts naturally.
+                bool wasMotion = _curMove != null && _curMove.MotionTimeline.Length > 0;
                 _atkFrame = -1;
                 _airMove = false;
+                if (wasMotion) { var lp = Position; lp.Y = _groundY; Position = lp; } // displacement move lands
                 if (!IsAirborne && InDownHeld && !InUpHeld)
                 {
                     State = PlayerState.Crouch;

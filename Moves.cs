@@ -35,6 +35,18 @@ public struct HurtKey
     public Rect2 Head, Body, Arms, Legs;
 }
 
+// One segment of a move's self-motion (displacement) timeline. While the attack's frame
+// counter is within [From, To], PerFrame is ADDED to the character's position every frame.
+//   PerFrame.X = FORWARD-relative px (engine mirrors by facing): +advance, -retreat.
+//   PerFrame.Y = screen-space px: NEGATIVE = rise, POSITIVE = fall.
+// The engine clamps to the ground and snaps back to it when the move ends, so a rise+fall
+// pair lands you on the floor at a new X. Empty timeline => stationary move (default).
+public struct MoveKey
+{
+    public int From, To;
+    public Vector2 PerFrame;
+}
+
 // A single move's data. Authored in C# (see MoveSets), not the Inspector.
 public sealed class MoveDef
 {
@@ -76,6 +88,10 @@ public sealed class MoveDef
 
     // optional per-frame hurtbox overrides; default empty = use base regions
     public HurtKey[] HurtboxTimeline = System.Array.Empty<HurtKey>();
+
+    // optional per-frame self-motion (displacement) segments; default empty = stationary.
+    // See MoveKey. Used for dragon-punch-style rise+advance moves that land at a new position.
+    public MoveKey[] MotionTimeline = System.Array.Empty<MoveKey>();
 
     // moves this one may cancel into, and the atk-frame window the cancel is allowed in.
     // CancelFrom/To < 0 => default window = from first active frame through end of recovery.
@@ -180,6 +196,22 @@ public static class MoveSets
                 Startup = 10, Active = 4, Recovery = 18, Damage = 14, Guard = GuardHeight.High,
                 Hitbox = new Rect2(20, -200, 170, 90),
                 CancelInto = new[] { "5HK" },
+                // ---- SAMPLE: per-region hurtbox timeline ----
+                // Rects are LOCAL & authored facing-LEFT (same convention as the base boxes;
+                // the engine mirrors them by facing). Any frame OUTSIDE every window falls
+                // back to the character's base boxes — so recovery here is auto-normal.
+                HurtboxTimeline = new[] {
+                    // startup (frames 0-9): arm tucked in — Arms box pulled back (harder to hit the fist)
+                    new HurtKey { From = 0, To = 9,
+                        Head = new Rect2(-40, -200,  80, 55), Body = new Rect2(-55, -150, 110, 95),
+                        Arms = new Rect2(-50, -165,  90, 60), Legs = new Rect2(-45,  -70,  90, 70) },
+                    // active (frames 10-13): fist thrusts forward — Arms box extends toward the
+                    // opponent and becomes a big vulnerable target (whiff-punish window).
+                    new HurtKey { From = 10, To = 13,
+                        Head = new Rect2(-40, -200,  80, 55), Body = new Rect2(-55, -150, 110, 95),
+                        Arms = new Rect2(-40, -165, 180, 55), Legs = new Rect2(-45,  -70,  90, 70) },
+                    // recovery (14+): no key -> base boxes restored automatically.
+                },
             },
             new MoveDef {
                 Id = "5LK", AnimName = "AtkJ", Button = AttackButton.LK,
@@ -243,6 +275,28 @@ public static class MoveSets
             Projectile = new ProjectileSpec {
                 Speed = 520f, Offset = new Vector2(95, -130),
                 Damage = 12, Guard = GuardHeight.High, MaxDistance = 900f,
+            },
+        });
+        // ---- SAMPLE: displacement special (dragon-punch style) — QCF + Kick ----
+        // Rises up & advances during startup/active, falls back down through recovery, and
+        // LANDS at a new X. MotionTimeline.X is forward-relative (flip the sign for a
+        // back-dashing move); Y is negative to rise, positive to fall. Frame counter runs
+        // 0..(Startup+Active+Recovery-1) = 0..25 here (6+5+15). Author non-overlapping windows.
+        moves.Add(new MoveDef {
+            Id = "236K_DP", AnimName = "AtkL", Button = AttackButton.HK, Stance = Stance.Stand,
+            Motion = MotionInput.Qcf, CommandLabel = "↓↘→+K",
+            Startup = 6, Active = 5, Recovery = 15, Damage = 16, Guard = GuardHeight.High,
+            Hitbox = new Rect2(30, -220, 120, 180), // tall rising hitbox
+            Launches = true,                         // DP-style: launches into a juggle on hit
+            MotionTimeline = new[] {
+                // startup crouch (0-5): tiny forward creep, still grounded
+                new MoveKey { From = 0,  To = 5,  PerFrame = new Vector2(2f,  0f) },
+                // launch/rise (6-13): shoot up & forward hard
+                new MoveKey { From = 6,  To = 13, PerFrame = new Vector2(10f, -34f) },
+                // apex (14-16): drift, gravity slows the climb
+                new MoveKey { From = 14, To = 16, PerFrame = new Vector2(6f,  -6f) },
+                // fall (17-25): come back down to the floor (engine snaps to ground on end)
+                new MoveKey { From = 17, To = 25, PerFrame = new Vector2(4f,  30f) },
             },
         });
         return new MoveSet(moves);

@@ -166,6 +166,13 @@ public partial class GameManager : Node2D
         p1.TickMoves();
         p2.TickMoves();
 
+        // displacement specials move the character after their move has started this tick;
+        // re-clamp so the new position stays on stage the same frame.
+        p1.TickMoveDisplacement();
+        p2.TickMoveDisplacement();
+        ClampToStage(p1);
+        ClampToStage(p2);
+
         p1.TickAdvanceTimers();
         p2.TickAdvanceTimers();
 
