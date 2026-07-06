@@ -462,7 +462,7 @@ public partial class Player : Node2D
         _curAtkAnim = m.AnimName;
         _curCancelFrom = m.ResolvedCancelFrom;
         _curCancelTo = m.ResolvedCancelTo;
-        PlayAnimSafe(m.AnimName);
+        PlayAnimSafe(m.AnimName, true);
 
         if (m.Motion != MotionInput.None) // 搓招成功 -> queue HUD popup
         {
@@ -715,7 +715,7 @@ public partial class Player : Node2D
         {
             State = PlayerState.DefenseHit;
             _defHitFrame = 0;
-            PlayAnimSafe(crouchBlock ? CrouchDefAnimName : DefAnimName);
+            PlayAnimSafe(crouchBlock ? CrouchDefAnimName : DefAnimName, true);
             return HitResult.Blocked;
         }
 
@@ -727,7 +727,7 @@ public partial class Player : Node2D
             _airMove = false;
             _vy = -move.LaunchUp;
             _jumpHVel = pushDir * move.LaunchBack;
-            PlayAnimSafe(LaunchRiseAnimName);
+            PlayAnimSafe(LaunchRiseAnimName, true);
         }
         else if (airborne) // light air hit -> air reset (flinch, lands on feet, recovers)
         {
@@ -735,13 +735,13 @@ public partial class Player : Node2D
             _airMove = false;
             _vy = -AirResetPop;
             _jumpHVel = pushDir * move.LaunchBack * 0.4f;
-            PlayAnimSafe(AirHurtAnimName);
+            PlayAnimSafe(AirHurtAnimName, true);
         }
         else // grounded normal hit
         {
             State = PlayerState.Hurt;
             _hurtFrame = 0;
-            PlayAnimSafe(HurtAnimName);
+            PlayAnimSafe(HurtAnimName, true);
         }
         return HitResult.Hit;
     }
@@ -850,12 +850,25 @@ public partial class Player : Node2D
         DrawRect(box, new Color(c.R, c.G, c.B, 0.9f), filled: false, width: 2f);
     }
 
-    private void PlayAnimSafe(string name)
+    private void PlayAnimSafe(string name, bool forceRestart = false)
     {
         if (anim?.SpriteFrames == null) return;
         if (string.IsNullOrEmpty(name)) return;
         if (!anim.SpriteFrames.HasAnimation(name)) return;
+        // 如果强制重开且当前已经在播放同一动画，先 Stop 以清除 Godot 的播放状态缓存
+        if (forceRestart && anim.Animation == name)
+        {
+            anim.Stop();
+        }
+
         anim.Play(name);
+
+        // 确保帧数和计时进度彻底归零（针对 Godot 4 最稳妥的双重保险）
+        if (forceRestart)
+        {
+            anim.Frame = 0;
+            anim.FrameProgress = 0f;
+        }
     }
 
     private void PlayAnimBackwardsSafe(string name)
