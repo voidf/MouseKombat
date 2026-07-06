@@ -232,8 +232,8 @@ public static class MoveSets
             },
             new MoveDef {
                 Id = "5HK", AnimName = "AtkL", Button = AttackButton.HK,
-                Startup = 12, Active = 5, Recovery = 20, Damage = 16, Guard = GuardHeight.High,
-                Hitbox = new Rect2(20, -150, 190, 110),
+                Startup = 25, Active = 2, Recovery = 35, Damage = 16, Guard = GuardHeight.High,
+                Hitbox = new Rect2(40, -150, 160, 70),
                 Launches = true, // launcher: ground hit -> juggle
             },
             // AirAtk
@@ -288,7 +288,7 @@ public static class MoveSets
         // back-dashing move); Y is negative to rise, positive to fall. Frame counter runs
         // 0..(Startup+Active+Recovery-1) = 0..25 here (6+5+15). Author non-overlapping windows.
         moves.Add(new MoveDef {
-            Id = "623P_DP", AnimName = "AtkL", Button = AttackButton.LP, Stance = Stance.Stand,
+            Id = "623P_DP", AnimName = "AtkShoRyu", Button = AttackButton.LP, Stance = Stance.Stand,
             Motion = MotionInput.Dp, AnyPunch = true, CommandLabel = "→↓↘+P",
             Startup = 5, Active = 10, Recovery = 33, Damage = 11, Guard = GuardHeight.High,
             Hitbox = new Rect2(30, -220, 120, 180), // tall rising hitbox
