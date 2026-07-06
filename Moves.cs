@@ -13,8 +13,8 @@ public enum Stance { Stand, Crouch, Air }
 //   Low  = crouching block only          (下段, low — standers get hit)
 public enum GuardHeight { High, Mid, Low }
 
-// Motion command (facing-relative): Qcf = 236 (↓↘→), Qcb = 214 (↓↙←).
-public enum MotionInput { None, Qcf, Qcb }
+// Motion command (facing-relative): Qcf = 236 (↓↘→), Qcb = 214 (↓↙←), Dp = 623 (→↓↘).
+public enum MotionInput { None, Qcf, Qcb, Dp }
 
 // Spawned projectile config — reused for ground/air fireballs by varying the values.
 public struct ProjectileSpec
@@ -123,7 +123,12 @@ public sealed class MoveSet
             else if (m.Motion != MotionInput.None) _specials.Add(m);
             else _byCommand[Key(m.Stance, m.Button)] = m;
         }
+        // Test more-specific motions first: a 623 (DP) input also satisfies the lenient
+        // Qcf recognizer, so DP must be checked before a QCF fireball or it gets eaten.
+        _specials.Sort((a, b) => MotionPriority(a.Motion).CompareTo(MotionPriority(b.Motion)));
     }
+
+    private static int MotionPriority(MotionInput m) => m == MotionInput.Dp ? 0 : 1;
 
     // resolve a normal command; Crouch falls back to the Stand version if no crouch-specific one exists
     public MoveDef Resolve(Stance stance, AttackButton button)
@@ -283,20 +288,26 @@ public static class MoveSets
         // back-dashing move); Y is negative to rise, positive to fall. Frame counter runs
         // 0..(Startup+Active+Recovery-1) = 0..25 here (6+5+15). Author non-overlapping windows.
         moves.Add(new MoveDef {
-            Id = "236K_DP", AnimName = "AtkL", Button = AttackButton.HK, Stance = Stance.Stand,
-            Motion = MotionInput.Qcf, CommandLabel = "↓↘→+K",
-            Startup = 6, Active = 5, Recovery = 15, Damage = 16, Guard = GuardHeight.High,
+            Id = "623P_DP", AnimName = "AtkL", Button = AttackButton.LP, Stance = Stance.Stand,
+            Motion = MotionInput.Dp, AnyPunch = true, CommandLabel = "→↓↘+P",
+            Startup = 5, Active = 10, Recovery = 33, Damage = 11, Guard = GuardHeight.High,
             Hitbox = new Rect2(30, -220, 120, 180), // tall rising hitbox
             Launches = true,                         // DP-style: launches into a juggle on hit
             MotionTimeline = new[] {
                 // startup crouch (0-5): tiny forward creep, still grounded
-                new MoveKey { From = 0,  To = 5,  PerFrame = new Vector2(2f,  0f) },
+                new MoveKey { From = 0,  To = 5,  PerFrame = new Vector2(0f,  0f) },
                 // launch/rise (6-13): shoot up & forward hard
-                new MoveKey { From = 6,  To = 13, PerFrame = new Vector2(10f, -34f) },
-                // apex (14-16): drift, gravity slows the climb
-                new MoveKey { From = 14, To = 16, PerFrame = new Vector2(6f,  -6f) },
-                // fall (17-25): come back down to the floor (engine snaps to ground on end)
-                new MoveKey { From = 17, To = 25, PerFrame = new Vector2(4f,  30f) },
+                new MoveKey { From = 6,  To = 6, PerFrame = new Vector2(8f, 0f) },
+                new MoveKey { From = 7,  To = 7, PerFrame = new Vector2(8f, -20f) },
+                new MoveKey { From = 8,  To = 8, PerFrame = new Vector2(8f, -8f) },
+                new MoveKey { From = 9,  To = 9, PerFrame = new Vector2(1f, -8f) },
+                new MoveKey { From = 10,  To = 10, PerFrame = new Vector2(0f, -7f) },
+                new MoveKey { From = 11,  To = 11, PerFrame = new Vector2(0f, -7f) },
+                new MoveKey { From = 12,  To = 12, PerFrame = new Vector2(0f, -6f) },
+                // // apex (14-16): drift, gravity slows the climb
+                // new MoveKey { From = 14, To = 16, PerFrame = new Vector2(6f,  -6f) },
+                // // fall (17-25): come back down to the floor (engine snaps to ground on end)
+                // new MoveKey { From = 17, To = 25, PerFrame = new Vector2(4f,  30f) },
             },
         });
         return new MoveSet(moves);
@@ -535,7 +546,24 @@ public sealed class InputBuffer
     {
         if (motion == MotionInput.None) return false;
         int n = Mathf.Min(window, _count);
-        // walk newest->oldest; require a "forward" then an earlier "down".
+
+        if (motion == MotionInput.Dp)
+        {
+            // 623 (→↓↘): forward, then down, then down-forward LAST (the ↘ that fires).
+            // Scan newest->oldest for the reverse chain 3 -> 2 -> 6. Ending on ↘ is what
+            // separates this from a 236 fireball (which ends on →, so its newest dir is 6).
+            int stage = 0; // 0: seek ↘(3)  1: seek ↓(2)  2: seek →(6/9)
+            for (int i = 0; i < n; i++)
+            {
+                int num = _slots[(_head - i + _slots.Length) % _slots.Length].Num;
+                if (stage == 0) { if (num == 3) stage = 1; }
+                else if (stage == 1) { if (num == 2) stage = 2; }
+                else if (num == 6 || num == 9) return true;
+            }
+            return false;
+        }
+
+        // Qcf/Qcb (236/214): walk newest->oldest; require a "forward" then an earlier "down".
         bool sawForward = false;
         for (int i = 0; i < n; i++)
         {
