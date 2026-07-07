@@ -291,19 +291,32 @@ public static class MoveSets
             Id = "623P_DP", AnimName = "AtkShoRyu", Button = AttackButton.LP, Stance = Stance.Stand,
             Motion = MotionInput.Dp, AnyPunch = true, CommandLabel = "→↓↘+P",
             Startup = 5, Active = 10, Recovery = 33, Damage = 11, Guard = GuardHeight.High,
-            Hitbox = new Rect2(30, -220, 120, 180), // tall rising hitbox
+            Hitbox = new Rect2(30, -240, 90, 200), // tall rising hitbox
             Launches = true,                         // DP-style: launches into a juggle on hit
             MotionTimeline = new[] {
                 // startup crouch (0-5): tiny forward creep, still grounded
                 new MoveKey { From = 0,  To = 5,  PerFrame = new Vector2(0f,  0f) },
                 // launch/rise (6-13): shoot up & forward hard
                 new MoveKey { From = 6,  To = 6, PerFrame = new Vector2(8f, 0f) },
-                new MoveKey { From = 7,  To = 7, PerFrame = new Vector2(8f, -20f) },
-                new MoveKey { From = 8,  To = 8, PerFrame = new Vector2(8f, -8f) },
-                new MoveKey { From = 9,  To = 9, PerFrame = new Vector2(1f, -8f) },
-                new MoveKey { From = 10,  To = 10, PerFrame = new Vector2(0f, -7f) },
-                new MoveKey { From = 11,  To = 11, PerFrame = new Vector2(0f, -7f) },
-                new MoveKey { From = 12,  To = 12, PerFrame = new Vector2(0f, -6f) },
+                new MoveKey { From = 7,  To = 7, PerFrame = new Vector2(8f, -22f) },
+                new MoveKey { From = 8,  To = 8, PerFrame = new Vector2(8f, -10f) },
+                new MoveKey { From = 9,  To = 9, PerFrame = new Vector2(1f, -10f) },
+                new MoveKey { From = 10,  To = 10, PerFrame = new Vector2(0f, -9f) },
+                new MoveKey { From = 11,  To = 12, PerFrame = new Vector2(0f, -8f) },
+                new MoveKey { From = 13,  To = 14, PerFrame = new Vector2(0f, -6f) },
+                new MoveKey { From = 15,  To = 15, PerFrame = new Vector2(0f, -2f) },
+                new MoveKey { From = 16,  To = 17, PerFrame = new Vector2(0f, 0f) },
+                new MoveKey { From = 18,  To = 18, PerFrame = new Vector2(0f, 1f) },
+                new MoveKey { From = 19,  To = 19, PerFrame = new Vector2(0f, 2f) },
+                new MoveKey { From = 20,  To = 20, PerFrame = new Vector2(0f, 3f) },
+                new MoveKey { From = 21,  To = 21, PerFrame = new Vector2(0f, 4f) },
+                new MoveKey { From = 22,  To = 22, PerFrame = new Vector2(0f, 5f) },
+                new MoveKey { From = 23,  To = 23, PerFrame = new Vector2(0f, 6f) },
+                new MoveKey { From = 24,  To = 24, PerFrame = new Vector2(0f, 7f) },
+                new MoveKey { From = 25,  To = 25, PerFrame = new Vector2(0f, 8f) },
+                new MoveKey { From = 26,  To = 26, PerFrame = new Vector2(0f, 9f) },
+                new MoveKey { From = 27,  To = 27, PerFrame = new Vector2(0f, 10f) },
+                new MoveKey { From = 28,  To = 28, PerFrame = new Vector2(0f, 11f) },
                 // // apex (14-16): drift, gravity slows the climb
                 // new MoveKey { From = 14, To = 16, PerFrame = new Vector2(6f,  -6f) },
                 // // fall (17-25): come back down to the floor (engine snaps to ground on end)
