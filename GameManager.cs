@@ -74,6 +74,21 @@ public partial class GameManager : Node2D
         UpdateHpBars();
     }
 
+    [Export] public string ReadyScenePath = "res://ReadyScreen.tscn";
+
+    // Esc bails out of the match and returns to the ready screen so devices can be
+    // re-bound. Scene change frees this tree (BGM included); ReadyScreen clears the
+    // stale GameSession bindings on its own _Ready.
+    public override void _UnhandledInput(InputEvent @event)
+    {
+        if (@event is InputEventKey k && k.Pressed && !k.Echo && k.Keycode == Key.Escape)
+        {
+            GetViewport().SetInputAsHandled();
+            GameSession.Clear();
+            GetTree().ChangeSceneToFile(ReadyScenePath);
+        }
+    }
+
     [Export] public string ConfigFileName = "fighter_config.csv";
 
     // Loads numeric tuning from a loose CSV next to the executable (so non-engine users can tune),

@@ -21,12 +21,17 @@ run/main_scene="res://ReadyScreen.tscn"
 config/features=PackedStringArray("4.6", "C#", "Mobile")
 config/icon="uid://betfal31o5rh8"
 
+[autoload]
+
+AspectLock="*res://AspectLock.cs"
+
 [display]
 
 window/size/viewport_width=800
 window/size/viewport_height=600
-window/size/resizable=false
+window/size/resizable=true
 window/stretch/mode="viewport"
+window/stretch/aspect="keep"
 
 [dotnet]
 
