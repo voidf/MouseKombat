@@ -35,6 +35,8 @@ public partial class GameManager : Node2D
     [Export] public PackedScene GuardFxScene;      // FX_Guard.tscn — spawned on a block
     [Export] public float HitFxLifetime = 0.2f;    // seconds before a spawned FX is freed
 
+    [Export] public PackedScene CmdPopupScene;     // cmd_popup.tscn — command-success banner (bg + label)
+
     [Export] public AudioStreamPlayer Bgm;         // looped combat BGM
     [Export] public AudioStreamPlayer SfxHit;      // played on a clean hit
     [Export] public AudioStreamPlayer SfxGuard;    // played on a block
@@ -221,22 +223,24 @@ public partial class GameManager : Node2D
 
     private void ShowCommandPopup(int playerIndex, string text)
     {
-        if (string.IsNullOrEmpty(text)) return;
+        if (string.IsNullOrEmpty(text) || CmdPopupScene == null) return;
         var hud = GetNodeOrNull<CanvasLayer>("HUD");
         if (hud == null) return;
 
-        var label = new Label();
-        label.Text = text + " 成功";
-        GD.Print($"popup: {label.Text}");
-        label.AddThemeFontSizeOverride("font_size", 18);
-        label.Position = new Vector2(playerIndex == 0 ? 20 : 520, 52);
-        hud.AddChild(label);
+        var popup = CmdPopupScene.Instantiate<Control>();
+        popup.GetNode<Label>("Label").Text = text + " 成功";
+        // Fixed 800x600-space anchor per side. HUD is a CanvasLayer and stretch
+        // mode "viewport" scales the whole framebuffer as one unit, so the popup
+        // stays proportional at any window size — no per-node scaling needed.
+        popup.Position = new Vector2(playerIndex == 0 ? 142 : 658, 560);
+        hud.AddChild(popup);
 
+        // Fade the root once: modulate cascades to bg + label together.
         var t = CreateTween();
         t.TweenInterval(0.9);
-        t.TweenProperty(label, "modulate:a", 0f, 0.4f).SetTrans(Tween.TransitionType.Linear);
-        var lref = label;
-        t.TweenCallback(Callable.From(() => lref.QueueFree()));
+        t.TweenProperty(popup, "modulate:a", 0f, 0.4f).SetTrans(Tween.TransitionType.Linear);
+        var pref = popup;
+        t.TweenCallback(Callable.From(() => pref.QueueFree()));
     }
 
     private void FreeProjectiles()

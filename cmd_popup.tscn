@@ -1,0 +1,50 @@
+[gd_scene format=3 uid="uid://c00g2r3nvkdi2"]
+
+[ext_resource type="Texture2D" uid="uid://43bn11om4qd1" path="res://Art/Tex_UICyan.png" id="1_leeks"]
+
+[sub_resource type="LabelSettings" id="LabelSettings_qnk4y"]
+font_size = 32
+outline_size = 4
+outline_color = Color(0, 0, 0, 1)
+shadow_color = Color(0.697192, 0, 0, 0.93200004)
+
+[node name="CmdPopup" type="Control" unique_id=511329368]
+layout_mode = 3
+anchors_preset = 0
+offset_left = 142.0
+offset_top = 560.0
+offset_right = 142.0
+offset_bottom = 560.0
+
+[node name="TextureRect" type="TextureRect" parent="." unique_id=956171452]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -142.0
+offset_top = -24.5
+offset_right = 142.0
+offset_bottom = 24.5
+grow_horizontal = 2
+grow_vertical = 2
+texture = ExtResource("1_leeks")
+
+[node name="Label" type="Label" parent="." unique_id=1904925401]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -20.0
+offset_top = -11.5
+offset_right = 20.0
+offset_bottom = 11.500019
+grow_horizontal = 2
+grow_vertical = 2
+text = "AAAAAAAAAAAA"
+label_settings = SubResource("LabelSettings_qnk4y")
+horizontal_alignment = 1
+vertical_alignment = 1
