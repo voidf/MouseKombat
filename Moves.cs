@@ -334,20 +334,20 @@ public static class MoveSets
         {
             new MoveDef {
                 Id = "5LP", AnimName = "AtkU", Button = AttackButton.LP,
-                Startup = 4, Active = 3, Recovery = 6, Damage = 6, Guard = GuardHeight.High,
-                Hitbox = new Rect2(20, -190, 90, 70),
+                Startup = 4, Active = 3, Recovery = 7, Damage = 3, Guard = GuardHeight.High,
+                Hitbox = new Rect2(50, -150, 44, 50),
                 CancelInto = new[] { "5MP", "5HP", "5LK", "5MK", "5HK" },
             },
             new MoveDef {
                 Id = "5MP", AnimName = "AtkI", Button = AttackButton.MP,
-                Startup = 6, Active = 3, Recovery = 10, Damage = 9, Guard = GuardHeight.High,
-                Hitbox = new Rect2(20, -195, 120, 75),
+                Startup = 8, Active = 4, Recovery = 15, Damage = 6, Guard = GuardHeight.High,
+                Hitbox = new Rect2(50, -150, 70, 50),
                 CancelInto = new[] { "5HP", "5MK", "5HK" },
             },
             new MoveDef {
                 Id = "5HP", AnimName = "AtkO", Button = AttackButton.HP,
-                Startup = 10, Active = 4, Recovery = 18, Damage = 14, Guard = GuardHeight.High,
-                Hitbox = new Rect2(20, -200, 170, 90),
+                Startup = 9, Active = 3, Recovery = 21, Damage = 8, Guard = GuardHeight.High,
+                Hitbox = new Rect2(50, -150, 140, 130),
                 CancelInto = new[] { "5HK" },
             },
             new MoveDef {
