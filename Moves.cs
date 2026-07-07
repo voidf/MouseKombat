@@ -352,14 +352,14 @@ public static class MoveSets
             },
             new MoveDef {
                 Id = "5LK", AnimName = "AtkJ", Button = AttackButton.LK,
-                Startup = 5, Active = 3, Recovery = 8, Damage = 6, Guard = GuardHeight.High,
-                Hitbox = new Rect2(20, -70, 110, 60),
+                Startup = 4, Active = 3, Recovery = 8, Damage = 3, Guard = GuardHeight.High,
+                Hitbox = new Rect2(50, -144, 64, 74),
                 CancelInto = new[] { "5MP", "5HP", "5MK", "5HK" },
             },
             new MoveDef {
                 Id = "5MK", AnimName = "AtkK", Button = AttackButton.MK,
-                Startup = 7, Active = 4, Recovery = 12, Damage = 10, Guard = GuardHeight.High,
-                Hitbox = new Rect2(20, -120, 150, 80),
+                Startup = 9, Active = 3, Recovery = 18, Damage = 7, Guard = GuardHeight.High,
+                Hitbox = new Rect2(50, -154, 80, 70),
                 CancelInto = new[] { "5HP", "5HK" },
             },
             new MoveDef {
