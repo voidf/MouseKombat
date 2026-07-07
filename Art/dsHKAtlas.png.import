@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://dgnyxpxfswxkg"
-path="res://.godot/imported/dsKickPPAtlas.png-089a9485662b28a109c2043e67a057df.ctex"
+uid="uid://cgj41t3khf07p"
+path="res://.godot/imported/dsHKAtlas.png-8b5f41b076e8d726ef07165332a3d763.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://Art/dsKickPPAtlas.png"
-dest_files=["res://.godot/imported/dsKickPPAtlas.png-089a9485662b28a109c2043e67a057df.ctex"]
+source_file="res://Art/dsHKAtlas.png"
+dest_files=["res://.godot/imported/dsHKAtlas.png-8b5f41b076e8d726ef07165332a3d763.ctex"]
 
 [params]
 
