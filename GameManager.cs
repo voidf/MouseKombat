@@ -1,5 +1,10 @@
 using Godot;
+using System.Collections.Generic;
+using MouseKombat.Sim;
 
+// Presentation VIEW + match director. Owns the headless GameSim, feeds it two InputFrames
+// per physics tick, and renders the returned events: HP bars, hit/guard FX + SFX, command
+// popups, projectile view nodes, and the win/reset sequence. All combat logic is in the sim.
 public partial class GameManager : Node2D
 {
     [Export] public Player p1;
@@ -41,15 +46,18 @@ public partial class GameManager : Node2D
     [Export] public AudioStreamPlayer SfxHit;      // played on a clean hit
     [Export] public AudioStreamPlayer SfxGuard;    // played on a block
     // ± fractional pitch offset randomized per play for the two hit SFX (0 = off).
-    // e.g. 0.12 => PitchScale in [0.88, 1.12]. Applied to SfxHit and SfxGuard.
     [Export] public float SfxPitchVariation = 0.12f;
 
     private enum Phase { Fighting, Win, Resetting }
     private Phase _phase = Phase.Fighting;
 
+    private GameSim _sim;
+    private readonly Dictionary<int, Projectile> _projViews = new(); // sim projectile id -> view node
+    private readonly HashSet<int> _liveIds = new();
+    private readonly List<int> _toRemove = new();
+
     public override void _Ready()
     {
-        LoadAndApplyConfig();
         StartBgm();
 
         // device bindings chosen in the ready screen; null Source => InputMap fallback
@@ -58,6 +66,20 @@ public partial class GameManager : Node2D
             if (p1 != null) p1.Source = GameSession.P1;
             if (p2 != null) p2.Source = GameSession.P2;
         }
+
+        // Build the sim from the players' exported tuning; force start pos/facing to the
+        // director's own values (matches the original reset convention: p1 faces right, p2 left).
+        var cfg1 = p1.BuildConfig();
+        cfg1.StartPos = new System.Numerics.Vector2(P1StartPos.X, P1StartPos.Y);
+        cfg1.StartFacingRight = true;
+        var cfg2 = p2.BuildConfig();
+        cfg2.StartPos = new System.Numerics.Vector2(P2StartPos.X, P2StartPos.Y);
+        cfg2.StartFacingRight = false;
+
+        float worldViewWidth = GetViewport().GetVisibleRect().Size.X;
+        _sim = new GameSim(cfg1, cfg2, StageMinX, StageMaxX, worldViewWidth);
+        p1.Bind(_sim.P1);
+        p2.Bind(_sim.P2);
 
         if (p1WinAnim != null)
         {
@@ -78,9 +100,7 @@ public partial class GameManager : Node2D
 
     [Export] public string ReadyScenePath = "res://ReadyScreen.tscn";
 
-    // Esc bails out of the match and returns to the ready screen so devices can be
-    // re-bound. Scene change frees this tree (BGM included); ReadyScreen clears the
-    // stale GameSession bindings on its own _Ready.
+    // Esc bails out of the match and returns to the ready screen so devices can be re-bound.
     public override void _UnhandledInput(InputEvent @event)
     {
         if (@event is InputEventKey k && k.Pressed && !k.Echo && k.Keycode == Key.Escape)
@@ -89,58 +109,6 @@ public partial class GameManager : Node2D
             GameSession.Clear();
             GetTree().ChangeSceneToFile(ReadyScenePath);
         }
-    }
-
-    [Export] public string ConfigFileName = "fighter_config.csv";
-
-    // Loads numeric tuning from a loose CSV next to the executable (so non-engine users can tune),
-    // falling back to the bundled res:// copy. Vertical table: header "key,p1,p2"; one config per row.
-    private void LoadAndApplyConfig()
-    {
-        string text = ReadConfigText();
-        if (string.IsNullOrEmpty(text)) return;
-
-        var p1col = new System.Collections.Generic.Dictionary<string, string>();
-        var p2col = new System.Collections.Generic.Dictionary<string, string>();
-
-        var lines = text.Replace("\r\n", "\n").Replace("\r", "\n").Split('\n');
-        bool headerSeen = false;
-        foreach (var raw in lines)
-        {
-            var line = raw.Trim();
-            if (line.Length == 0 || line.StartsWith("#")) continue;
-            var cells = line.Split(',');
-            if (cells.Length < 3) continue;
-            if (!headerSeen) { headerSeen = true; continue; } // skip "key,p1,p2"
-            string key = cells[0].Trim();
-            if (key.Length == 0) continue;
-            p1col[key] = cells[1];
-            p2col[key] = cells[2];
-        }
-
-        p1?.ApplyConfig(p1col);
-        p2?.ApplyConfig(p2col);
-    }
-
-    private string ReadConfigText()
-    {
-        // 1) loose file next to the binary (editable without the engine)
-        string exeDir = OS.GetExecutablePath().GetBaseDir();
-        string looksePath = exeDir + "/" + ConfigFileName;
-        if (Godot.FileAccess.FileExists(looksePath))
-        {
-            using var f = Godot.FileAccess.Open(looksePath, Godot.FileAccess.ModeFlags.Read);
-            if (f != null) return f.GetAsText();
-        }
-        // 2) bundled fallback
-        string resPath = "res://" + ConfigFileName;
-        if (Godot.FileAccess.FileExists(resPath))
-        {
-            using var f = Godot.FileAccess.Open(resPath, Godot.FileAccess.ModeFlags.Read);
-            if (f != null) return f.GetAsText();
-        }
-        GD.PushWarning($"[GameManager] config not found: {looksePath} or {resPath}; using engine defaults.");
-        return null;
     }
 
     private static void CacheAndHideLabel(Label l, ref Vector2 home)
@@ -159,66 +127,76 @@ public partial class GameManager : Node2D
             return;
         }
 
-        p1.LatchInput();
-        p2.LatchInput();
+        var res = _sim.Step(p1.BuildInputFrame(), p2.BuildInputFrame());
 
-        UpdateFacings();
+        // push logic -> views (position + animation commands)
+        p1.SyncFromSim();
+        p2.SyncFromSim();
 
-        p1.TickStartJumpIfRequested(p1.FacingRight ? 1 : -1);
-        p2.TickStartJumpIfRequested(p2.FacingRight ? 1 : -1);
+        foreach (int id in res.SpawnedProjectileIds) SpawnProjectileView(id);
+        SyncProjectileViews();
 
-        p1.TickGroundStance();
-        p2.TickGroundStance();
+        foreach (var h in res.Hits)
+            PlayHitFeedback(h.Result, h.WorldHitbox.ToGodot(), h.DefenderIndex == 0 ? p1 : p2);
 
-        ResolveMovement(delta);
-
-        p1.TickApplyMovement();
-        p2.TickApplyMovement();
-
-        p1.TickVertical(delta);
-        p2.TickVertical(delta);
-        ClampToStage(p1);
-        ClampToStage(p2);
-
-        p1.TickMoves();
-        p2.TickMoves();
-
-        // displacement specials move the character after their move has started this tick;
-        // re-clamp so the new position stays on stage the same frame.
-        p1.TickMoveDisplacement();
-        p2.TickMoveDisplacement();
-        ClampToStage(p1);
-        ClampToStage(p2);
-
-        p1.TickAdvanceTimers();
-        p2.TickAdvanceTimers();
-
-        ProcessSpecials();
-
-        ResolveHits();
+        foreach (var pop in res.Popups) ShowCommandPopup(pop.PlayerIndex, pop.Text);
 
         UpdateHpBars();
-        CheckKO();
+
+        // winner index: 1 = P2 won (P1 dead), 0 = P1 won (P2 dead) — matches old CheckKO mapping
+        if (res.MatchOverWinner == 1) BeginWin(p2WinAnim, p1);
+        else if (res.MatchOverWinner == 0) BeginWin(p1WinAnim, p2);
     }
 
-    // spawn queued projectiles and show queued command-success popups
-    private void ProcessSpecials()
+    private SimProjectile FindProjectile(int id)
     {
-        if (p1.ConsumeProjectileSpawn(out var s1)) SpawnProjectile(p1, s1, p2);
-        if (p2.ConsumeProjectileSpawn(out var s2)) SpawnProjectile(p2, s2, p1);
-        if (p1.ConsumeCommandSuccess(out var t1)) ShowCommandPopup(0, t1);
-        if (p2.ConsumeCommandSuccess(out var t2)) ShowCommandPopup(1, t2);
+        var list = _sim.Projectiles;
+        for (int i = 0; i < list.Count; i++)
+            if (list[i].Id == id) return list[i];
+        return null;
     }
 
-    private void SpawnProjectile(Player owner, ProjectileSpec spec, Player target)
+    private void SpawnProjectileView(int id)
     {
-        if (owner.ProjectileScene == null) return;
-        var proj = owner.ProjectileScene.Instantiate<Projectile>();
-        int dir = owner.FacingRight ? 1 : -1;
-        var off = new Vector2(spec.Offset.X * dir, spec.Offset.Y); // x measured forward
-        proj.Position = owner.GlobalPosition + off;
-        AddChild(proj);
-        proj.Init(dir, spec, target, this);
+        var pr = FindProjectile(id);
+        if (pr == null) return;
+        var owner = pr.OwnerIndex == 0 ? p1 : p2;
+        if (owner.ProjectileScene == null) return; // no visual; the logic projectile still runs
+        var node = owner.ProjectileScene.Instantiate<Projectile>();
+        node.Position = new Vector2(pr.Position.X, pr.Position.Y);
+        AddChild(node);
+        node.Init(pr.Dir);
+        _projViews[id] = node;
+    }
+
+    // mirror live sim projectile positions onto view nodes; free views whose projectile ended
+    private void SyncProjectileViews()
+    {
+        _liveIds.Clear();
+        var list = _sim.Projectiles;
+        for (int i = 0; i < list.Count; i++)
+        {
+            var pr = list[i];
+            _liveIds.Add(pr.Id);
+            if (_projViews.TryGetValue(pr.Id, out var node) && IsInstanceValid(node))
+                node.Position = new Vector2(pr.Position.X, pr.Position.Y);
+        }
+
+        _toRemove.Clear();
+        foreach (var kv in _projViews)
+            if (!_liveIds.Contains(kv.Key)) _toRemove.Add(kv.Key);
+        foreach (int id in _toRemove)
+        {
+            if (_projViews.TryGetValue(id, out var node) && IsInstanceValid(node)) node.QueueFree();
+            _projViews.Remove(id);
+        }
+    }
+
+    private void FreeProjectileViews()
+    {
+        foreach (var kv in _projViews)
+            if (IsInstanceValid(kv.Value)) kv.Value.QueueFree();
+        _projViews.Clear();
     }
 
     private void ShowCommandPopup(int playerIndex, string text)
@@ -229,118 +207,14 @@ public partial class GameManager : Node2D
 
         var popup = CmdPopupScene.Instantiate<Control>();
         popup.GetNode<Label>("Label").Text = text + " 成功";
-        // Fixed 800x600-space anchor per side. HUD is a CanvasLayer and stretch
-        // mode "viewport" scales the whole framebuffer as one unit, so the popup
-        // stays proportional at any window size — no per-node scaling needed.
         popup.Position = new Vector2(playerIndex == 0 ? 142 : 658, 560);
         hud.AddChild(popup);
 
-        // Fade the root once: modulate cascades to bg + label together.
         var t = CreateTween();
         t.TweenInterval(0.9);
         t.TweenProperty(popup, "modulate:a", 0f, 0.4f).SetTrans(Tween.TransitionType.Linear);
         var pref = popup;
         t.TweenCallback(Callable.From(() => pref.QueueFree()));
-    }
-
-    private void FreeProjectiles()
-    {
-        foreach (var child in GetChildren())
-            if (child is Projectile p) p.QueueFree();
-    }
-
-    private void ResolveMovement(double dt)
-    {
-        // Airborne: no push / no inter-player gap block — players pass over each other (cross-up).
-        // Airborne player owns its X in TickJumpPhysics (DesiredDeltaX stays 0 via IsBusy).
-        if (p1.IsAirborne || p2.IsAirborne)
-        {
-            p1.DesiredDeltaX = (p1.IsAirborne || p1.IsBusy) ? 0 : SignFromInput(p1) * p1.WalkSpeedPxPerSec * (float)dt;
-            p2.DesiredDeltaX = (p2.IsAirborne || p2.IsBusy) ? 0 : SignFromInput(p2) * p2.WalkSpeedPxPerSec * (float)dt;
-            return;
-        }
-
-        float v1 = SignFromInput(p1) * p1.WalkSpeedPxPerSec * (float)dt;
-        float v2 = SignFromInput(p2) * p2.WalkSpeedPxPerSec * (float)dt;
-        if (p1.IsBusy) v1 = 0;
-        if (p2.IsBusy) v2 = 0;
-
-        var box1 = p1.GetWorldHurtbox();
-        var box2 = p2.GetWorldHurtbox();
-        bool p1IsLeft = box1.Position.X < box2.Position.X;
-
-        float gap = p1IsLeft
-            ? box2.Position.X - (box1.Position.X + box1.Size.X)
-            : box1.Position.X - (box2.Position.X + box2.Size.X);
-
-        bool p1Toward = p1IsLeft ? v1 > 0 : v1 < 0;
-        bool p2Toward = p1IsLeft ? v2 < 0 : v2 > 0;
-
-        bool p1Pushes = p1Toward && !p2.IsDirectionPressed;
-        bool p2Pushes = p2Toward && !p1.IsDirectionPressed;
-
-        if (gap <= 0.5f && p1Pushes)
-        {
-            float half = v1 * 0.5f;
-            p1.DesiredDeltaX = half;
-            p2.DesiredDeltaX = half;
-            return;
-        }
-        if (gap <= 0.5f && p2Pushes)
-        {
-            float half = v2 * 0.5f;
-            p1.DesiredDeltaX = half;
-            p2.DesiredDeltaX = half;
-            return;
-        }
-
-        float approach = (p1Toward ? Mathf.Abs(v1) : 0) + (p2Toward ? Mathf.Abs(v2) : 0);
-        if (approach > 0 && approach > gap && gap > 0)
-        {
-            float scale = gap / approach;
-            if (p1Toward) v1 *= scale;
-            if (p2Toward) v2 *= scale;
-        }
-        else if (gap <= 0 && (p1Toward || p2Toward))
-        {
-            if (p1Toward) v1 = 0;
-            if (p2Toward) v2 = 0;
-        }
-
-        p1.DesiredDeltaX = v1;
-        p2.DesiredDeltaX = v2;
-    }
-
-    private void UpdateFacings()
-    {
-        if (!p1.IsAirborne && CanTurn(p1)) p1.FacingRight = p2.GlobalPosition.X >= p1.GlobalPosition.X;
-        if (!p2.IsAirborne && CanTurn(p2)) p2.FacingRight = p1.GlobalPosition.X >= p2.GlobalPosition.X;
-    }
-
-    private static bool CanTurn(Player p) =>
-        p.State != Player.PlayerState.Attack && p.State != Player.PlayerState.Hurt
-        && p.State != Player.PlayerState.Dead && p.State != Player.PlayerState.DefenseHit
-        && p.State != Player.PlayerState.Juggle && p.State != Player.PlayerState.AirHurt
-        && p.State != Player.PlayerState.Downed && p.State != Player.PlayerState.Wakeup;
-
-    private static int SignFromInput(Player p)
-    {
-        if (p.InLeft && !p.InRight) return -1;
-        if (p.InRight && !p.InLeft) return 1;
-        return 0;
-    }
-
-    private void ClampToStage(Player p)
-    {
-        var pos = p.Position;
-        pos.X = Mathf.Clamp(pos.X, StageMinX, StageMaxX);
-        p.Position = pos;
-    }
-
-    private void ResolveHits()
-    {
-        TryHit(p1, p2);
-        TryHit(p2, p1);
     }
 
     private void StartBgm()
@@ -350,32 +224,16 @@ public partial class GameManager : Node2D
         if (!Bgm.Playing) Bgm.Play();
     }
 
-    private void TryHit(Player attacker, Player defender)
+    // Spawns the hit/guard spark + plays the matching SFX at the contact point. Shared by melee
+    // and projectiles (via sim HitFeedback events) so a fireball impact reads like a normal strike.
+    public void PlayHitFeedback(HitResult res, Rect2 hitBox, Player defender)
     {
-        if (!attacker.IsAttackingActive) return;
-        if (defender.State == Player.PlayerState.Dead) return;
-        if (defender.IsInvincible) return; // knocked down / waking up
-        var hitBox = attacker.GetWorldHitbox();
-        if (defender.HurtboxOverlaps(hitBox))
-        {
-            int pushDir = attacker.GlobalPosition.X <= defender.GlobalPosition.X ? 1 : -1; // shove away from attacker
-            var res = defender.ApplyDamage(attacker.CurrentMove, pushDir);
-            attacker.ConsumeAttackHit();
-            PlayHitFeedback(res, hitBox, defender);
-        }
-    }
-
-    // Spawns the hit/guard spark + plays the matching SFX at the contact point.
-    // Shared by melee (TryHit) and projectiles (Projectile.OnHit) so a fireball
-    // impact reads identically to a normal strike (and a blocked one to a block).
-    public void PlayHitFeedback(Player.HitResult res, Rect2 hitBox, Player defender)
-    {
-        if (res == Player.HitResult.None) return;
+        if (res == HitResult.None) return;
 
         var pt = HitContactPoint(hitBox, defender);
         // FX oriented by the DEFENDER's facing: art authored facing-left; mirror when facing right.
-        bool flip = defender.FacingRight;
-        if (res == Player.HitResult.Hit)
+        bool flip = defender.Sim.FacingRight;
+        if (res == HitResult.Hit)
         {
             SpawnFx(HitFxScene, pt, flip);
             PlaySfx(SfxHit);
@@ -387,8 +245,6 @@ public partial class GameManager : Node2D
         }
     }
 
-    // Plays a one-shot SFX with a random pitch offset (± SfxPitchVariation) so
-    // repeated hits don't sound machine-gun identical.
     private void PlaySfx(AudioStreamPlayer p)
     {
         if (p == null) return;
@@ -397,14 +253,14 @@ public partial class GameManager : Node2D
         p.Play();
     }
 
-    // center of the hitbox ∩ hurtbox overlap (industry-standard spark placement);
-    // falls back to the midpoint of the two box centers if the bounding intersection is empty.
+    // center of the hitbox ∩ hurtbox overlap; falls back to the midpoint of the two box centers.
     private static Vector2 HitContactPoint(Rect2 hitBox, Player defender)
     {
-        var inter = hitBox.Intersection(defender.GetWorldHurtbox());
+        var hurt = defender.Sim.GetWorldHurtbox().ToGodot();
+        var inter = hitBox.Intersection(hurt);
         if (inter.Size.X > 0f && inter.Size.Y > 0f)
             return inter.Position + inter.Size * 0.5f;
-        return (hitBox.GetCenter() + defender.GetWorldHurtbox().GetCenter()) * 0.5f;
+        return (hitBox.GetCenter() + hurt.GetCenter()) * 0.5f;
     }
 
     // flip = mirror on X (directional FX faces the correct way for the defender)
@@ -416,7 +272,6 @@ public partial class GameManager : Node2D
         fx.Scale = new Vector2(flip ? -1f : 1f, 1f);
         AddChild(fx);
 
-        // FX particles ship inert (emitting=false / not yet restarted) — fire them now.
         foreach (var n in fx.FindChildren("*", "GPUParticles2D", true, false))
             if (n is GpuParticles2D ps) ps.Restart();
 
@@ -427,29 +282,18 @@ public partial class GameManager : Node2D
 
     private void UpdateHpBars()
     {
+        if (p1?.Sim == null || p2?.Sim == null) return;
         if (hp1Fill != null)
         {
             var s = hp1Fill.Size;
-            s.X = HpBarFullWidth * Mathf.Clamp(p1.Hp / (float)p1.MaxHp, 0, 1);
+            s.X = HpBarFullWidth * Mathf.Clamp(p1.Sim.Hp / (float)p1.Sim.MaxHp, 0, 1);
             hp1Fill.Size = s;
         }
         if (hp2Fill != null)
         {
-            float w = HpBarFullWidth * Mathf.Clamp(p2.Hp / (float)p2.MaxHp, 0, 1);
+            float w = HpBarFullWidth * Mathf.Clamp(p2.Sim.Hp / (float)p2.Sim.MaxHp, 0, 1);
             var s = hp2Fill.Size; s.X = w; hp2Fill.Size = s;
             var pos = hp2Fill.Position; pos.X = HpBarFullWidth - w; hp2Fill.Position = pos;
-        }
-    }
-
-    private void CheckKO()
-    {
-        if (p1.State == Player.PlayerState.Dead && p2.State != Player.PlayerState.Dead)
-        {
-            BeginWin(p2WinAnim, p1);
-        }
-        else if (p2.State == Player.PlayerState.Dead && p1.State != Player.PlayerState.Dead)
-        {
-            BeginWin(p1WinAnim, p2);
         }
     }
 
@@ -508,9 +352,12 @@ public partial class GameManager : Node2D
         RestoreLabel(p2WinLine2, _p2L2Home);
         if (p1WinAnim != null) { p1WinAnim.Visible = false; p1WinAnim.Stop(); }
         if (p2WinAnim != null) { p2WinAnim.Visible = false; p2WinAnim.Stop(); }
-        FreeProjectiles();
-        p1.ResetForNewRound(P1StartPos, true);
-        p2.ResetForNewRound(P2StartPos, false);
+
+        FreeProjectileViews();
+        _sim.Reset();
+        p1.SyncFromSim();
+        p2.SyncFromSim();
+
         UpdateHpBars();
         _phase = Phase.Fighting;
     }

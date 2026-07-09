@@ -1,5 +1,6 @@
 using Godot;
 using System.Collections.Generic;
+using MouseKombat.Sim;
 
 // Input device abstraction. Each source is a plain C# object polled exactly once per
 // frame by its owner (ReadyScreen for all candidates; each Player for its own in-game).

@@ -4,4 +4,8 @@
     <TargetFramework Condition=" '$(GodotTargetPlatform)' == 'android' ">net9.0</TargetFramework>
     <EnableDynamicLoading>true</EnableDynamicLoading>
   </PropertyGroup>
+  <ItemGroup>
+    <!-- Pure combat-logic library (no Godot dep), shared with the RL trainer. -->
+    <ProjectReference Include="..\MouseKombat.Sim\MouseKombat.Sim.csproj" />
+  </ItemGroup>
 </Project>
