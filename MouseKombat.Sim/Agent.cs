@@ -8,6 +8,10 @@ namespace MouseKombat.Sim;
 public interface IAgent
 {
     InputFrame Decide(GameSim sim, int selfIndex);
+
+    // Clear per-episode/per-round state (edge-detection, timers). Called on a round reset so the
+    // agent starts each round clean — mirrors the training env resetting between episodes.
+    void Reset();
 }
 
 // Simple deterministic finite-state AI: approach, poke with normals in range, block when the
@@ -25,6 +29,8 @@ public sealed class StateMachineAgent : IAgent
     private const int PokeCooldown = 18;    // frames between pokes
 
     public StateMachineAgent(int seed = 0) { _seed = seed; }
+
+    public void Reset() { _t = 0; _attackCd = 0; }
 
     public InputFrame Decide(GameSim sim, int selfIndex)
     {

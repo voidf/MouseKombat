@@ -376,6 +376,8 @@ public partial class GameManager : Node2D
 
         FreeProjectileViews();
         _sim.Reset();
+        p1.Agent?.Reset();   // clear per-round agent state (AI edge-detection/timers)
+        p2.Agent?.Reset();
         p1.SyncFromSim();
         p2.SyncFromSim();
 

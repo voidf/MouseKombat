@@ -48,5 +48,9 @@ public sealed class OnnxAgent : IAgent, IDisposable
         return new InputFrame(left, right, up, down, mask);
     }
 
+    // Clear edge-detection state at the start of each round (else a button held at round-end
+    // stays "pressed" and can never re-fire next round — the cross-round freeze bug).
+    public void Reset() => Array.Clear(_prevBtn, 0, _prevBtn.Length);
+
     public void Dispose() => _session?.Dispose();
 }
