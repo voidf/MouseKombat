@@ -180,16 +180,40 @@ internal static class Program
             Check(sim.P2.Hp < 100, $"fireball damaged P2 (Hp {sim.P2.Hp})");
         }
 
-        // G. observation vector: fixed size, sane values, reserved tail zeroed
+        // G. observation vector: fixed size, sane values, char slots + zeroed regions
         {
-            var sim = MakeSim(300, 360);
+            var sim = MakeSim(300, 360);   // P1 Hamster, P2 Kangaroo
             sim.Step(InputFrame.Neutral, InputFrame.Neutral);
             var obs = Observation.Get(sim, 0);
             Check(obs.Length == Observation.Size && obs.Length == 32, $"observation size 32 (got {obs.Length})");
             Check(obs[0] == 1f && obs[1] == 1f, "observation: both HP full = 1.0");
-            bool tailZero = true;
-            for (int k = 23; k < obs.Length; k++) if (obs[k] != 0f) tailZero = false;
-            Check(tailZero, "observation: reserved tail is zero");
+            bool projZero = true;
+            for (int k = 23; k < 28; k++) if (obs[k] != 0f) projZero = false;
+            Check(projZero, "observation: projectile slots zero when nothing on screen");
+            Check(obs[28] == 0f && obs[29] == 1f, "observation: char slots = self Hamster(0), opp Kangaroo(1)");
+            Check(obs[30] == 0f && obs[31] == 0f, "observation: reserved tail (30,31) zero");
+        }
+
+        // G2. projectile awareness: an incoming fireball populates the projectile obs slots
+        {
+            var sim = MakeSim(200, 420);
+            // P1 (Hamster, faces right) throws 236P; P2 idle
+            for (int i = 0; i < 120; i++)
+            {
+                bool downFwd = i == 2 || i == 3;
+                bool fwd = i >= 4 && i <= 6;
+                int m = i == 6 ? Mask(AttackButton.LP) : 0;
+                var f1 = new InputFrame(false, downFwd || fwd, false, (i <= 1) || downFwd, m);
+                sim.Step(f1, InputFrame.Neutral);
+                // from P2's view (idx 1), an incoming (P1-owned) fireball should set slot 23 = 1
+                if (sim.Projectiles.Count > 0)
+                {
+                    var o2 = Observation.Get(sim, 1);
+                    Check(o2[23] == 1f, "obs[23] incoming-active = 1 while a P1 fireball is live (P2 view)");
+                    break;
+                }
+                if (i == 119) Check(false, "expected a fireball to spawn for the projectile-obs test");
+            }
         }
 
         // H. headless throughput: sim steps far faster than the 60 fps wall-clock lock

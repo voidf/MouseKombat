@@ -90,6 +90,7 @@ public sealed class SimPlayer
 
     public int MaxHp => _cfg.MaxHp;                          // for the view's HP bar
     public float WalkSpeedPxPerSec => _cfg.WalkSpeedPxPerSec; // for GameSim.ResolveMovement
+    public CharacterId Character => _cfg.Character;           // for observation (asymmetric matchup)
 
     public bool IsDefending =>
         (State == PlayerState.Idle || State == PlayerState.Walk || State == PlayerState.Crouch || State == PlayerState.CrouchExit)

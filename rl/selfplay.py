@@ -1,25 +1,31 @@
-"""Self-play PPO: train a Hamster policy against a growing pool of its own past snapshots
-(plus the state-machine as a bootstrap/anchor). Randomizes which side the learner controls.
+"""Self-play PPO for the ASYMMETRIC matchup. Each episode the learner randomly plays Hamster OR
+Kangaroo, on a random side, at a random start distance; the opponent is always the OTHER character
+(mirrors the real game, which is never same-vs-same). Opponent = a sampled past snapshot (shared
+policy that plays both characters, char is in the observation) or a scripted teacher (state-machine
+/ zoner / rusher, zoner-heavy to force learning to approach through fireballs & crouch-block lows).
 
-Why self-play: beating one fixed weak opponent (train.py) caps skill. Playing evolving copies of
-itself forces real spacing / punishes / anti-airs. Snapshots are saved to checkpoints/pool/.
+Pool is on the FILESYSTEM (checkpoints/pool/*.zip) so SubprocVecEnv workers across all CPU cores
+share it. Env vars: MK_NENVS (default 16), MK_SUBPROC (default 1).
 
-Usage:  python rl/selfplay.py [total_timesteps]
+Usage:  python rl/selfplay.py [total_steps] [init_ckpt] [out_name]
 """
 import os
 import sys
+import glob
+import shutil
 import random
 import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
 from stable_baselines3 import PPO
 from stable_baselines3.common.env_util import make_vec_env
+from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv
 from stable_baselines3.common.callbacks import BaseCallback
 
 from mk_env import _ensure_runtime
 _ensure_runtime()
 from MouseKombat.Sim import (  # noqa: E402
-    GameSim, PlayerConfig, InputFrame, StateMachineAgent, CharacterId, Observation,
+    GameSim, PlayerConfig, InputFrame, StateMachineAgent, ZonerAgent, RusherAgent, CharacterId, Observation,
 )
 from System.Numerics import Vector2  # noqa: E402
 
@@ -27,10 +33,13 @@ OBS = 32
 NUM_ACT = 10
 HERE = os.path.dirname(__file__)
 POOL_DIR = os.path.join(HERE, "checkpoints", "pool")
+POOL_RECENT = 20  # sample opponents from the most-recent N snapshots (bounds per-worker cache)
 
-# in-process shared pool (DummyVecEnv => envs share module globals)
-_pool_paths = []
 _pol_cache = {}
+
+
+def _pool_files():
+    return sorted(glob.glob(os.path.join(POOL_DIR, "*.zip")))
 
 
 def _load_policy(path):
@@ -48,8 +57,19 @@ def _decode(press, prev):
     return InputFrame(bool(press[0]), bool(press[1]), bool(press[2]), bool(press[3]), int(mask))
 
 
+# scripted teachers, zoner-weighted (anti-zoning is the hardest + human-exploited skill)
+_SCRIPTED_WEIGHTS = [(ZonerAgent, 0.55), (RusherAgent, 0.25), (StateMachineAgent, 0.20)]
+def _make_scripted():
+    r, acc = random.random(), 0.0
+    for cls, w in _SCRIPTED_WEIGHTS:
+        acc += w
+        if r < acc:
+            return cls(random.randint(0, 9999))
+    return StateMachineAgent(random.randint(0, 9999))
+
+
 class SelfPlayEnv(gym.Env):
-    def __init__(self, max_steps=3600, pool_prob=0.8):
+    def __init__(self, max_steps=3600, pool_prob=0.5):
         super().__init__()
         self.observation_space = spaces.Box(-4.0, 4.0, (OBS,), np.float32)
         self.action_space = spaces.MultiBinary(NUM_ACT)
@@ -57,31 +77,40 @@ class SelfPlayEnv(gym.Env):
         self._pool_prob = pool_prob
 
     def _make(self):
-        ch = getattr(CharacterId, os.environ.get("MK_CHAR", "Hamster"))  # MK_CHAR=Kangaroo to train the roo
-        c1 = PlayerConfig(); c1.Character = ch; c1.StartPos = Vector2(300.0, 560.0); c1.StartFacingRight = True
-        c2 = PlayerConfig(); c2.Character = ch; c2.StartPos = Vector2(500.0, 560.0); c2.StartFacingRight = False
+        learner = random.choice([CharacterId.Hamster, CharacterId.Kangaroo])
+        opp = CharacterId.Kangaroo if learner == CharacterId.Hamster else CharacterId.Hamster
+        self._self = random.randint(0, 1)          # learner side: 0 = left (P1), 1 = right (P2)
+        self._opp = 1 - self._self
+        left_char, right_char = (learner, opp) if self._self == 0 else (opp, learner)
+        lx = random.uniform(80.0, 350.0)
+        rx = random.uniform(450.0, 720.0)          # random start distance, incl. the real far start
+        c1 = PlayerConfig(); c1.Character = left_char; c1.StartPos = Vector2(lx, 560.0); c1.StartFacingRight = True
+        c2 = PlayerConfig(); c2.Character = right_char; c2.StartPos = Vector2(rx, 560.0); c2.StartFacingRight = False
         return GameSim(c1, c2, 40.0, 760.0, 800.0)
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
         self._sim = self._make()
-        self._self = random.randint(0, 1)          # learner controls a random side
-        self._opp = 1 - self._self
-        if _pool_paths and random.random() < self._pool_prob:
-            self._opp_pol = _load_policy(random.choice(_pool_paths)); self._opp_sm = None
+        files = _pool_files()
+        if files and random.random() < self._pool_prob:
+            self._opp_pol = _load_policy(random.choice(files[-POOL_RECENT:])); self._opp_ag = None
         else:
-            self._opp_pol = None; self._opp_sm = StateMachineAgent(random.randint(0, 9999))
+            self._opp_pol = None; self._opp_ag = _make_scripted()
         self._prev_self = np.zeros(6, bool)
         self._prev_opp = np.zeros(6, bool)
         self._steps = 0
+        self._prev_dist = self._gap()
         return self._obs(self._self), {}
+
+    def _gap(self):
+        return abs(self._sim.Player(self._opp).Position.X - self._sim.Player(self._self).Position.X)
 
     def _obs(self, idx):
         return np.array(list(Observation.Get(self._sim, idx)), dtype=np.float32)
 
     def _opp_frame(self):
-        if self._opp_sm is not None:
-            return self._opp_sm.Decide(self._sim, self._opp)
+        if self._opp_ag is not None:
+            return self._opp_ag.Decide(self._sim, self._opp)
         act, _ = self._opp_pol.predict(self._obs(self._opp), deterministic=False)
         return _decode(np.asarray(act).astype(bool), self._prev_opp)
 
@@ -97,6 +126,10 @@ class SelfPlayEnv(gym.Env):
         h1s, h1o = me.Hp, op.Hp
 
         reward = (h0o - h1o) / 100.0 - (h0s - h1s) / 100.0 - 0.0005
+        dist = self._gap()
+        reward += 0.002 * (self._prev_dist - dist) / 100.0   # tiny approach shaping
+        self._prev_dist = dist
+
         term = trunc = False
         w = res.MatchOverWinner
         if w == self._self:
@@ -109,38 +142,44 @@ class SelfPlayEnv(gym.Env):
 
 
 class SnapshotCallback(BaseCallback):
-    def __init__(self, every, verbose=0):
+    """Every `every` steps: add a pool snapshot AND overwrite the main out model (so an
+    interrupted overnight run still leaves a usable/latest checkpoint to export in the morning)."""
+    def __init__(self, every, out_path, verbose=0):
         super().__init__(verbose)
         self.every = every
+        self.out_path = out_path
         self._last = 0
 
     def _on_step(self):
         if self.num_timesteps - self._last >= self.every:
             self._last = self.num_timesteps
             os.makedirs(POOL_DIR, exist_ok=True)
-            p = os.path.join(POOL_DIR, f"snap_{self.num_timesteps}.zip")
-            self.model.save(p)
-            _pool_paths.append(p)
+            self.model.save(os.path.join(POOL_DIR, f"snap_{self.num_timesteps:09d}"))
+            self.model.save(self.out_path)   # latest, for morning export
             if self.verbose:
-                print(f"[selfplay] snapshot -> {os.path.basename(p)} (pool={len(_pool_paths)})")
+                print(f"[selfplay] step {self.num_timesteps}: snapshot + saved {os.path.basename(self.out_path)} "
+                      f"(pool={len(_pool_files())})", flush=True)
         return True
 
 
 def main():
     total = int(sys.argv[1]) if len(sys.argv) > 1 else 1_000_000
-    init = sys.argv[2] if len(sys.argv) > 2 else None  # warm-start + pool anchor (e.g. v0)
-    n_envs = 8
+    init = sys.argv[2] if len(sys.argv) > 2 else None
+    out_name = sys.argv[3] if len(sys.argv) > 3 else "ppo_selfplay"
+    out_path = os.path.join(HERE, "checkpoints", out_name)
 
-    # Anchor the pool with a fixed reference policy so the learner must keep beating it
-    # (prevents drifting into a self-play bubble that loses to outside styles). FSM stays the
-    # bootstrap anchor via reset()'s pool_prob branch.
-    if init:
-        _pool_paths.append(init)
+    # seed the pool with the init model as an anchor so workers spar against it from step 0
+    os.makedirs(POOL_DIR, exist_ok=True)
+    if init and os.path.exists(init):
+        shutil.copy(init, os.path.join(POOL_DIR, "snap_000000000_anchor.zip"))
 
-    venv = make_vec_env(SelfPlayEnv, n_envs=n_envs)
-    if init:
-        model = PPO.load(init, env=venv, device="cpu")  # warm-start from init's weights
-        print(f"[selfplay] warm-started from {init}")
+    n_envs = int(os.environ.get("MK_NENVS", "16"))
+    vec_cls = SubprocVecEnv if os.environ.get("MK_SUBPROC", "1") == "1" else DummyVecEnv
+    venv = make_vec_env(SelfPlayEnv, n_envs=n_envs, vec_env_cls=vec_cls)
+
+    if init and os.path.exists(init):
+        model = PPO.load(init, env=venv, device="cpu")
+        print(f"[selfplay] warm-started from {init}", flush=True)
     else:
         model = PPO(
             "MlpPolicy", venv,
@@ -149,12 +188,10 @@ def main():
             policy_kwargs=dict(net_arch=[256, 256]),
             verbose=1, device="cpu",
         )
-    cb = SnapshotCallback(every=max(1, total // 10), verbose=1)
+    cb = SnapshotCallback(every=300_000, out_path=out_path, verbose=1)
     model.learn(total_timesteps=total, callback=cb, progress_bar=False)
-    out_name = sys.argv[3] if len(sys.argv) > 3 else "ppo_hamster_selfplay_v1"
-    out = os.path.join(HERE, "checkpoints", out_name)
-    model.save(out)
-    print(f"saved {out}.zip")
+    model.save(out_path)
+    print(f"saved {out_path}.zip", flush=True)
 
 
 if __name__ == "__main__":

@@ -11,9 +11,11 @@ from stable_baselines3 import PPO
 from mk_env import _ensure_runtime
 _ensure_runtime()
 from MouseKombat.Sim import (  # noqa: E402
-    GameSim, PlayerConfig, InputFrame, StateMachineAgent, CharacterId, Observation,
+    GameSim, PlayerConfig, InputFrame, StateMachineAgent, ZonerAgent, RusherAgent, CharacterId, Observation,
 )
 from System.Numerics import Vector2  # noqa: E402
+
+_SCRIPTED = {"statemachine": StateMachineAgent, "zoner": ZonerAgent, "rusher": RusherAgent}
 
 
 def _decode(press, prev):
@@ -26,32 +28,34 @@ def _decode(press, prev):
 
 
 class Ctrl:
-    """Uniform controller over a policy or the state machine, with per-round reset."""
+    """Uniform controller over a scripted agent or a policy .zip, with per-round reset."""
     def __init__(self, spec, seed):
         self.spec = spec
         self.seed = seed
-        self.is_sm = (spec == "statemachine")
-        self.pol = None if self.is_sm else PPO.load(spec, device="cpu")
-        self.sm = None
+        self.scripted = _SCRIPTED.get(spec)
+        self.pol = None if self.scripted else PPO.load(spec, device="cpu")
+        self.ag = None
         self.prev = np.zeros(6, bool)
 
     def reset(self):
         self.prev[:] = False
-        if self.is_sm:
-            self.sm = StateMachineAgent(self.seed)
+        if self.scripted:
+            self.ag = self.scripted(self.seed)
 
     def frame(self, sim, idx):
-        if self.is_sm:
-            return self.sm.Decide(sim, idx)
+        if self.scripted:
+            return self.ag.Decide(sim, idx)
         obs = np.array(list(Observation.Get(sim, idx)), dtype=np.float32)
         act, _ = self.pol.predict(obs, deterministic=False)
         return _decode(np.asarray(act).astype(bool), self.prev)
 
 
 def make():
-    ch = getattr(CharacterId, os.environ.get("MK_CHAR", "Hamster"))
-    c1 = PlayerConfig(); c1.Character = ch; c1.StartPos = Vector2(300.0, 560.0); c1.StartFacingRight = True
-    c2 = PlayerConfig(); c2.Character = ch; c2.StartPos = Vector2(500.0, 560.0); c2.StartFacingRight = False
+    # real matchup by default: P1 Hamster (left) vs P2 Kangaroo (right). Override via MK_P1CHAR/MK_P2CHAR.
+    p1c = getattr(CharacterId, os.environ.get("MK_P1CHAR", "Hamster"))
+    p2c = getattr(CharacterId, os.environ.get("MK_P2CHAR", "Kangaroo"))
+    c1 = PlayerConfig(); c1.Character = p1c; c1.StartPos = Vector2(200.0, 560.0); c1.StartFacingRight = True
+    c2 = PlayerConfig(); c2.Character = p2c; c2.StartPos = Vector2(600.0, 560.0); c2.StartFacingRight = False
     return GameSim(c1, c2, 40.0, 760.0, 800.0)
 
 
