@@ -67,6 +67,14 @@ public partial class GameManager : Node2D
             if (p1 != null) { p1.Source = GameSession.P1; p1.Agent = GameSession.P1Agent; }
             if (p2 != null) { p2.Source = GameSession.P2; p2.Agent = GameSession.P2Agent; }
         }
+        else
+        {
+            // Dev/testing hook: with no lobby config, env vars can bind an AI to each slot.
+            //   MK_AI_P1 / MK_AI_P2 = "statemachine"  OR  a model path (e.g. res://ai_rl_model/x.onnx)
+            // No effect in normal play. Enables headless AI-vs-AI runs.
+            BindDebugAgent(p1, OS.GetEnvironment("MK_AI_P1"), 0);
+            BindDebugAgent(p2, OS.GetEnvironment("MK_AI_P2"), 1);
+        }
 
         // Build the sim from the players' exported tuning; force start pos/facing to the
         // director's own values (matches the original reset convention: p1 faces right, p2 left).
@@ -152,6 +160,14 @@ public partial class GameManager : Node2D
     // AI agent overrides device input when present; else poll the device / InputMap.
     private InputFrame FrameFor(Player p, int index)
         => p.Agent != null ? p.Agent.Decide(_sim, index) : p.BuildInputFrame();
+
+    private static void BindDebugAgent(Player p, string spec, int seed)
+    {
+        if (p == null || string.IsNullOrEmpty(spec)) return;
+        if (spec.ToLower() == "statemachine") { p.Agent = new StateMachineAgent(seed); GD.Print($"[dbg] P{seed + 1} = StateMachine"); return; }
+        try { p.Agent = new OnnxAgent(ProjectSettings.GlobalizePath(spec)); GD.Print($"[dbg] P{seed + 1} = ONNX {spec}"); }
+        catch (System.Exception e) { GD.PushError($"[dbg] P{seed + 1} ONNX load failed: {e.Message}"); }
+    }
 
     private SimProjectile FindProjectile(int id)
     {

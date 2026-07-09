@@ -195,12 +195,20 @@ public partial class ReadyScreen : Control
         }
         else
         {
-            // TODO(rl): real OnnxAgent (Microsoft.ML.OnnxRuntime) once the obs/action contract is
-            // finalized with the training pipeline. Until then a picked .onnx falls back to the
-            // state machine so selection never crashes.
-            GD.PushWarning($"[ReadyScreen] ONNX agent not implemented yet: {item.path}; using state machine.");
-            agent = new StateMachineAgent(_menuSlot);
-            name = item.name + "(占位)";
+            // load the trained policy; on any failure fall back to the state machine so the
+            // lobby never breaks on a bad/missing model file.
+            try
+            {
+                string osPath = ProjectSettings.GlobalizePath(item.path);
+                agent = new OnnxAgent(osPath);
+                name = item.name;
+            }
+            catch (System.Exception e)
+            {
+                GD.PushError($"[ReadyScreen] failed to load ONNX {item.path}: {e.Message}; using state machine.");
+                agent = new StateMachineAgent(_menuSlot);
+                name = item.name + "(载入失败)";
+            }
         }
 
         if (_menuSlot == 0) { _agP1 = agent; _devP1 = null; _aiNameP1 = name; }

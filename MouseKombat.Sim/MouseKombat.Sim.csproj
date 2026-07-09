@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <!-- match the game csproj: it switches to net9.0 for the android export -->
+    <TargetFramework Condition=" '$(GodotTargetPlatform)' == 'android' ">net9.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <!-- Pure logic library: no Godot dependency, loadable headless by pythonnet. -->
+    <RootNamespace>MouseKombat.Sim</RootNamespace>
+    <AssemblyName>MouseKombat.Sim</AssemblyName>
+    <!-- Emit MouseKombat.Sim.runtimeconfig.json even for a library so Python (pythonnet +
+         clr_loader coreclr) can host this assembly directly for RL training. -->
+    <GenerateRuntimeConfigurationFiles>true</GenerateRuntimeConfigurationFiles>
+  </PropertyGroup>
+</Project>

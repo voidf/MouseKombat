@@ -3,3 +3,14 @@
 /android/
 Out/
 Exported_GIFs/
+
+# .NET build output (MouseKombat.Sim library + tests)
+[Bb]in/
+[Oo]bj/
+
+# Python (RL trainer under rl/)
+__pycache__/
+*.pyc
+.venv/
+venv/
+rl/checkpoints/

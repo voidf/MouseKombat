@@ -1,0 +1,87 @@
+using System;
+
+namespace MouseKombat.Sim;
+
+// A non-human input provider: given the current sim state, decide this player's InputFrame.
+// Godot-free so it works headless (RL warmup opponents) and in-game (bound to a Player).
+// A future ONNX-backed policy implements this same interface on the Godot side.
+public interface IAgent
+{
+    InputFrame Decide(GameSim sim, int selfIndex);
+}
+
+// Simple deterministic finite-state AI: approach, poke with normals in range, block when the
+// opponent commits an attack, anti-air jumps. Not strong — meant to win against a passive or
+// weak opponent and to seed self-play. No RNG (frame-counter + seed drive variety) so episodes
+// stay deterministic. NOTE: reads opponent State/position only — never the opponent input queue.
+public sealed class StateMachineAgent : IAgent
+{
+    private int _t;          // frames since construction
+    private int _attackCd;   // frames until the next poke is allowed
+    private readonly int _seed;
+
+    private const float PokeRange = 110f;   // within this gap, throw normals
+    private const float BlockRange = 150f;  // block incoming attacks inside this gap
+    private const int PokeCooldown = 18;    // frames between pokes
+
+    public StateMachineAgent(int seed = 0) { _seed = seed; }
+
+    public InputFrame Decide(GameSim sim, int selfIndex)
+    {
+        _t++;
+        if (_attackCd > 0) _attackCd--;
+
+        var self = sim.Player(selfIndex);
+        var opp = sim.Player(1 - selfIndex);
+
+        // committed / uncontrollable states: do nothing (let them resolve)
+        if (self.State is PlayerState.Attack or PlayerState.Hurt or PlayerState.Dead
+            or PlayerState.DefenseHit or PlayerState.Jump or PlayerState.Juggle
+            or PlayerState.AirHurt or PlayerState.Downed or PlayerState.Wakeup)
+            return InputFrame.Neutral;
+
+        float gap = opp.Position.X - self.Position.X; // >0 => opponent on the right
+        float dist = MathF.Abs(gap);
+        bool oppRight = gap >= 0f;
+
+        // block: opponent is in an attack's startup/active and we're close -> hold back (away)
+        int oppPhase = opp.AttackPhase();
+        if (dist < BlockRange && opp.State == PlayerState.Attack && (oppPhase == 1 || oppPhase == 2))
+        {
+            // back = away from the opponent
+            return new InputFrame(oppRight, !oppRight, false, false, 0);
+        }
+
+        // anti-air: opponent airborne and near -> heavy punch (5HP)
+        if (opp.IsAirborne && dist < BlockRange && _attackCd == 0)
+        {
+            _attackCd = PokeCooldown;
+            return new InputFrame(false, false, false, false, 1 << (int)AttackButton.HP);
+        }
+
+        // approach when out of poke range
+        if (dist > PokeRange)
+        {
+            bool up = dist > 220f && (_t % 150) == (_seed % 150); // occasional jump-in
+            return new InputFrame(!oppRight ? true : false, oppRight, up, false, 0);
+        }
+
+        // in range: poke on cooldown, rotating a few normals
+        if (_attackCd == 0)
+        {
+            int pick = (_t / 7 + _seed) & 3;
+            bool crouch = pick == 3;
+            AttackButton b = pick switch
+            {
+                0 => AttackButton.LK,
+                1 => AttackButton.MK,
+                2 => AttackButton.LP,
+                _ => AttackButton.LK,
+            };
+            _attackCd = PokeCooldown;
+            return new InputFrame(false, false, false, crouch, 1 << (int)b);
+        }
+
+        return InputFrame.Neutral;
+    }
+}
