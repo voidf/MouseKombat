@@ -60,11 +60,12 @@ public partial class GameManager : Node2D
     {
         StartBgm();
 
-        // device bindings chosen in the ready screen; null Source => InputMap fallback
+        // device bindings chosen in the ready screen; null Source => InputMap fallback.
+        // An Agent (state-machine or ONNX policy) overrides the device when set.
         if (GameSession.Configured)
         {
-            if (p1 != null) p1.Source = GameSession.P1;
-            if (p2 != null) p2.Source = GameSession.P2;
+            if (p1 != null) { p1.Source = GameSession.P1; p1.Agent = GameSession.P1Agent; }
+            if (p2 != null) { p2.Source = GameSession.P2; p2.Agent = GameSession.P2Agent; }
         }
 
         // Build the sim from the players' exported tuning; force start pos/facing to the
@@ -127,7 +128,7 @@ public partial class GameManager : Node2D
             return;
         }
 
-        var res = _sim.Step(p1.BuildInputFrame(), p2.BuildInputFrame());
+        var res = _sim.Step(FrameFor(p1, 0), FrameFor(p2, 1));
 
         // push logic -> views (position + animation commands)
         p1.SyncFromSim();
@@ -147,6 +148,10 @@ public partial class GameManager : Node2D
         if (res.MatchOverWinner == 1) BeginWin(p2WinAnim, p1);
         else if (res.MatchOverWinner == 0) BeginWin(p1WinAnim, p2);
     }
+
+    // AI agent overrides device input when present; else poll the device / InputMap.
+    private InputFrame FrameFor(Player p, int index)
+        => p.Agent != null ? p.Agent.Decide(_sim, index) : p.BuildInputFrame();
 
     private SimProjectile FindProjectile(int id)
     {

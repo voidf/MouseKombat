@@ -20,6 +20,10 @@ public partial class Player : Node2D
     // opened directly in the editor) input falls back to the InputMap actions above.
     public IInputSource Source;
 
+    // Optional AI/policy driver. When set, GameManager asks it for this player's InputFrame
+    // instead of polling the device (Source). Bound from the ready screen's AI menu.
+    public IAgent Agent;
+
     // The logic object this view mirrors; created + bound by GameManager after the sim exists.
     public SimPlayer Sim;
 
