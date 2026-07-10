@@ -57,8 +57,10 @@ def _decode(press, prev):
     return InputFrame(bool(press[0]), bool(press[1]), bool(press[2]), bool(press[3]), int(mask))
 
 
-# scripted teachers, zoner-weighted (anti-zoning is the hardest + human-exploited skill)
-_SCRIPTED_WEIGHTS = [(ZonerAgent, 0.55), (RusherAgent, 0.25), (StateMachineAgent, 0.20)]
+# scripted teachers. Zoner (approach through fireballs) + heavy Rusher (close pressure -> teaches
+# blocking & wakeup defense, v5's weak spots).
+_SCRIPTED_WEIGHTS = [(ZonerAgent, 0.40), (RusherAgent, 0.40), (StateMachineAgent, 0.20)]
+_DEFHIT = 5  # PlayerState.DefenseHit index
 def _make_scripted():
     r, acc = random.random(), 0.0
     for cls, w in _SCRIPTED_WEIGHTS:
@@ -99,7 +101,7 @@ class SelfPlayEnv(gym.Env):
         self._prev_self = np.zeros(6, bool)
         self._prev_opp = np.zeros(6, bool)
         self._steps = 0
-        self._prev_dist = self._gap()
+        self._prev_st = self._sim.Player(self._self).StateIndex
         return self._obs(self._self), {}
 
     def _gap(self):
@@ -126,9 +128,12 @@ class SelfPlayEnv(gym.Env):
         h1s, h1o = me.Hp, op.Hp
 
         reward = (h0o - h1o) / 100.0 - (h0s - h1s) / 100.0 - 0.0005
-        dist = self._gap()
-        reward += 0.002 * (self._prev_dist - dist) / 100.0   # tiny approach shaping
-        self._prev_dist = dist
+        # reward a successful block (transition into DefenseHit) so it guards instead of eating hits.
+        # (Removed the old approach-shaping term — it punished holding back and killed blocking.)
+        st = me.StateIndex
+        if st == _DEFHIT and self._prev_st != _DEFHIT:
+            reward += 0.02
+        self._prev_st = st
 
         term = trunc = False
         w = res.MatchOverWinner
@@ -188,7 +193,7 @@ def main():
             policy_kwargs=dict(net_arch=[256, 256]),
             verbose=1, device="cpu",
         )
-    cb = SnapshotCallback(every=300_000, out_path=out_path, verbose=1)
+    cb = SnapshotCallback(every=max(300_000, total // 400), out_path=out_path, verbose=1)
     model.learn(total_timesteps=total, callback=cb, progress_bar=False)
     model.save(out_path)
     print(f"saved {out_path}.zip", flush=True)
