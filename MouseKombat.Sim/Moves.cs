@@ -266,12 +266,12 @@ public static class MoveSets
         moves.Add(new MoveDef {
             Id = "236P", AnimName = "AtkHadou", Button = AttackButton.LP, Stance = Stance.Stand,
             Motion = MotionInput.Qcf, AnyPunch = true, CommandLabel = "↓↘→+P",
-            Startup = 12, Active = 0, Recovery = 24, Damage = 0, Guard = GuardHeight.High,
+            Startup = 16, Active = 0, Recovery = 33, Damage = 0, Guard = GuardHeight.High,
             Hitbox = new SimRect(0, 0, 0, 0), // no melee judgement; the projectile carries offense
             SpawnsProjectile = true, ProjectileSpawnFrame = 12,
             Projectile = new ProjectileSpec {
                 Speed = 520f, Offset = new Vec2(95, -130),
-                Damage = 12, Guard = GuardHeight.High, MaxDistance = 900f,
+                Damage = 6, Guard = GuardHeight.High, MaxDistance = 900f,
                 Hitbox = new SimRect(-55, -40, 110, 80), // matches csProjectile.tscn
             },
         });
@@ -451,12 +451,12 @@ public static class MoveSets
         moves.Add(new MoveDef {
             Id = "236P", AnimName = "AtkHadou", Button = AttackButton.LP, Stance = Stance.Stand,
             Motion = MotionInput.Qcf, AnyPunch = true, CommandLabel = "↓↘→+P",
-            Startup = 12, Active = 0, Recovery = 24, Damage = 0, Guard = GuardHeight.High,
+            Startup = 14, Active = 0, Recovery = 35, Damage = 0, Guard = GuardHeight.High,
             Hitbox = new SimRect(0, 0, 0, 0), // no melee judgement; the projectile carries offense
             SpawnsProjectile = true, ProjectileSpawnFrame = 12,
             Projectile = new ProjectileSpec {
                 Speed = 520f, Offset = new Vec2(95, -50),
-                Damage = 12, Guard = GuardHeight.Low, MaxDistance = 900f,
+                Damage = 6, Guard = GuardHeight.Low, MaxDistance = 900f,
                 Hitbox = new SimRect(-60, -26, 138, 73), // matches dsProjectile.tscn
             },
         });
