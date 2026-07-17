@@ -62,6 +62,11 @@ public sealed class SimPlayer
     private float _jumpHVel = 0f;
     private float _groundY = 0f;
 
+    private int _hurtStunDuration = 14;     // per-hit stun frames (from move.oH or config fallback)
+    private int _defHitStunDuration = 10;   // per-block stun frames (from move.oB or config fallback)
+    private int _juggleHitCount = 0;        // consecutive juggle hits (resets on ground hit)
+    private const int MaxJuggleHits = 3;    // juggle limit before forced air reset
+
     public bool IsAirborne => Position.Y < _groundY - 0.5f;
 
     public int CurrentAtkDamage => _curDamage;
@@ -433,7 +438,7 @@ public sealed class SimPlayer
         else if (State == PlayerState.Hurt)
         {
             _hurtFrame++;
-            if (_hurtFrame >= _cfg.HurtStunFrames)
+            if (_hurtFrame >= _hurtStunDuration)
             {
                 _hurtFrame = -1;
                 EndStunToNeutral();
@@ -442,7 +447,7 @@ public sealed class SimPlayer
         else if (State == PlayerState.DefenseHit)
         {
             _defHitFrame++;
-            if (_defHitFrame >= _cfg.DefHitStunFrames)
+            if (_defHitFrame >= _defHitStunDuration)
             {
                 _defHitFrame = -1;
                 EndStunToNeutral();
@@ -587,11 +592,34 @@ public sealed class SimPlayer
         {
             State = PlayerState.DefenseHit;
             _defHitFrame = 0;
+            _defHitStunDuration = move.oB > 0 ? move.oB : _cfg.DefHitStunFrames;
             PlayAnim(crouchBlock ? _cfg.CrouchDefAnimName : _cfg.DefAnimName, true);
+            if (move.KnockbackOnBlock > 0)
+                Position += new Vec2(pushDir * move.KnockbackOnBlock, 0);
             return HitResult.Blocked;
         }
 
-        bool juggle = move.Launches || (airborne && !move.IsLight);
+        // ---- resolve juggle / air-reset / ground-stun ----
+        bool juggle;
+        if (!airborne)
+        {
+            _juggleHitCount = 0;
+            juggle = move.Launches;
+        }
+        else
+        {
+            bool canJuggle = move.CanAirJuggle && !move.IsLight;
+            if (canJuggle && _juggleHitCount < MaxJuggleHits)
+            {
+                juggle = true;
+                _juggleHitCount++;
+            }
+            else
+            {
+                juggle = false;
+            }
+        }
+
         if (juggle)
         {
             State = PlayerState.Juggle;
@@ -612,7 +640,10 @@ public sealed class SimPlayer
         {
             State = PlayerState.Hurt;
             _hurtFrame = 0;
+            _hurtStunDuration = move.oH > 0 ? move.oH : _cfg.HurtStunFrames;
             PlayAnim(_cfg.HurtAnimName, true);
+            if (move.Knockback > 0)
+                Position += new Vec2(pushDir * move.Knockback, 0);
         }
         return HitResult.Hit;
     }
@@ -633,6 +664,9 @@ public sealed class SimPlayer
         _atkHitConsumed = false;
         _vy = 0f;
         _jumpHVel = 0f;
+        _juggleHitCount = 0;
+        _hurtStunDuration = _cfg.HurtStunFrames;
+        _defHitStunDuration = _cfg.DefHitStunFrames;
         _curMove = null;
         _airMove = false;
         _projectileSpawned = false;

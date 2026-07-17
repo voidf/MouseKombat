@@ -99,6 +99,10 @@ public sealed class GameSim
         ResolveHits(res);       // melee (parent ran before projectile-node children)
         AdvanceProjectiles(res, preExisting);
 
+        // re-clamp after hit knockback may have pushed players past stage bounds
+        ClampToStage(P1);
+        ClampToStage(P2);
+
         CheckKO(res);
         return res;
     }

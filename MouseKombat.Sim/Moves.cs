@@ -17,6 +17,10 @@ public struct ProjectileSpec
     public GuardHeight Guard;  // hit height (High/Mid/Low) — reused for high/low fireballs
     public float MaxDistance;  // travel before self-destruct
     public SimRect Hitbox;     // local hit rect, flipped by travel dir (was a Projectile.tscn export)
+    public bool CanAirJuggle;  // default false → projectiles air-reset instead of juggling
+    public float Knockback;    // horizontal knockback on hit (px)
+    public int oH;             // stun frames on hit (0 → use config default)
+    public int oB;             // stun frames on block (0 → use config default)
 }
 
 // One entry of a move's optional per-frame hurtbox timeline.
@@ -62,6 +66,21 @@ public sealed class MoveDef
     public float LaunchBack = 120f;  // horizontal knockback (px/s) away from attacker
 
     public bool IsLight => Button == AttackButton.LP || Button == AttackButton.LK;
+
+    // ---- per-move hit/block stun & knockback ----
+    // oH = On Hit: defender stun frames (0 = use PlayerConfig default).
+    // oB = On Block: defender stun frames (0 = use PlayerConfig default).
+    public int oH = 14;
+    public int oB = 10;
+
+    // horizontal knockback applied to defender on ground hit / block (px).
+    // airborne targets use velocity-driven knockback (LaunchBack) instead.
+    public float Knockback = 0f;
+    public float KnockbackOnBlock = 0f;
+
+    // when hitting an airborne opponent: true = can trigger juggle state,
+    // false = always air-reset. Light normals (LP/LK) always air-reset regardless.
+    public bool CanAirJuggle = true;
 
     // Simultaneous-press trigger (e.g. throw = LP+LK). Non-null => matched by ResolveThrow
     // before specials/normals; the two buttons must land within a frame gap (SF6 ~2 frames).
@@ -180,18 +199,21 @@ public static class MoveSets
                 Id = "5LP", AnimName = "AtkU", Button = AttackButton.LP,
                 Startup = 4, Active = 3, Recovery = 7, Damage = 3, Guard = GuardHeight.High,
                 Hitbox = new SimRect(50, -130, 52, 40),
+                oH = 14, oB = 6, Knockback = 6f, KnockbackOnBlock = 0f,
                 CancelInto = new[] { "5MP", "5HP", "5LK", "5MK", "5HK" },
             },
             new MoveDef {
                 Id = "5MP", AnimName = "AtkI", Button = AttackButton.MP,
                 Startup = 5, Active = 4, Recovery = 10, Damage = 6, Guard = GuardHeight.High,
                 Hitbox = new SimRect(50, -145, 75, 75),
+                oH = 19, oB = 14, Knockback = 14f, KnockbackOnBlock = 0f,
                 CancelInto = new[] { "5HP", "5MK", "5HK" },
             },
             new MoveDef {
                 Id = "5HP", AnimName = "AtkO", Button = AttackButton.HP,
                 Startup = 10, Active = 6, Recovery = 21, Damage = 9, Guard = GuardHeight.High,
                 Hitbox = new SimRect(20, -210, 150, 110),
+                oH = 26, oB = 17, Knockback = 20f, KnockbackOnBlock = 0f,
                 CancelInto = new[] { "5HK" },
                 // ---- SAMPLE: per-region hurtbox timeline ----
                 // Rects are LOCAL & authored facing-LEFT (same convention as the base boxes;
@@ -214,50 +236,59 @@ public static class MoveSets
                 Id = "5LK", AnimName = "AtkJ", Button = AttackButton.LK,
                 Startup = 4, Active = 2, Recovery = 10, Damage = 3, Guard = GuardHeight.High,
                 Hitbox = new SimRect(20, -120, 110, 40),
+                oH = 14, oB = 10, Knockback = 10f, KnockbackOnBlock = 0f,
                 CancelInto = new[] { "5MP", "5HP", "5MK", "5HK" },
             },
             new MoveDef {
                 Id = "5MK", AnimName = "AtkK", Button = AttackButton.MK,
                 Startup = 10, Active = 3, Recovery = 17, Damage = 7, Guard = GuardHeight.High,
                 Hitbox = new SimRect(20, -150, 120, 80),
+                oH = 21, oB = 16, Knockback = 20f, KnockbackOnBlock = 0f,
                 CancelInto = new[] { "5HP", "5HK" },
             },
             new MoveDef {
                 Id = "5HK", AnimName = "AtkL", Button = AttackButton.HK,
                 Startup = 25, Active = 2, Recovery = 35, Damage = 16, Guard = GuardHeight.High,
                 Hitbox = new SimRect(40, -150, 160, 70),
+                oH = 0, oB = 33, Knockback = 0f, KnockbackOnBlock = 0f,
                 Launches = true, // launcher: ground hit -> juggle
             },
             // AirAtk
             new MoveDef {
                 Id = "jLP", AnimName = "AirAtkL", Button = AttackButton.LP, Stance = Stance.Air,
-                Startup = 9, Active = 6, Recovery = 12, Damage = 15, Guard = GuardHeight.High,
+                Startup = 9, Active = 6, Recovery = 12, Damage = 8, Guard = GuardHeight.High,
                 Hitbox = new SimRect(20, -100, 100, 60),
+                oH = 14, oB = 9, Knockback = 6f, KnockbackOnBlock = 0f,
             },
             new MoveDef {
                 Id = "jMP", AnimName = "AirAtkL", Button = AttackButton.MP, Stance = Stance.Air,
-                Startup = 9, Active = 6, Recovery = 12, Damage = 15, Guard = GuardHeight.High,
+                Startup = 9, Active = 6, Recovery = 12, Damage = 8, Guard = GuardHeight.High,
                 Hitbox = new SimRect(20, -100, 100, 60),
+                oH = 14, oB = 9, Knockback = 6f, KnockbackOnBlock = 0f,
             },
             new MoveDef {
                 Id = "jHP", AnimName = "AirAtkL", Button = AttackButton.HP, Stance = Stance.Air,
-                Startup = 9, Active = 6, Recovery = 12, Damage = 15, Guard = GuardHeight.High,
+                Startup = 9, Active = 6, Recovery = 12, Damage = 8, Guard = GuardHeight.High,
                 Hitbox = new SimRect(20, -100, 100, 60),
+                oH = 14, oB = 9, Knockback = 6f, KnockbackOnBlock = 0f,
             },
             new MoveDef {
                 Id = "jLK", AnimName = "AirAtkL", Button = AttackButton.LK, Stance = Stance.Air,
-                Startup = 9, Active = 6, Recovery = 12, Damage = 15, Guard = GuardHeight.High,
+                Startup = 9, Active = 6, Recovery = 12, Damage = 8, Guard = GuardHeight.High,
                 Hitbox = new SimRect(20, -100, 100, 60),
+                oH = 14, oB = 9, Knockback = 6f, KnockbackOnBlock = 0f,
             },
             new MoveDef {
                 Id = "jMK", AnimName = "AirAtkL", Button = AttackButton.MK, Stance = Stance.Air,
-                Startup = 9, Active = 6, Recovery = 12, Damage = 15, Guard = GuardHeight.High,
+                Startup = 9, Active = 6, Recovery = 12, Damage = 8, Guard = GuardHeight.High,
                 Hitbox = new SimRect(20, -100, 100, 60),
+                oH = 14, oB = 9, Knockback = 6f, KnockbackOnBlock = 0f,
             },
             new MoveDef {
                 Id = "jHK", AnimName = "AirAtkL", Button = AttackButton.HK, Stance = Stance.Air,
-                Startup = 9, Active = 6, Recovery = 12, Damage = 15, Guard = GuardHeight.High,
+                Startup = 9, Active = 6, Recovery = 12, Damage = 8, Guard = GuardHeight.High,
                 Hitbox = new SimRect(20, -100, 100, 60),
+                oH = 14, oB = 9, Knockback = 6f, KnockbackOnBlock = 0f,
             },
         };
 
@@ -273,6 +304,10 @@ public static class MoveSets
                 Speed = 520f, Offset = new Vec2(95, -130),
                 Damage = 6, Guard = GuardHeight.High, MaxDistance = 900f,
                 Hitbox = new SimRect(-55, -40, 110, 80), // matches csProjectile.tscn
+                CanAirJuggle = false,
+                Knockback = 10f,
+                oH = 30,
+                oB = 26,
             },
         });
         // ---- SAMPLE: displacement special (dragon-punch style) — QCF + Kick ----
@@ -285,6 +320,7 @@ public static class MoveSets
             Motion = MotionInput.Dp, AnyPunch = true, CommandLabel = "→↓↘+P",
             Startup = 5, Active = 10, Recovery = 33, Damage = 11, Guard = GuardHeight.High,
             Hitbox = new SimRect(30, -240, 90, 200), // tall rising hitbox
+            oH = 0, oB = 19, Knockback = 0f, KnockbackOnBlock = 0f,
             Launches = true,                         // DP-style: launches into a juggle on hit
             MotionTimeline = new[] {
                 // startup crouch (0-5): tiny forward creep, still grounded
@@ -329,36 +365,42 @@ public static class MoveSets
                 Id = "5LP", AnimName = "AtkU", Button = AttackButton.LP,
                 Startup = 4, Active = 3, Recovery = 7, Damage = 3, Guard = GuardHeight.High,
                 Hitbox = new SimRect(50, -150, 44, 50),
+                oH = 14, oB = 7, Knockback = 6f, KnockbackOnBlock = 0f,
                 CancelInto = new[] { "5MP", "5HP", "5LK", "5MK", "5HK" },
             },
             new MoveDef {
                 Id = "5MP", AnimName = "AtkI", Button = AttackButton.MP,
                 Startup = 8, Active = 4, Recovery = 15, Damage = 6, Guard = GuardHeight.High,
                 Hitbox = new SimRect(50, -150, 70, 50),
+                oH = 20, oB = 15, Knockback = 12f, KnockbackOnBlock = 0f,
                 CancelInto = new[] { "5HP", "5MK", "5HK" },
             },
             new MoveDef {
                 Id = "5HP", AnimName = "AtkO", Button = AttackButton.HP,
                 Startup = 9, Active = 3, Recovery = 21, Damage = 8, Guard = GuardHeight.High,
                 Hitbox = new SimRect(50, -150, 140, 130),
+                oH = 24, oB = 20, Knockback = 20f, KnockbackOnBlock = 0f,
                 CancelInto = new[] { "5HK" },
             },
             new MoveDef {
                 Id = "5LK", AnimName = "AtkJ", Button = AttackButton.LK,
                 Startup = 4, Active = 3, Recovery = 8, Damage = 3, Guard = GuardHeight.High,
                 Hitbox = new SimRect(50, -144, 64, 74),
+                oH = 11, oB = 9, Knockback = 4f, KnockbackOnBlock = 0f,
                 CancelInto = new[] { "5MP", "5HP", "5MK", "5HK" },
             },
             new MoveDef {
                 Id = "5MK", AnimName = "AtkK", Button = AttackButton.MK,
                 Startup = 9, Active = 3, Recovery = 18, Damage = 7, Guard = GuardHeight.High,
                 Hitbox = new SimRect(50, -154, 80, 70),
+                oH = 25, oB = 16, Knockback = 10f, KnockbackOnBlock = 0f,
                 CancelInto = new[] { "5HP", "5HK" },
             },
             new MoveDef {
                 Id = "5HK", AnimName = "AtkL", Button = AttackButton.HK,
                 Startup = 5, Active = 18, Recovery = 30, Damage = 9, Guard = GuardHeight.High,
                 Hitbox = new SimRect(20, -280, 110, 240),
+                oH = 0, oB = 18, Knockback = 0f, KnockbackOnBlock = 12f,
                 Launches = true, // launcher: ground hit -> juggle
                 MotionTimeline = new[] {
                     // startup crouch (0-5): tiny forward creep, still grounded
@@ -417,33 +459,39 @@ public static class MoveSets
             // AirAtk
             new MoveDef {
                 Id = "jLP", AnimName = "AirAtkL", Button = AttackButton.LP, Stance = Stance.Air,
-                Startup = 15, Active = 6, Recovery = 12, Damage = 15, Guard = GuardHeight.High,
+                Startup = 10, Active = 7, Recovery = 12, Damage = 8, Guard = GuardHeight.High,
                 Hitbox = new SimRect(20, -120, 160, 80),
+                oH = 14, oB = 8, Knockback = 6f, KnockbackOnBlock = 0f,
             },
             new MoveDef {
                 Id = "jMP", AnimName = "AirAtkL", Button = AttackButton.MP, Stance = Stance.Air,
-                Startup = 15, Active = 6, Recovery = 12, Damage = 15, Guard = GuardHeight.High,
+                Startup = 10, Active = 7, Recovery = 12, Damage = 8, Guard = GuardHeight.High,
                 Hitbox = new SimRect(20, -120, 160, 80),
+                oH = 14, oB = 8, Knockback = 6f, KnockbackOnBlock = 0f,
             },
             new MoveDef {
                 Id = "jHP", AnimName = "AirAtkL", Button = AttackButton.HP, Stance = Stance.Air,
-                Startup = 15, Active = 6, Recovery = 12, Damage = 15, Guard = GuardHeight.High,
+                Startup = 10, Active = 7, Recovery = 12, Damage = 8, Guard = GuardHeight.High,
                 Hitbox = new SimRect(20, -120, 160, 80),
+                oH = 14, oB = 8, Knockback = 6f, KnockbackOnBlock = 0f,
             },
             new MoveDef {
                 Id = "jLK", AnimName = "AirAtkL", Button = AttackButton.LK, Stance = Stance.Air,
-                Startup = 15, Active = 6, Recovery = 12, Damage = 15, Guard = GuardHeight.High,
+                Startup = 10, Active = 7, Recovery = 12, Damage = 8, Guard = GuardHeight.High,
                 Hitbox = new SimRect(20, -120, 160, 80),
+                oH = 14, oB = 8, Knockback = 6f, KnockbackOnBlock = 0f,
             },
             new MoveDef {
                 Id = "jMK", AnimName = "AirAtkL", Button = AttackButton.MK, Stance = Stance.Air,
-                Startup = 15, Active = 6, Recovery = 12, Damage = 15, Guard = GuardHeight.High,
+                Startup = 10, Active = 7, Recovery = 12, Damage = 8, Guard = GuardHeight.High,
                 Hitbox = new SimRect(20, -120, 160, 80),
+                oH = 14, oB = 8, Knockback = 6f, KnockbackOnBlock = 0f,
             },
             new MoveDef {
                 Id = "jHK", AnimName = "AirAtkL", Button = AttackButton.HK, Stance = Stance.Air,
-                Startup = 15, Active = 6, Recovery = 12, Damage = 15, Guard = GuardHeight.High,
+                Startup = 10, Active = 7, Recovery = 12, Damage = 8, Guard = GuardHeight.High,
                 Hitbox = new SimRect(20, -120, 160, 80),
+                oH = 14, oB = 8, Knockback = 6f, KnockbackOnBlock = 0f,
             },
         };
         AppendCrouchAndThrow(moves);
@@ -458,6 +506,10 @@ public static class MoveSets
                 Speed = 520f, Offset = new Vec2(95, -50),
                 Damage = 6, Guard = GuardHeight.Low, MaxDistance = 900f,
                 Hitbox = new SimRect(-60, -26, 138, 73), // matches dsProjectile.tscn
+                CanAirJuggle = false,
+                Knockback = 5f,
+                oH = 32,
+                oB = 26,
             },
         });
         return new MoveSet(moves);
@@ -471,41 +523,51 @@ public static class MoveSets
         // ---- crouching normals: Id "2xx" (FG: 2 = down), Low guard, anims Cr* ----
         moves.Add(new MoveDef {
             Id = "2LP", AnimName = "CrAtkU", Button = AttackButton.LP, Stance = Stance.Crouch,
-            Startup = 4, Active = 3, Recovery = 7, Damage = 5, Guard = GuardHeight.Low,
-            Hitbox = new SimRect(20, -60, 90, 55), CancelInto = new[] { "2MP", "2HP", "2MK", "2HK" },
+            Startup = 4, Active = 3, Recovery = 7, Damage = 3, Guard = GuardHeight.Low,
+            Hitbox = new SimRect(20, -60, 90, 55),
+            oH = 14, oB = 6, Knockback = 3f, KnockbackOnBlock = 1f,
+            CancelInto = new[] { "2MP", "2HP", "2MK", "2HK" },
         });
         moves.Add(new MoveDef {
             Id = "2MP", AnimName = "CrAtkI", Button = AttackButton.MP, Stance = Stance.Crouch,
-            Startup = 6, Active = 3, Recovery = 11, Damage = 8, Guard = GuardHeight.Low,
-            Hitbox = new SimRect(20, -65, 120, 60), CancelInto = new[] { "2HP", "2HK" },
+            Startup = 5, Active = 4, Recovery = 10, Damage = 6, Guard = GuardHeight.Low,
+            Hitbox = new SimRect(20, -65, 120, 60),
+            oH = 19, oB = 14, Knockback = 7f, KnockbackOnBlock = 1f,
+            CancelInto = new[] { "2HP", "2HK" },
         });
         moves.Add(new MoveDef {
             Id = "2HP", AnimName = "CrAtkO", Button = AttackButton.HP, Stance = Stance.Crouch,
-            Startup = 11, Active = 4, Recovery = 20, Damage = 13, Guard = GuardHeight.Low,
+            Startup = 13, Active = 3, Recovery = 20, Damage = 8, Guard = GuardHeight.Low,
             Hitbox = new SimRect(20, -70, 160, 70),
+            oH = 24, oB = 19, Knockback = 11f, KnockbackOnBlock = 1f,
         });
         moves.Add(new MoveDef {
             Id = "2LK", AnimName = "CrAtkJ", Button = AttackButton.LK, Stance = Stance.Crouch,
-            Startup = 5, Active = 3, Recovery = 9, Damage = 5, Guard = GuardHeight.Low,
-            Hitbox = new SimRect(20, -30, 120, 40), CancelInto = new[] { "2MK", "2HK" },
+            Startup = 4, Active = 2, Recovery = 10, Damage = 2, Guard = GuardHeight.Low,
+            Hitbox = new SimRect(20, -30, 120, 40),
+            oH = 11, oB = 9, Knockback = 3f, KnockbackOnBlock = 1f,
+            CancelInto = new[] { "2MK", "2HK" },
         });
         moves.Add(new MoveDef {
             Id = "2MK", AnimName = "CrAtkK", Button = AttackButton.MK, Stance = Stance.Crouch,
-            Startup = 8, Active = 4, Recovery = 14, Damage = 10, Guard = GuardHeight.Low,
+            Startup = 7, Active = 3, Recovery = 19, Damage = 5, Guard = GuardHeight.Low,
             Hitbox = new SimRect(20, -35, 150, 45),
+            oH = 19, oB = 15, Knockback = 6f, KnockbackOnBlock = 1f,
         });
         moves.Add(new MoveDef {
             Id = "2HK", AnimName = "CrAtkL", Button = AttackButton.HK, Stance = Stance.Crouch,
-            Startup = 12, Active = 5, Recovery = 22, Damage = 15, Guard = GuardHeight.Low,
+            Startup = 9, Active = 6, Recovery = 19, Damage = 9, Guard = GuardHeight.Low,
             Hitbox = new SimRect(20, -40, 180, 50), // sweep
+            oH = 27, oB = 15, Knockback = 10f, KnockbackOnBlock = 1f,
         });
 
         // ---- throw: LP+LK within ~2 frames (SF6 classic). Unblockable, short range, stand stance. ----
         moves.Add(new MoveDef {
             Id = "THROW", AnimName = "AtkThrow", Button = AttackButton.LP, Stance = Stance.Stand,
             ComboButtons = new[] { AttackButton.LP, AttackButton.LK }, Unblockable = true,
-            Startup = 5, Active = 2, Recovery = 20, Damage = 18, Guard = GuardHeight.High,
+            Startup = 5, Active = 2, Recovery = 20, Damage = 12, Guard = GuardHeight.High,
             Hitbox = new SimRect(20, -170, 95, 150), // close-range grab box
+            oH = 0, oB = 0, Knockback = 10f, KnockbackOnBlock = 0f,
         });
     }
 }

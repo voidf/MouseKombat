@@ -29,7 +29,15 @@ public sealed class SimProjectile
         _maxDistance = spec.MaxDistance;
         _hitboxLocal = spec.Hitbox;
         // non-light so a mid-air target juggles/air-resets like a normal HP hit (matches old Projectile._hit)
-        _hit = new MoveDef { Damage = spec.Damage, Guard = spec.Guard, Button = AttackButton.HP };
+        _hit = new MoveDef {
+            Damage = spec.Damage,
+            Guard = spec.Guard,
+            Button = AttackButton.HP,
+            CanAirJuggle = spec.CanAirJuggle,
+            Knockback = spec.Knockback,
+            oH = spec.oH,
+            oB = spec.oB,
+        };
     }
 
     public MoveDef Hit => _hit;
