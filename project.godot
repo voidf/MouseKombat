@@ -16,7 +16,7 @@ config/name_localized={
 "zh": "真鼠快打",
 "zh_CN": "真鼠快打"
 }
-config/version="0.0.6"
+config/version="0.0.7"
 run/main_scene="res://ReadyScreen.tscn"
 config/features=PackedStringArray("4.6", "C#", "Mobile")
 config/icon="uid://betfal31o5rh8"

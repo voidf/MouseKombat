@@ -17,6 +17,7 @@
 [ext_resource type="Texture2D" uid="uid://c3pjtusuglldb" path="res://Art/dsAtkHadouAtlas.png" id="7_lcr1l"]
 [ext_resource type="Texture2D" uid="uid://17pk6llub42w" path="res://Art/dsWinAtlas.png" id="7_o8y5o"]
 [ext_resource type="Texture2D" uid="uid://byc4ufhaaqgp" path="res://Art/csHurtAtlas.png" id="8_254nc"]
+[ext_resource type="Texture2D" uid="uid://cyyy3md40jx0f" path="res://Art/ssIdleAtlas.png" id="8_bxo6i"]
 [ext_resource type="Texture2D" uid="uid://4jmwgdpol8de" path="res://Art/dsJumpAtlas.png" id="8_lv44l"]
 [ext_resource type="Texture2D" uid="uid://dl6jhgh6an73t" path="res://Art/csDefAtlas.png" id="9_nmseu"]
 [ext_resource type="Texture2D" uid="uid://wgj8onqetjte" path="res://Art/csWinAtlas.png" id="10_i24j6"]
@@ -51,6 +52,70 @@
 [ext_resource type="PackedScene" uid="uid://cblwghenscetk" path="res://dsProjectile.tscn" id="proj_ds"]
 [ext_resource type="AudioStream" uid="uid://dbt50p4kq2yur" path="res://Art/SFX/SFX_Guard.wav" id="sfx_guard"]
 [ext_resource type="AudioStream" uid="uid://26abicf4m7mx" path="res://Art/SFX/SFX_Hit.ogg" id="sfx_hit"]
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_7x62x"]
+atlas = ExtResource("8_bxo6i")
+region = Rect2(1024, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_ly7oh"]
+atlas = ExtResource("8_bxo6i")
+region = Rect2(512, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_d634e"]
+atlas = ExtResource("8_bxo6i")
+region = Rect2(0, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_50bj1"]
+atlas = ExtResource("8_bxo6i")
+region = Rect2(512, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_cqnql"]
+atlas = ExtResource("8_bxo6i")
+region = Rect2(1024, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_cw63d"]
+atlas = ExtResource("8_bxo6i")
+region = Rect2(1536, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_yphaw"]
+atlas = ExtResource("8_bxo6i")
+region = Rect2(2048, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_xr0l6"]
+atlas = ExtResource("8_bxo6i")
+region = Rect2(1536, 0, 512, 512)
+
+[sub_resource type="SpriteFrames" id="SpriteFrames_8llm0"]
+animations = [{
+"frames": [{
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_7x62x")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_ly7oh")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_d634e")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_50bj1")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_cqnql")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_cw63d")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_yphaw")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_xr0l6")
+}],
+"loop": true,
+"name": &"IDLE",
+"speed": 10.0
+}]
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_l8k6s"]
 atlas = ExtResource("7_7hena")
@@ -2638,6 +2703,27 @@ offset_bottom = 40.0
 texture = ExtResource("2_jj8fq")
 expand_mode = 2
 
+[node name="Player3" type="Node2D" parent="." unique_id=2050235557 node_paths=PackedStringArray("anim")]
+visible = false
+position = Vector2(650, 560)
+script = ExtResource("1_tu88n")
+anim = NodePath("松鼠")
+ActionLeft = "p2_left"
+ActionRight = "p2_right"
+ActionUp = "p2_up"
+ActionDown = "p2_down"
+InputPrefix = "p2"
+Character = 1
+CrouchEnterFrames = 3
+ProjectileScene = ExtResource("proj_ds")
+
+[node name="松鼠" type="AnimatedSprite2D" parent="Player3" unique_id=942326356]
+visible = false
+position = Vector2(0, -107)
+sprite_frames = SubResource("SpriteFrames_8llm0")
+animation = &"IDLE"
+frame_progress = 0.4419187
+
 [node name="Player2" type="Node2D" parent="." unique_id=64225234 node_paths=PackedStringArray("anim")]
 position = Vector2(650, 560)
 script = ExtResource("1_tu88n")
@@ -2654,7 +2740,7 @@ ProjectileScene = ExtResource("proj_ds")
 [node name="袋鼠" type="AnimatedSprite2D" parent="Player2" unique_id=344721729]
 position = Vector2(0, -167)
 sprite_frames = SubResource("SpriteFrames_jd2df")
-animation = &"AtkI"
+animation = &"IDLE"
 
 [node name="Player1" type="Node2D" parent="." unique_id=280155618 node_paths=PackedStringArray("anim")]
 position = Vector2(120, 560)
@@ -2667,9 +2753,7 @@ ProjectileScene = ExtResource("proj_cs")
 [node name="仓鼠" type="AnimatedSprite2D" parent="Player1" unique_id=185176480]
 position = Vector2(0, -107)
 sprite_frames = SubResource("SpriteFrames_iruj8")
-animation = &"AtkL"
-frame = 9
-frame_progress = 1.0
+animation = &"IDLE"
 flip_h = true
 
 [node name="P2WinAnim" type="AnimatedSprite2D" parent="." unique_id=374502234]
