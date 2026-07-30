@@ -39,6 +39,11 @@ public sealed class GameSim
     private readonly float _cullMinX, _cullMaxX;
     private int _nextProjId = 1;
 
+    // index of the player currently holding the other in a throw (-1 = nobody). Only one grab
+    // can be live at a time; the victim is Player(1 - _grabAttacker).
+    private int _grabAttacker = -1;
+    public int GrabAttacker => _grabAttacker;
+
     public bool MatchOver { get; private set; }
 
     public GameSim(PlayerConfig c1, PlayerConfig c2, float stageMinX, float stageMaxX, float worldViewWidth)
@@ -103,6 +108,11 @@ public sealed class GameSim
         ClampToStage(P1);
         ClampToStage(P2);
 
+        // Throw binding runs AFTER the clamps, so a held victim is placed relative to the
+        // attacker's FINAL position this frame. The victim is deliberately not clamped itself:
+        // clamping it would tear it out of the grabber's hands during a corner throw.
+        TickThrowBind(res);
+
         CheckKO(res);
         return res;
     }
@@ -112,6 +122,7 @@ public sealed class GameSim
         P1.ResetForNewRound();
         P2.ResetForNewRound();
         _projectiles.Clear();
+        _grabAttacker = -1;
         MatchOver = false;
     }
 
@@ -125,7 +136,8 @@ public sealed class GameSim
         p.State != PlayerState.Attack && p.State != PlayerState.Hurt
         && p.State != PlayerState.Dead && p.State != PlayerState.DefenseHit
         && p.State != PlayerState.Juggle && p.State != PlayerState.AirHurt
-        && p.State != PlayerState.Downed && p.State != PlayerState.Wakeup;
+        && p.State != PlayerState.Downed && p.State != PlayerState.Wakeup
+        && p.State != PlayerState.Grabbed; // held: facing is owned by the throw's bind key
 
     private static int SignFromInput(SimPlayer p)
     {
@@ -232,6 +244,10 @@ public sealed class GameSim
         if (!attacker.IsAttackingActive) return;
         if (defender.State == PlayerState.Dead) return;
         if (defender.IsInvincible) return;
+
+        // throws never resolve as damage here — they take over the defender instead
+        if (attacker.CurrentMove?.Throw != null) { TryGrab(attacker, defender, defIdx, res); return; }
+
         var hitBox = attacker.GetWorldHitbox();
         if (defender.HurtboxOverlaps(hitBox))
         {
@@ -240,6 +256,75 @@ public sealed class GameSim
             attacker.ConsumeAttackHit();
             res.Hits.Add(new HitFeedback { Result = r, WorldHitbox = hitBox, DefenderIndex = defIdx });
         }
+    }
+
+    // A grab attempt during the move's active frames. On success the defender goes to
+    // PlayerState.Grabbed and TickThrowBind owns it until ReleaseFrame; no damage yet.
+    private void TryGrab(SimPlayer attacker, SimPlayer defender, int defIdx, StepResult res)
+    {
+        if (_grabAttacker >= 0) return;                             // already holding someone
+        var spec = attacker.CurrentMove.Throw;
+        if (!spec.CanGrabAirborne && defender.IsAirborne) return;   // jumping out is the counterplay
+        if (defender.ThrowImmune) return;                           // no throw loops
+
+        var grabBox = attacker.GetWorldGrabBox();
+        // judged against the BODY region only: a poking arm or leg must not be grabbable
+        if (!defender.GetWorldHurt(HurtRegion.Body).Intersects(grabBox)) return;
+
+        attacker.BeginGrab();
+        defender.EnterGrabbed();
+        _grabAttacker = defIdx == 0 ? 1 : 0;
+        res.Hits.Add(new HitFeedback { Result = HitResult.Grabbed, WorldHitbox = grabBox, DefenderIndex = defIdx });
+    }
+
+    // Drives a live throw: force the victim's position + pose from the ATTACKER's bind timeline,
+    // then damage + launch it at the release frame. This is what keeps throw art O(characters):
+    // the victim only plays its own generic poses, never anything drawn for this specific pairing.
+    private void TickThrowBind(StepResult res)
+    {
+        if (_grabAttacker < 0) return;
+
+        var atk = Player(_grabAttacker);
+        int vicIdx = 1 - _grabAttacker;
+        var vic = Player(vicIdx);
+        var spec = atk.CurrentMove?.Throw;
+
+        // grab broken: the attacker was hit out of it / died / the move ended, or the victim is gone
+        if (spec == null || !atk.IsGrabbing || atk.State != PlayerState.Attack
+            || vic.State != PlayerState.Grabbed)
+        {
+            if (vic.State == PlayerState.Grabbed) vic.DropFromGrab();
+            atk.EndGrab();
+            _grabAttacker = -1;
+            return;
+        }
+
+        int f = atk.AtkFrame;
+        int fwd = atk.FacingRight ? 1 : -1;
+
+        if (f >= spec.ReleaseFrame)
+        {
+            var vel = new Vec2(spec.ReleaseVel.X * fwd, spec.ReleaseVel.Y);
+            var r = vic.ReleaseFromGrab(atk.CurrentMove.Damage, vel, spec.ReleaseToJuggle, spec.ThrowImmuneFrames);
+            res.Hits.Add(new HitFeedback { Result = r, WorldHitbox = atk.GetWorldGrabBox(), DefenderIndex = vicIdx });
+            atk.EndGrab();
+            _grabAttacker = -1;
+            return;
+        }
+
+        // resolve the bind key for this frame; a frame past the last key holds that key's pose
+        BindKey use = default;
+        bool found = false;
+        for (int i = 0; i < spec.Bind.Length; i++)
+        {
+            var k = spec.Bind[i];
+            if (f >= k.From && f <= k.To) { use = k; found = true; break; }
+            if (k.From <= f) { use = k; found = true; }
+        }
+        if (!found) return;
+
+        var pos = atk.Position + new Vec2(use.Offset.X * fwd, use.Offset.Y);
+        vic.ApplyGrabbedPose(pos, use.VictimAnim, use.VictimSameDir ? atk.FacingRight : !atk.FacingRight);
     }
 
     private void AdvanceProjectiles(StepResult res, int count)

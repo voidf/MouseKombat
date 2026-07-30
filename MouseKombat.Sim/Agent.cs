@@ -43,7 +43,8 @@ public sealed class StateMachineAgent : IAgent
         // committed / uncontrollable states: do nothing (let them resolve)
         if (self.State is PlayerState.Attack or PlayerState.Hurt or PlayerState.Dead
             or PlayerState.DefenseHit or PlayerState.Jump or PlayerState.Juggle
-            or PlayerState.AirHurt or PlayerState.Downed or PlayerState.Wakeup)
+            or PlayerState.AirHurt or PlayerState.Downed or PlayerState.Wakeup
+            or PlayerState.Grabbed)
             return InputFrame.Neutral;
 
         float gap = opp.Position.X - self.Position.X; // >0 => opponent on the right
@@ -161,7 +162,8 @@ public sealed class RusherAgent : IAgent
         var opp = sim.Player(1 - selfIndex);
         if (self.State is PlayerState.Attack or PlayerState.Hurt or PlayerState.Dead
             or PlayerState.DefenseHit or PlayerState.Jump or PlayerState.Juggle
-            or PlayerState.AirHurt or PlayerState.Downed or PlayerState.Wakeup)
+            or PlayerState.AirHurt or PlayerState.Downed or PlayerState.Wakeup
+            or PlayerState.Grabbed)
             return InputFrame.Neutral;
 
         float gap = opp.Position.X - self.Position.X;

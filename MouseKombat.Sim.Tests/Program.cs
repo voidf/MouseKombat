@@ -250,6 +250,87 @@ internal static class Program
             Check(sim.P2.Hp < 100, $"state-machine AI damaged idle opponent (P2 Hp {sim.P2.Hp})");
             Check(winner == 0, $"state-machine AI KO'd idle opponent (winner {winner}, ~{frames / 60}s)");
         }
+        // J. throw: LP+LK in range -> victim held (Grabbed), then damaged + knocked down at release
+        {
+            var sim = MakeSim(300, 360);
+            bool sawGrabbed = false, sawGrabFeedback = false, sawJuggle = false;
+            int grabbedFrames = 0;
+            float maxLift = 0f;
+            int mask = Mask(AttackButton.LP) | Mask(AttackButton.LK);
+            RunScenario(sim, 120, mask, onStep: r =>
+            {
+                foreach (var h in r.Hits) if (h.Result == HitResult.Grabbed) sawGrabFeedback = true;
+                if (sim.P2.State == PlayerState.Grabbed)
+                {
+                    sawGrabbed = true;
+                    grabbedFrames++;
+                    maxLift = MathF.Max(maxLift, sim.P1.Position.Y - sim.P2.Position.Y); // >0 = lifted
+                }
+                if (sim.P2.State == PlayerState.Juggle) sawJuggle = true;
+            });
+            Check(sawGrabbed, "throw: P2 entered Grabbed");
+            Check(sawGrabFeedback, "throw: a HitResult.Grabbed feedback was emitted on contact");
+            Check(grabbedFrames == 23, $"throw: held for frames 5..27 = 23 frames (got {grabbedFrames})");
+            Check(maxLift > 100f, $"throw: victim was lifted off the attacker's plane (max {maxLift:F0}px)");
+            Check(sim.P2.Hp == 88, $"throw: 12 damage at release -> P2 Hp 88 (got {sim.P2.Hp})");
+            Check(sawJuggle, "throw: victim was launched (Juggle) after release");
+            Check(sim.P2.State is PlayerState.Downed or PlayerState.Wakeup or PlayerState.Idle,
+                $"throw: victim ended up knocked down / recovering (got {sim.P2.State})");
+            Check(sim.GrabAttacker == -1, "throw: grab pairing cleared after release");
+        }
+
+        // J2. throw whiff: out of grab range -> nobody is held, no damage, and the attacker's
+        // total move is SHORTER than a connected throw (WhiffRecovery 20 vs Recovery 30).
+        {
+            var sim = MakeSim(200, 600);
+            bool sawGrabbed = false;
+            int busyFrames = 0;
+            int mask = Mask(AttackButton.LP) | Mask(AttackButton.LK);
+            RunScenario(sim, 60, mask, onStep: _ =>
+            {
+                if (sim.P2.State == PlayerState.Grabbed) sawGrabbed = true;
+                if (sim.P1.State == PlayerState.Attack) busyFrames++;
+            });
+            Check(!sawGrabbed, "throw whiff: nobody was grabbed");
+            Check(sim.P2.Hp == 100, $"throw whiff: no damage (P2 Hp {sim.P2.Hp})");
+            // 5+3+20 = 28 logic frames; the first is consumed by StartMove itself, so 27 steps
+            // are observable with State == Attack. A CONNECTED throw is 5+3+30 = 38 (37 observable).
+            Check(busyFrames == 27, $"throw whiff: 28 committed frames, 27 observable (got {busyFrames})");
+        }
+
+        // J3. a grabbed victim can't be grabbed again immediately (ThrowImmuneFrames blocks loops)
+        {
+            var sim = MakeSim(300, 360);
+            int grabs = 0;
+            int mask = Mask(AttackButton.LP) | Mask(AttackButton.LK);
+            for (int i = 0; i < 200; i++)
+            {
+                // mash the throw every 40 frames
+                var f1 = new InputFrame(false, false, false, false, (i % 40 == 0) ? mask : 0);
+                var r = sim.Step(f1, InputFrame.Neutral);
+                foreach (var h in r.Hits) if (h.Result == HitResult.Grabbed) grabs++;
+            }
+            Check(grabs >= 1, $"throw immunity: at least one throw landed (got {grabs})");
+            Check(grabs <= 3, $"throw immunity: throw loops are limited (got {grabs} grabs in 200 frames)");
+        }
+
+        // K. determinism still holds with throws in the mix
+        {
+            var a = MakeSim(300, 360);
+            var b = MakeSim(300, 360);
+            int mask = Mask(AttackButton.LP) | Mask(AttackButton.LK);
+            for (int i = 0; i < 150; i++)
+            {
+                var f1 = new InputFrame(false, i < 6, false, false, i == 8 ? mask : 0);
+                var f2 = new InputFrame(false, false, false, false, i == 60 ? mask : 0);
+                a.Step(f1, f2);
+                b.Step(f1, f2);
+            }
+            Check(a.P1.Hp == b.P1.Hp && a.P2.Hp == b.P2.Hp
+                && a.P1.State == b.P1.State && a.P2.State == b.P2.State
+                && a.P2.Position.X == b.P2.Position.X && a.P2.Position.Y == b.P2.Position.Y,
+                "determinism holds with throws");
+        }
     }
 }
 

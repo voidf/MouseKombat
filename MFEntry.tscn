@@ -2722,7 +2722,7 @@ visible = false
 position = Vector2(0, -107)
 sprite_frames = SubResource("SpriteFrames_8llm0")
 animation = &"IDLE"
-frame_progress = 0.4419187
+frame_progress = 0.49385104
 
 [node name="Player2" type="Node2D" parent="." unique_id=64225234 node_paths=PackedStringArray("anim")]
 position = Vector2(650, 560)

@@ -254,6 +254,13 @@ public partial class GameManager : Node2D
         var pt = HitContactPoint(hitBox, defender);
         // FX oriented by the DEFENDER's facing: art authored facing-left; mirror when facing right.
         bool flip = defender.Sim.FacingRight;
+        if (res == HitResult.Grabbed)
+        {
+            // grab connected: just the contact thud. No impact spark and no damage number yet —
+            // the throw's damage arrives as a normal Hit feedback at its release frame.
+            PlaySfx(SfxHit);
+            return;
+        }
         if (res == HitResult.Hit)
         {
             SpawnFx(HitFxScene, pt, flip);

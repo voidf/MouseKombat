@@ -13,9 +13,9 @@ public static class Observation
 {
     private const int CoreSize = 23;
     private const int ProjSize = 5;       // incoming-fireball awareness (active, dx, dy, dir) + own-active
-    private const int CharSize = 2;       // self + opponent CharacterId (asymmetric matchup awareness)
-    private const int ReservedSize = 2;   // 斗气/必杀/countdown/etc. — grow into these, keep Size fixed
-    public const int Size = CoreSize + ProjSize + CharSize + ReservedSize; // 32
+    private const int CharSize = 2;       // self + opponent CharacterId (asymmetric matchup)
+    private const int ThrowSize = 2;      // self/opp "held by a throw" flags (was reserved padding)
+    public const int Size = CoreSize + ProjSize + CharSize + ThrowSize; // 32
 
     // selfIndex: 0 = P1's view, 1 = P2's view. Values roughly normalized to ~[-1,1] / [0,1].
     public static float[] Get(GameSim sim, int selfIndex, float worldWidth = 800f, float worldHeight = 600f)
@@ -46,7 +46,7 @@ public static class Observation
         o[i++] = opp.IsAirborne ? 1f : 0f;
         o[i++] = self.Vy / 2000f;
         o[i++] = opp.Vy / 2000f;
-        o[i++] = self.StateIndex / 13f;      // PlayerState has 13 members
+        o[i++] = self.StateIndex / 13f;      // divisor intentionally frozen at 13 — see the throw block below
         o[i++] = opp.StateIndex / 13f;
         o[i++] = self.AttackPhase() / 3f;
         o[i++] = opp.AttackPhase() / 3f;
@@ -86,6 +86,14 @@ public static class Observation
         // ---- character ids (the matchup is asymmetric: Hamster vs Kangaroo) ----
         o[i++] = (int)self.Character;   // 0 = Hamster, 1 = Kangaroo
         o[i++] = (int)opp.Character;
-        // i == 30 here; remaining [30, Size) stay 0 (reserved).
+        // i == 30 here.
+
+        // ---- throw state (grew into the reserved tail; Size is UNCHANGED at 32, so an existing
+        // policy's input layer still loads). Zero except during the brief held window, which is
+        // also why StateIndex below keeps its /13f divisor: adding PlayerState.Grabbed must not
+        // rescale a feature every trained model already depends on.
+        o[i++] = self.State == PlayerState.Grabbed ? 1f : 0f;
+        o[i++] = opp.State == PlayerState.Grabbed ? 1f : 0f;
+        // i == Size (32) here.
     }
 }

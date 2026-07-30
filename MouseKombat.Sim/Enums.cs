@@ -17,10 +17,17 @@ public enum GuardHeight { High, Mid, Low }
 // Motion command (facing-relative): Qcf = 236 (↓↘→), Qcb = 214 (↓↙←), Dp = 623 (→↓↘).
 public enum MotionInput { None, Qcf, Qcb, Dp }
 
-public enum PlayerState { Idle, Walk, Attack, Hurt, Dead, DefenseHit, Jump, Crouch, CrouchExit, Juggle, AirHurt, Downed, Wakeup }
+// NOTE: append new members at the END only. Observation feeds StateIndex to the RL policy, so
+// reordering would silently invalidate every trained model.
+// Grabbed = held by an opponent's throw: the victim's position + pose are driven entirely by the
+// ATTACKER's ThrowSpec bind timeline (see GameSim.TickThrowBind). The grabber itself stays in
+// Attack (its move frames keep running), exposed as SimPlayer.IsGrabbing.
+public enum PlayerState { Idle, Walk, Attack, Hurt, Dead, DefenseHit, Jump, Crouch, CrouchExit, Juggle, AirHurt, Downed, Wakeup, Grabbed }
 
 public enum HurtRegion { Head, Body, Arms, Legs }
 
 public enum CharacterId { Hamster, Kangaroo }
 
-public enum HitResult { None, Blocked, Hit } // outcome of ApplyDamage, drives FX/SFX
+// outcome of ApplyDamage, drives FX/SFX. Grabbed = a throw connected (no impact spark; the
+// throw's damage arrives later as a separate Hit at the release frame).
+public enum HitResult { None, Blocked, Hit, Grabbed }

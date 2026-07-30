@@ -67,6 +67,12 @@ public sealed class SimPlayer
     private int _juggleHitCount = 0;        // consecutive juggle hits (resets on ground hit)
     private const int MaxJuggleHits = 3;    // juggle limit before forced air reset
 
+    // ---- throws ----
+    private bool _grabbing = false;          // attacker side: this move's grab connected and is holding
+    private bool _throwWhiffApplied = false; // attacker side: whiff recovery already swapped in
+    private string _grabbedAnim = null;      // victim side: last pose clip pushed by the binder
+    private int _throwImmune = 0;            // victim side: frames left where a grab can't connect
+
     public bool IsAirborne => Position.Y < _groundY - 0.5f;
 
     public int CurrentAtkDamage => _curDamage;
@@ -88,10 +94,18 @@ public sealed class SimPlayer
         return 3;
     }
 
-    public bool IsInvincible => State == PlayerState.Downed || State == PlayerState.Wakeup;
+    // Downed/Wakeup are invincible; a grabbed victim is untouchable too (its damage comes from the
+    // throw's release frame, and a stray fireball must not steal it out of the grabber's hands).
+    public bool IsInvincible => State == PlayerState.Downed || State == PlayerState.Wakeup
+        || State == PlayerState.Grabbed;
     public bool IsDirectionPressed => InLeft || InRight;
     public bool IsCrouching => State == PlayerState.Crouch;
     public bool IsDefendingInput => FacingRight ? InLeft : InRight;
+
+    // ---- throw state (see ThrowSpec / GameSim.TickThrowBind) ----
+    public bool IsGrabbing => _grabbing;                  // attacker: holding a victim right now
+    public bool IsGrabbed => State == PlayerState.Grabbed; // victim: held by the opponent
+    public bool ThrowImmune => _throwImmune > 0;
 
     public int MaxHp => _cfg.MaxHp;                          // for the view's HP bar
     public float WalkSpeedPxPerSec => _cfg.WalkSpeedPxPerSec; // for GameSim.ResolveMovement
@@ -107,7 +121,7 @@ public sealed class SimPlayer
         && _atkFrame < _curStartup + _curActive
         && !_atkHitConsumed;
 
-    public bool IsBusy => State == PlayerState.Attack || State == PlayerState.Hurt || State == PlayerState.Dead || State == PlayerState.DefenseHit || State == PlayerState.Jump || State == PlayerState.Crouch || State == PlayerState.Juggle || State == PlayerState.AirHurt || State == PlayerState.Downed || State == PlayerState.Wakeup;
+    public bool IsBusy => State == PlayerState.Attack || State == PlayerState.Hurt || State == PlayerState.Dead || State == PlayerState.DefenseHit || State == PlayerState.Jump || State == PlayerState.Crouch || State == PlayerState.Juggle || State == PlayerState.AirHurt || State == PlayerState.Downed || State == PlayerState.Wakeup || State == PlayerState.Grabbed;
 
     private bool IsGroundFree =>
         State == PlayerState.Idle || State == PlayerState.Walk || State == PlayerState.Crouch || State == PlayerState.CrouchExit;
@@ -179,6 +193,8 @@ public sealed class SimPlayer
 
     public void TickVertical()
     {
+        // held by a throw: the attacker's bind timeline owns our position, gravity must not fight it
+        if (State == PlayerState.Grabbed) return;
         if (State == PlayerState.Attack && _curMove != null && _curMove.MotionTimeline.Length > 0) return;
 
         bool aerialState = State == PlayerState.Jump || State == PlayerState.Juggle || State == PlayerState.AirHurt
@@ -224,7 +240,8 @@ public sealed class SimPlayer
     {
         if (IsAirborne) return;
         if (State == PlayerState.Attack || State == PlayerState.Hurt || State == PlayerState.Dead
-            || State == PlayerState.DefenseHit || State == PlayerState.Jump) return;
+            || State == PlayerState.DefenseHit || State == PlayerState.Jump
+            || State == PlayerState.Grabbed) return;
 
         bool wantCrouch = InDownHeld && !InUpHeld;
 
@@ -278,6 +295,8 @@ public sealed class SimPlayer
 
     public void TickMoves()
     {
+        if (State == PlayerState.Grabbed) return; // held: inputs are dead until the release frame
+
         if (IsAirborne)
         {
             if (State == PlayerState.Jump)
@@ -359,6 +378,8 @@ public sealed class SimPlayer
         CurrentAtkAnim = m.AnimName;
         _curCancelFrom = m.ResolvedCancelFrom;
         _curCancelTo = m.ResolvedCancelTo;
+        _grabbing = false;
+        _throwWhiffApplied = false;
         PlayAnim(m.AnimName, true);
 
         if (m.Motion != MotionInput.None)
@@ -384,6 +405,7 @@ public sealed class SimPlayer
 
     public void TickApplyMovement()
     {
+        if (State == PlayerState.Grabbed) { DesiredDeltaX = 0; return; }
         Position += new Vec2(DesiredDeltaX, 0);
         DesiredDeltaX = 0;
         if (State == PlayerState.Idle || State == PlayerState.Walk)
@@ -408,9 +430,22 @@ public sealed class SimPlayer
 
     public void TickAdvanceTimers()
     {
+        if (_throwImmune > 0) _throwImmune--;
+
         if (State == PlayerState.Attack)
         {
             _atkFrame++;
+
+            // throw whiffed: the grab window closed without connecting -> swap in the (punishable)
+            // whiff recovery. Checked once, right after the active frames end.
+            var th = _curMove?.Throw;
+            if (th != null && !_grabbing && !_throwWhiffApplied && _atkFrame >= _curStartup + _curActive)
+            {
+                _throwWhiffApplied = true;
+                if (th.WhiffRecovery > 0) _curRecovery = th.WhiffRecovery;
+                if (!string.IsNullOrEmpty(th.WhiffAnim)) PlayAnim(th.WhiffAnim, true);
+            }
+
             if (_curMove != null && _curMove.SpawnsProjectile && !_projectileSpawned
                 && _atkFrame >= _curMove.ProjectileSpawnFrame)
             {
@@ -423,6 +458,8 @@ public sealed class SimPlayer
                 bool wasMotion = _curMove != null && _curMove.MotionTimeline.Length > 0;
                 _atkFrame = -1;
                 _airMove = false;
+                _grabbing = false;
+                _throwWhiffApplied = false;
                 if (wasMotion) { var lp = Position; lp.Y = _groundY; Position = lp; }
                 if (!IsAirborne && InDownHeld && !InUpHeld)
                 {
@@ -560,6 +597,99 @@ public sealed class SimPlayer
 
     public void ConsumeAttackHit() { _atkHitConsumed = true; }
 
+    // ================= throws =================
+    // Attacker side: GetWorldGrabBox / BeginGrab / EndGrab.
+    // Victim side: EnterGrabbed -> ApplyGrabbedPose (every frame) -> ReleaseFromGrab or DropFromGrab.
+    // GameSim owns the pairing and drives all of this; SimPlayer never references the other player.
+
+    // grab judgement rect in world space; falls back to the move's melee hitbox if unset
+    public SimRect GetWorldGrabBox()
+    {
+        var th = _curMove?.Throw;
+        bool hasBox = th != null && th.GrabBox.Size.X > 0f && th.GrabBox.Size.Y > 0f;
+        return ToWorld(hasBox ? th.GrabBox : _curHitbox);
+    }
+
+    // attacker: the grab connected. Consumes the hit so the move can't also land as a strike.
+    public void BeginGrab()
+    {
+        _grabbing = true;
+        _atkHitConsumed = true;
+    }
+
+    public void EndGrab() { _grabbing = false; }
+
+    // victim: enter the held state. All own motion/input handling stops; the binder takes over.
+    public void EnterGrabbed()
+    {
+        State = PlayerState.Grabbed;
+        _grabbedAnim = null;
+        _atkFrame = -1;
+        _hurtFrame = -1;
+        _defHitFrame = -1;
+        _airMove = false;
+        _curMove = null;
+        _vy = 0f;
+        _jumpHVel = 0f;
+        DesiredDeltaX = 0f;
+    }
+
+    // victim: called every held frame with the attacker's bind key resolved to world space.
+    // The pose clip is only (re)played when it actually changes, so a multi-frame hold does not
+    // restart the animation every tick.
+    public void ApplyGrabbedPose(Vec2 worldPos, string anim, bool facingRight)
+    {
+        Position = worldPos;
+        FacingRight = facingRight;
+        if (!string.IsNullOrEmpty(anim) && anim != _grabbedAnim)
+        {
+            _grabbedAnim = anim;
+            PlayAnim(anim, true);
+        }
+    }
+
+    // victim: the release frame. Damage lands here, then the victim is thrown ballistically and
+    // reuses the existing Juggle -> land -> Downed path (so KNOCKDOWN/WAKEUP just work).
+    // vel.X is already WORLD-space here; vel.Y negative = up.
+    // juggleFollowUp=false pre-fills the juggle counter so further air hits air-reset instead.
+    public HitResult ReleaseFromGrab(int damage, Vec2 vel, bool juggleFollowUp, int immuneFrames)
+    {
+        _grabbedAnim = null;
+        _throwImmune = immuneFrames;
+
+        if (damage > 0)
+        {
+            Hp = Math.Max(0, Hp - damage);
+            if (Hp == 0)
+            {
+                State = PlayerState.Dead;
+                StopAnim();
+                return HitResult.Hit;
+            }
+        }
+
+        _juggleHitCount = juggleFollowUp ? 0 : MaxJuggleHits;
+        State = PlayerState.Juggle;
+        _vy = vel.Y;
+        _jumpHVel = vel.X;
+        PlayAnim(_cfg.LaunchRiseAnimName, true);
+        return HitResult.Hit;
+    }
+
+    // victim: the grab broke before the release frame (the attacker got hit / died). No damage —
+    // just set the victim back down on its feet.
+    public void DropFromGrab()
+    {
+        _grabbedAnim = null;
+        var p = Position;
+        p.Y = _groundY;
+        Position = p;
+        _vy = 0f;
+        _jumpHVel = 0f;
+        State = PlayerState.Idle;
+        PlayAnim(_cfg.IdleAnimName);
+    }
+
     // pushDir: +1 shove toward +x (away from attacker), -1 toward -x. Returns Hit/Blocked/None.
     public HitResult ApplyDamage(MoveDef move, int pushDir)
     {
@@ -672,6 +802,10 @@ public sealed class SimPlayer
         _projectileSpawned = false;
         _pendingProjectile = false;
         _pendingPopup = false;
+        _grabbing = false;
+        _throwWhiffApplied = false;
+        _grabbedAnim = null;
+        _throwImmune = 0;
         _buffer.Clear();
         InLeft = InRight = InUpHeld = InDownHeld = false;
         DesiredDeltaX = 0;

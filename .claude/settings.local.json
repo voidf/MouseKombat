@@ -8,7 +8,12 @@
       "Bash(python -c \"import stable_baselines3 as s; print\\('sb3', s.__version__\\)\")",
       "Bash(python -c \"import onnxruntime as o; print\\('onnxruntime', o.__version__\\)\")",
       "Bash(python -c \"import pythonnet; print\\('pythonnet', pythonnet.__version__\\)\")",
-      "Bash(python -c \"import gymnasium as g; print\\('gymnasium', g.__version__\\)\")"
+      "Bash(python -c \"import gymnasium as g; print\\('gymnasium', g.__version__\\)\")",
+      "Bash(awk -F/ 'NF>1{print $1\"/\"$2}')",
+      "WebSearch",
+      "WebFetch(domain:mugen.fandom.com)",
+      "WebFetch(domain:mugenguild.com)",
+      "Bash(dotnet run *)"
     ]
   }
 }

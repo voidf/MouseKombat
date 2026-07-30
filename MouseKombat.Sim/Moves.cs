@@ -44,10 +44,52 @@ public struct MoveKey
     public Vec2 PerFrame;
 }
 
+// One segment of a throw's VICTIM-BINDING timeline. While the ATTACKER's frame counter is within
+// [From, To], the victim is force-positioned at the attacker's anchor + Offset and plays VictimAnim
+// off its OWN SpriteFrames.
+//
+// This is the whole reason throws cost O(characters) art instead of O(characters^2): the victim
+// only ever needs a handful of GENERIC "held / lifted / thrown" poses, never a drawing made for
+// one specific attacker. Body-size differences are absorbed by per-character offset tweaks, not
+// by new art per pairing.
+//   Offset.X = FORWARD-relative px (engine mirrors by the ATTACKER's facing)
+//   Offset.Y = screen-space px; NEGATIVE = lifted above the attacker's feet anchor
+// Author keys in ascending frame order; a frame past the last key holds that key's pose.
+public struct BindKey
+{
+    public int From, To;
+    public string VictimAnim;   // generic pose clip on the victim (e.g. HURT / LAUNCH / FALL)
+    public Vec2 Offset;         // victim anchor relative to the attacker's anchor (both = feet)
+    public bool VictimSameDir;  // false = victim faces the attacker (default); true = same way (back throws)
+}
+
+// Throw data hung off a MoveDef. Non-null => the move grabs instead of striking: it never calls
+// ApplyDamage, it puts the defender in PlayerState.Grabbed and hands its position + pose to
+// GameSim.TickThrowBind until ReleaseFrame.
+public sealed class ThrowSpec
+{
+    // grab judgement rect (local, flipped by facing). Zero size => fall back to MoveDef.Hitbox.
+    // Judged against the victim's BODY region only — a poking arm/leg must not be grabbable.
+    public SimRect GrabBox;
+
+    public bool CanGrabAirborne = false;  // ground throws whiff on a jumping opponent (that's the counterplay)
+
+    public BindKey[] Bind = System.Array.Empty<BindKey>();
+
+    public int ReleaseFrame;              // attacker frame the victim is let go on; damage lands here
+    public Vec2 ReleaseVel;               // X = FORWARD-relative px/s, Y NEGATIVE = up
+    public bool ReleaseToJuggle = false;  // false => further air hits air-reset instead of juggling
+    public int ThrowImmuneFrames = 60;    // victim can't be grabbed again for this long (no throw loops)
+
+    // whiff = the grab window passed without connecting. Throws are unsafe on whiff; that is the
+    // entire risk side of the move. 0 => keep MoveDef.Recovery.
+    public int WhiffRecovery = 0;
+    public string WhiffAnim = "";
+}
+
 // A single move's data. Authored in C# (see MoveSets), not the Inspector.
 public sealed class MoveDef
-{
-    public string Id;            // e.g. "5LP" (5 = standing, FG notation)
+{    public string Id;            // e.g. "5LP" (5 = standing, FG notation)
     public string AnimName;      // clip to play (missing clip degrades to no-op)
     public AttackButton Button;
     public Stance Stance = Stance.Stand;
@@ -86,6 +128,9 @@ public sealed class MoveDef
     // before specials/normals; the two buttons must land within a frame gap (SF6 ~2 frames).
     public AttackButton[] ComboButtons = null;
     public bool Unblockable = false; // throws ignore guard
+
+    // Non-null => this move is a THROW (grab + hold + release), not a strike. See ThrowSpec.
+    public ThrowSpec Throw = null;
 
     // Motion special: if Motion != None this move is matched by (motion + a punch) before normals.
     // AnyPunch = any of LP/MP/HP triggers it (the classic "236+P").
@@ -562,12 +607,38 @@ public static class MoveSets
         });
 
         // ---- throw: LP+LK within ~2 frames (SF6 classic). Unblockable, short range, stand stance. ----
+        // Frame layout: 0-4 startup | 5-7 grab window | 8-37 the throw itself (bind timeline).
+        // On whiff the recovery is swapped to WhiffRecovery so a missed throw is punishable.
+        //
+        // VICTIM ART: this first pass deliberately reuses clips every character ALREADY has
+        // (HURT / LAUNCH / FALL / KNOCKDOWN), so throws work with ZERO new victim art. Swap
+        // VictimAnim to dedicated generic poses (GRABBED_HOLD / GRABBED_AIR / THROWN_SPIN) once
+        // they exist — no code change needed, and still one set per character, never per pairing.
         moves.Add(new MoveDef {
-            Id = "THROW", AnimName = "AtkThrow", Button = AttackButton.LP, Stance = Stance.Stand,
+            Id = "THROW", AnimName = "AtkO", // TODO 美术: 换成专属 AtkThrow；AtkO 只是能看见的占位
             ComboButtons = new[] { AttackButton.LP, AttackButton.LK }, Unblockable = true,
-            Startup = 5, Active = 2, Recovery = 20, Damage = 12, Guard = GuardHeight.High,
+            Button = AttackButton.LP, Stance = Stance.Stand,
+            Startup = 5, Active = 3, Recovery = 30, Damage = 12, Guard = GuardHeight.High,
             Hitbox = new SimRect(20, -170, 95, 150), // close-range grab box
-            oH = 0, oB = 0, Knockback = 10f, KnockbackOnBlock = 0f,
+            oH = 0, oB = 0, Knockback = 0f, KnockbackOnBlock = 0f,
+            Throw = new ThrowSpec {
+                GrabBox = new SimRect(20, -170, 95, 150),
+                CanGrabAirborne = false,
+                Bind = new[] {
+                    // grabbed & held on the ground
+                    new BindKey { From = 5,  To = 13, VictimAnim = "HURT",   Offset = new Vec2(78f,    0f) },
+                    // hoisted off the floor
+                    new BindKey { From = 14, To = 21, VictimAnim = "LAUNCH", Offset = new Vec2(68f,  -70f) },
+                    // above the head, about to be thrown
+                    new BindKey { From = 22, To = 27, VictimAnim = "LAUNCH", Offset = new Vec2(26f, -125f) },
+                },
+                ReleaseFrame = 28,
+                ReleaseVel = new Vec2(300f, -900f), // forward + up; lands ~160px away
+                ReleaseToJuggle = false,            // hard knockdown, no follow-up juggle
+                ThrowImmuneFrames = 60,
+                WhiffRecovery = 20,
+                WhiffAnim = "",                     // TODO 美术: AtkThrowWhiff
+            },
         });
     }
 }
