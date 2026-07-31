@@ -437,10 +437,13 @@ public partial class ReadyScreen : Control
         bool blinkOn = ((int)(_blinkClock / Mathf.Max(0.05f, BlinkInterval))) % 2 == 0;
         bool panelOpen = _state != LobbyState.Seats;
 
+        // A seat shows NOTHING until its player has actually confirmed a character. Showing the
+        // default roster picks would read as "P1 is already the hamster", which is a lie: _char[]
+        // only holds where that seat's cursor will start.
         SetSeatPortrait(P1Portrait, 0, p1Bound);
         SetSeatPortrait(P2Portrait, 1, p2Bound);
-        if (P1Label != null) P1Label.Text = $"P1 · {CharacterDb.NameOf(_char[0])}";
-        if (P2Label != null) P2Label.Text = $"P2 · {CharacterDb.NameOf(_char[1])}";
+        if (P1Label != null) P1Label.Text = p1Bound ? $"P1 · {CharacterDb.NameOf(_char[0])}" : "P1";
+        if (P2Label != null) P2Label.Text = p2Bound ? $"P2 · {CharacterDb.NameOf(_char[1])}" : "P2";
 
         if (P1Status != null) { P1Status.Visible = p1Bound; P1Status.Text = _agent[0] != null ? _aiName[0] : StatusText; }
         if (P2Status != null) { P2Status.Visible = p2Bound; P2Status.Text = _agent[1] != null ? _aiName[1] : StatusText; }
@@ -473,11 +476,11 @@ public partial class ReadyScreen : Control
         }
     }
 
-    private void SetSeatPortrait(TextureRect rect, int seat, bool bound)
+    private void SetSeatPortrait(TextureRect rect, int seat, bool picked)
     {
         if (rect == null) return;
-        rect.Texture = CharacterDb.Get(_char[seat]).Portrait;
-        rect.Modulate = bound ? BoundTint : FreeTint;
+        rect.Texture = picked ? CharacterDb.Get(_char[seat]).Portrait : null;
+        rect.Modulate = picked ? BoundTint : FreeTint;
     }
 
     private static void SetCancelHint(Label l, IInputSource src)

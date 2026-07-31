@@ -265,6 +265,14 @@ def verify(name, text):
     for h in node_headers[1:]:
         if 'parent="' not in h:
             errs.append(f"{name}: more than one root node: {h}")
+
+    # load_steps, when present, is resources + 1. A stale value survives editing unnoticed.
+    m = re.search(r"^\[gd_scene load_steps=(\d+)", text, flags=re.M)
+    if m:
+        want = len(declared) + 1
+        if int(m.group(1)) != want:
+            errs.append(f"{name}: load_steps={m.group(1)} but the file declares "
+                        f"{len(declared)} resources (expected {want})")
     return errs
 
 

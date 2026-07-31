@@ -77,16 +77,22 @@ public static class CharacterDb
 
     public static string NameOf(CharacterId id) => Get(id).DisplayName;
 
-    // Instantiate a character into a slot. Returns null if the scene is missing or does not have a
-    // Player root, so a broken roster entry degrades to "slot stays empty" instead of a hard crash
+    // Instantiate a character for a seat. Returns null if the scene is missing or does not have a
+    // Player root, so a broken roster entry degrades to "no fighter" instead of a hard crash
     // mid-match.
+    //
+    // IMPORTANT — `parent` must be an IDENTITY transform (the match director itself), not a
+    // positioned marker. SimPlayer.Position is WORLD space and Player.SyncFromSim writes it
+    // straight into Node2D.Position, so parenting a fighter under a marker at (120, 560) makes that
+    // world position local and draws the character at (240, 1120): off screen, while its HUD tag,
+    // hit FX and projectiles — all positioned from sim data — still look correct.
     //
     // slotIndex picks the InputMap fallback actions (p1_* / p2_*): those are a property of the SEAT,
     // not of the character, so they are assigned here rather than baked into the character scene
     // (see tools/split_chars.py, which strips them on extraction).
-    public static Player Spawn(CharacterId id, Node2D slot, int slotIndex)
+    public static Player Spawn(CharacterId id, Node parent, Vector2 worldPos, int slotIndex)
     {
-        if (slot == null) return null;
+        if (parent == null) return null;
         var scene = Get(id).Scene;
         if (scene == null)
         {
@@ -107,8 +113,8 @@ public static class CharacterDb
         player.ActionDown = prefix + "_down";
         player.StartFacingRight = slotIndex == 0;
 
-        player.Position = Vector2.Zero; // the slot marker owns the world position
-        slot.AddChild(player);
+        player.Position = worldPos;
+        parent.AddChild(player);
         return player;
     }
 }

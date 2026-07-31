@@ -7,10 +7,11 @@ using MouseKombat.Sim;
 // popups, projectile view nodes, and the win/reset sequence. All combat logic is in the sim.
 //
 // The two fighters are NOT part of this scene: the ready screen picks a character per seat, and
-// _Ready instantiates the matching Char_*.tscn into P1Slot / P2Slot (see CharacterDb).
+// _Ready instantiates the matching Char_*.tscn (see CharacterDb). P1Slot / P2Slot are design-time
+// markers that give the fighters their world position and draw order.
 public partial class GameManager : Node2D
 {
-    [Export] public Node2D P1Slot;   // empty marker; the chosen character is instantiated into it
+    [Export] public Node2D P1Slot;   // marker: position + draw order for the P1 fighter
     [Export] public Node2D P2Slot;
 
     // Resolved after the characters are spawned. Everything below reads these, never the slots.
@@ -118,23 +119,27 @@ public partial class GameManager : Node2D
         UpdateHpBars();
     }
 
-    // Instantiate the two selected characters into their slots. The slot markers carry the world
-    // position, so a character scene needs no knowledge of which side it is on.
+    // Instantiate the two selected characters. The slot markers are DESIGN-TIME anchors: when
+    // present their position wins over the exports, so the stage layout is editable in the editor.
+    // The fighters themselves are parented to this director, not to the markers — SimPlayer.Position
+    // is world space (see CharacterDb.Spawn).
     private bool SpawnFighters()
     {
         var c1 = GameSession.Configured ? GameSession.P1Char : DebugP1Character;
         var c2 = GameSession.Configured ? GameSession.P2Char : DebugP2Character;
 
-        if (P1Slot == null || P2Slot == null)
-        {
-            GD.PushError("[GameManager] P1Slot / P2Slot not assigned; cannot build the match.");
-            return false;
-        }
-        P1Slot.Position = P1StartPos;
-        P2Slot.Position = P2StartPos;
+        if (P1Slot != null) P1StartPos = P1Slot.Position;
+        if (P2Slot != null) P2StartPos = P2Slot.Position;
 
-        p1 = CharacterDb.Spawn(c1, P1Slot, 0);
-        p2 = CharacterDb.Spawn(c2, P2Slot, 1);
+        p1 = CharacterDb.Spawn(c1, this, P1StartPos, 0);
+        p2 = CharacterDb.Spawn(c2, this, P2StartPos, 1);
+
+        // Draw order: a runtime AddChild lands last and would paint over the win splash. Slot each
+        // fighter in where its marker sits among the director's children instead, so the marker
+        // controls layering as well as position (background behind, win animation in front).
+        if (p1 != null && P1Slot != null) MoveChild(p1, P1Slot.GetIndex());
+        if (p2 != null && P2Slot != null) MoveChild(p2, P2Slot.GetIndex());
+
         if (p1 == null || p2 == null)
         {
             GD.PushError($"[GameManager] failed to spawn fighters ({c1} vs {c2}).");

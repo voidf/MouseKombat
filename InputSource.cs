@@ -22,6 +22,13 @@ public interface IInputSource
 
     bool ConfirmJustPressed { get; }   // ready-screen lock / start
     bool CancelJustPressed { get; }    // ready-screen unbind
+
+    // Raw held state for the same two keys. A menu that OPENS on a key press has to wait for that
+    // key to be released before it may act on it again — otherwise the press that opened the panel
+    // is still down when the panel starts reading input and immediately closes it.
+    bool ConfirmHeld { get; }
+    bool CancelHeld { get; }
+
     string CancelLabel { get; }        // key shown in the "press X to cancel" hint
 }
 
@@ -38,6 +45,8 @@ public abstract class InputSourceBase : IInputSource
 
     public bool ConfirmJustPressed { get; private set; }
     public bool CancelJustPressed { get; private set; }
+    public bool ConfirmHeld { get; private set; }
+    public bool CancelHeld { get; private set; }
 
     public List<AttackButton> JustPressedButtons { get; } = new();
 
@@ -65,6 +74,8 @@ public abstract class InputSourceBase : IInputSource
 
         ConfirmJustPressed = confirm && !_prevConfirm;
         CancelJustPressed = cancel && !_prevCancel;
+        ConfirmHeld = confirm;
+        CancelHeld = cancel;
         _prevConfirm = confirm;
         _prevCancel = cancel;
     }

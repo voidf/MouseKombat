@@ -11,6 +11,9 @@ using MouseKombat.Sim;
 //     devices until this player is done" means — the lock lives in the owner's poll loop, and this
 //     panel simply never sees anyone else's input.
 //
+// Laid out entirely with containers (VBox / Center / Grid / Margin) rather than hand-set positions:
+// an earlier hand-positioned version had the portraits drift out of their cells.
+//
 // Built in code rather than as a .tscn so the pre-fight lobby (ReadyScreen) and the networked
 // lobby (期3) can both instantiate it without a shared scene to keep in sync.
 public partial class CharSelect : Control
@@ -25,7 +28,7 @@ public partial class CharSelect : Control
     public CharacterId Selected => CharacterDb.All[_index].Id;
 
     [Export] public int Columns = 3;
-    [Export] public Vector2 CellSize = new Vector2(150, 150);
+    [Export] public Vector2 CellSize = new Vector2(150, 176);
     [Export] public int NavRepeatFirstFrames = 18;  // frames held before the cursor auto-repeats
     [Export] public int NavRepeatFrames = 6;        // frames between repeats after that
 
@@ -33,7 +36,13 @@ public partial class CharSelect : Control
     private bool _aiMode;
     private int _index;
 
-    private Control _root;
+    // The panel refuses confirm/cancel until the driving device has released BOTH. The key that
+    // opens a panel is frequently the same key that would close it — the AI seat's ` is both
+    // "hand this seat to an AI" and "back out" — and that press is still physically down on the
+    // frame the panel appears. Without this the panel opened and closed in the same tick, which
+    // showed up as "pressing ` does nothing, or flashes the panel for an instant".
+    private bool _armed;
+
     private Label _title;
     private Label _hint;
     private readonly System.Collections.Generic.List<Panel> _cells = new();
@@ -43,8 +52,10 @@ public partial class CharSelect : Control
     private int _hDir, _vDir;       // direction held last frame, for edge detection
     private int _hHold, _vHold;     // frames the current direction has been held
 
-    private static readonly Color CellFree = new Color(0.13f, 0.14f, 0.18f, 0.92f);
-    private static readonly Color CellSelected = new Color(0.95f, 0.78f, 0.25f, 0.95f);
+    private static readonly Color Backdrop = new Color(0.05f, 0.055f, 0.07f);
+    private static readonly Color CellFree = new Color(0.13f, 0.14f, 0.18f);
+    private static readonly Color CellPicked = new Color(0.22f, 0.2f, 0.12f);
+    private static readonly Color Accent = new Color(0.95f, 0.78f, 0.25f);
 
     public override void _Ready()
     {
@@ -62,6 +73,7 @@ public partial class CharSelect : Control
         _index = CharacterDb.IndexOf(initial);
         _hDir = _vDir = 0;
         _hHold = _vHold = 0;
+        _armed = false;
         IsOpen = true;
         Visible = true;
         RefreshTexts();
@@ -80,13 +92,17 @@ public partial class CharSelect : Control
     {
         if (!IsOpen || _nav == null) return;
 
+        if (!_armed)
+        {
+            if (_nav.ConfirmHeld || _nav.CancelHeld) return;
+            _armed = true;
+        }
+
         int h = (_nav.Right ? 1 : 0) - (_nav.Left ? 1 : 0);
         int v = (_nav.Down ? 1 : 0) - (_nav.Up ? 1 : 0);
         if (StepAxis(ref _hDir, ref _hHold, h)) MoveCursor(h, 0);
         if (StepAxis(ref _vDir, ref _vHold, v)) MoveCursor(0, v);
 
-        // Confirm/cancel are read as edges by IInputSource itself, so a key still held from the
-        // seat-claim press cannot immediately confirm a character.
         if (_nav.ConfirmJustPressed)
         {
             Confirmed?.Invoke(Seat, Selected);
@@ -129,82 +145,83 @@ public partial class CharSelect : Control
         SetAnchorsPreset(LayoutPreset.FullRect);
         MouseFilter = MouseFilterEnum.Ignore;
 
-        var dim = new ColorRect { Color = new Color(0, 0, 0, 0.72f), MouseFilter = MouseFilterEnum.Ignore };
-        dim.SetAnchorsPreset(LayoutPreset.FullRect);
-        AddChild(dim);
+        // OPAQUE, not a dim: this panel must fully hide the lobby behind it, otherwise P1's already
+        // chosen portrait shows through while P2 is picking.
+        var backdrop = new ColorRect { Color = Backdrop, MouseFilter = MouseFilterEnum.Ignore };
+        backdrop.SetAnchorsPreset(LayoutPreset.FullRect);
+        AddChild(backdrop);
 
-        _root = new Control { MouseFilter = MouseFilterEnum.Ignore };
-        _root.SetAnchorsPreset(LayoutPreset.FullRect);
-        AddChild(_root);
+        var column = new VBoxContainer { MouseFilter = MouseFilterEnum.Ignore };
+        column.SetAnchorsPreset(LayoutPreset.FullRect);
+        column.OffsetLeft = 24; column.OffsetRight = -24;
+        column.OffsetTop = 48; column.OffsetBottom = -32;
+        column.AddThemeConstantOverride("separation", 20);
+        AddChild(column);
 
-        _title = new Label
+        _title = new Label { HorizontalAlignment = HorizontalAlignment.Center };
+        _title.AddThemeFontSizeOverride("font_size", 30);
+        column.AddChild(_title);
+
+        // CenterContainer keeps the grid centred whatever the roster size, with no magic offsets
+        var center = new CenterContainer { SizeFlagsVertical = SizeFlags.ExpandFill };
+        column.AddChild(center);
+
+        var grid = new GridContainer { Columns = Mathf.Max(1, Columns) };
+        grid.AddThemeConstantOverride("h_separation", 18);
+        grid.AddThemeConstantOverride("v_separation", 18);
+        center.AddChild(grid);
+
+        foreach (var entry in CharacterDb.All)
         {
-            Position = new Vector2(0, 84), Size = new Vector2(800, 40),
-            HorizontalAlignment = HorizontalAlignment.Center,
-        };
-        _title.AddThemeFontSizeOverride("font_size", 28);
-        _root.AddChild(_title);
-
-        int cols = Mathf.Max(1, Columns);
-        int rows = (CharacterDb.All.Length + cols - 1) / cols;
-        var gridSize = new Vector2(cols * CellSize.X + (cols - 1) * 16,
-                                   rows * (CellSize.Y + 32) + (rows - 1) * 16);
-        var grid = new GridContainer
-        {
-            Columns = cols,
-            Position = new Vector2((800 - gridSize.X) * 0.5f, 150),
-            Size = gridSize,
-            MouseFilter = MouseFilterEnum.Ignore,
-        };
-        grid.AddThemeConstantOverride("h_separation", 16);
-        grid.AddThemeConstantOverride("v_separation", 16);
-        _root.AddChild(grid);
-
-        for (int i = 0; i < CharacterDb.All.Length; i++)
-        {
-            var entry = CharacterDb.All[i];
-
-            var cell = new Panel { CustomMinimumSize = new Vector2(CellSize.X, CellSize.Y + 32) };
-            var style = new StyleBoxFlat { BgColor = CellFree, BorderColor = CellSelected };
+            var cell = new Panel { CustomMinimumSize = CellSize };
+            var style = new StyleBoxFlat { BgColor = CellFree, BorderColor = Accent };
             style.SetCornerRadiusAll(6);
             style.SetBorderWidthAll(0);
             cell.AddThemeStyleboxOverride("panel", style);
             grid.AddChild(cell);
             _cells.Add(cell);
 
+            // Margin+VBox inside the Panel: the containers own the layout, so the portrait cannot
+            // escape its cell no matter what the source texture's size is.
+            var pad = new MarginContainer { MouseFilter = MouseFilterEnum.Ignore };
+            pad.SetAnchorsPreset(LayoutPreset.FullRect);
+            foreach (string side in new[] { "margin_left", "margin_right", "margin_top", "margin_bottom" })
+                pad.AddThemeConstantOverride(side, 8);
+            cell.AddChild(pad);
+
+            var box = new VBoxContainer { MouseFilter = MouseFilterEnum.Ignore };
+            box.AddThemeConstantOverride("separation", 4);
+            pad.AddChild(box);
+
             var portrait = new TextureRect
             {
                 Texture = entry.Portrait,
-                Position = new Vector2(8, 8),
-                Size = new Vector2(CellSize.X - 16, CellSize.Y - 16),
                 ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
                 StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
+                SizeFlagsVertical = SizeFlags.ExpandFill,
                 MouseFilter = MouseFilterEnum.Ignore,
             };
-            cell.AddChild(portrait);
+            box.AddChild(portrait);
             _portraits.Add(portrait);
 
             var name = new Label
             {
                 Text = entry.DisplayName,
-                Position = new Vector2(0, CellSize.Y - 4),
-                Size = new Vector2(CellSize.X, 28),
                 HorizontalAlignment = HorizontalAlignment.Center,
             };
             name.AddThemeFontSizeOverride("font_size", 18);
-            cell.AddChild(name);
+            box.AddChild(name);
             _names.Add(name);
         }
 
         _hint = new Label
         {
-            Position = new Vector2(0, 150 + gridSize.Y + 26), Size = new Vector2(800, 60),
             HorizontalAlignment = HorizontalAlignment.Center,
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
         };
         _hint.AddThemeFontSizeOverride("font_size", 16);
         _hint.AddThemeColorOverride("font_color", new Color(0.82f, 0.84f, 0.9f));
-        _root.AddChild(_hint);
+        column.AddChild(_hint);
     }
 
     private void RefreshTexts()
@@ -214,7 +231,7 @@ public partial class CharSelect : Control
         string ok = _aiMode ? "回车" : "确认键";
         string back = _aiMode ? "`" : (_nav?.CancelLabel ?? "取消键");
         string tail = _aiMode ? "确定后选择 AI 模型" : "双方可以选同一个角色";
-        _hint.Text = $"{dirs} 选择 · {ok} 确定 · {back} 返回（放弃该机位）\n{tail}";
+        _hint.Text = $"{dirs} 选择 · {ok} 确定 · {back} 或 Esc 返回（放弃该机位）\n{tail}";
     }
 
     private static string NavLabel(IInputSource src) => src?.Id switch
@@ -233,10 +250,10 @@ public partial class CharSelect : Control
             if (_cells[i].GetThemeStylebox("panel") is StyleBoxFlat sb)
             {
                 sb.SetBorderWidthAll(sel ? 4 : 0);
-                sb.BgColor = sel ? new Color(0.22f, 0.2f, 0.12f, 0.95f) : CellFree;
+                sb.BgColor = sel ? CellPicked : CellFree;
             }
             _portraits[i].Modulate = sel ? Colors.White : new Color(0.55f, 0.55f, 0.6f);
-            _names[i].AddThemeColorOverride("font_color", sel ? CellSelected : new Color(0.7f, 0.7f, 0.75f));
+            _names[i].AddThemeColorOverride("font_color", sel ? Accent : new Color(0.7f, 0.7f, 0.75f));
         }
     }
 }
