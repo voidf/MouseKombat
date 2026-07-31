@@ -52,6 +52,7 @@ public partial class GameManager : Node2D
     [Export] public float WinTextFadeOutSec = 0.12f;
 
     private Vector2 _l1Home, _l2Home;   // fly-in destinations, captured before the labels are hidden
+    private float _l1BoxL, _l1BoxR;     // line 1's authored box, for the centring below
     private Tween _line1Tween, _line2Tween;
 
     // The victory presentation has TWO independent timelines: the splash animation and the text
@@ -126,6 +127,7 @@ public partial class GameManager : Node2D
             WinAnim.Visible = false;
             WinAnim.AnimationFinished += OnWinAnimFinished;
         }
+        if (WinTextLine1 != null) { _l1BoxL = WinTextLine1.OffsetLeft; _l1BoxR = WinTextLine1.OffsetRight; }
         CacheAndHideLabel(WinTextLine1, ref _l1Home);
         CacheAndHideLabel(WinTextLine2, ref _l2Home);
         UpdateHpBars();
@@ -473,7 +475,7 @@ public partial class GameManager : Node2D
         }
 
         if (WinTextLine1 != null) WinTextLine1.Text = CharacterDb.Get(winner.Character).WinName;
-        PlayWinTextFlyIn(WinTextLine1, _l1Home, fromLeft: true, ref _line1Tween);
+        PlayWinTextFlyIn(WinTextLine1, Line1Destination(), fromLeft: true, ref _line1Tween);
         PlayWinTextFlyIn(WinTextLine2, _l2Home, fromLeft: false, ref _line2Tween);
 
         // A missing splash node / missing art counts as "already finished", so the text still gets
@@ -483,6 +485,27 @@ public partial class GameManager : Node2D
         var textTimer = GetTree().CreateTimer(WinTextFlyInSec + WinTextDwellSec + WinTextFadeOutSec);
         textTimer.Timeout += () => { _winTextDone = true; TryFinishWin(); };
         TryFinishWin();
+    }
+
+    // Where line 1 should come to rest, for the name it is CURRENTLY showing.
+    //
+    // At 128 px every fighting name is WIDER than the authored 395 px box, so the Label relies on
+    // grow_horizontal = Both: the box expands around its own centre and the text is drawn from the
+    // expanded left edge, which is what makes names of different lengths look centred. The fly-in
+    // then pins GlobalPosition, so a destination cached at _Ready — when the label still held the
+    // "NAME" placeholder, narrow enough not to grow — pinned every name to the placeholder's left
+    // edge instead. KANGIEFOO then ran off the right of the screen.
+    //
+    // So reproduce Godot's grow-Both arithmetic here against the label's authored box (anchors are 0,
+    // so Offset* ARE absolute coordinates) and the width of the text actually set. No magic numbers,
+    // and it holds for any future name — an over-long one overflows symmetrically rather than to one
+    // side, which is the best available outcome.
+    private Vector2 Line1Destination()
+    {
+        if (WinTextLine1 == null) return _l1Home;
+        float boxW = _l1BoxR - _l1BoxL;
+        float w = Mathf.Max(boxW, WinTextLine1.GetCombinedMinimumSize().X);
+        return new Vector2((_l1BoxL + _l1BoxR) * 0.5f - w * 0.5f, _l1Home.Y);
     }
 
     private void PlayWinTextFlyIn(Label l, Vector2 home, bool fromLeft, ref Tween slot)
@@ -527,7 +550,7 @@ public partial class GameManager : Node2D
         _phase = Phase.Resetting;
         if (_line1Tween != null && _line1Tween.IsValid()) _line1Tween.Kill();
         if (_line2Tween != null && _line2Tween.IsValid()) _line2Tween.Kill();
-        RestoreLabel(WinTextLine1, _l1Home);
+        RestoreLabel(WinTextLine1, Line1Destination());
         RestoreLabel(WinTextLine2, _l2Home);
         if (WinAnim != null) { WinAnim.Visible = false; WinAnim.Stop(); }
 
