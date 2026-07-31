@@ -33,16 +33,17 @@ public partial class GameManager : Node2D
     [Export] public AnimatedSprite2D WinAnim;
     [Export] public string WinAnimName = "default";
 
-    [Export] public Label p1WinLine1;
-    [Export] public Label p1WinLine2;
-    [Export] public Label p2WinLine1;
-    [Export] public Label p2WinLine2;
+    // ONE pair of victory-text Labels, same reason as WinAnim above: line 1 is the WINNER'S
+    // fighting name (it used to be baked per side as "BISON" / "KANGIEFOO"), line 2 is "WINS" for
+    // everyone. Line 1's text comes from CharacterDb.WinName at win time.
+    [Export] public Label WinTextLine1;
+    [Export] public Label WinTextLine2;
 
     [Export] public float WinTextFlyInSec = 0.4f;
     [Export] public float WinTextDwellSec = 1.0f;
     [Export] public float WinTextFadeOutSec = 0.12f;
 
-    private Vector2 _p1L1Home, _p1L2Home, _p2L1Home, _p2L2Home;
+    private Vector2 _l1Home, _l2Home;   // fly-in destinations, captured before the labels are hidden
     private Tween _line1Tween, _line2Tween;
 
     [Export] public Vector2 P1StartPos = new Vector2(120, 560);
@@ -110,10 +111,8 @@ public partial class GameManager : Node2D
             WinAnim.Visible = false;
             WinAnim.AnimationFinished += OnWinAnimFinished;
         }
-        CacheAndHideLabel(p1WinLine1, ref _p1L1Home);
-        CacheAndHideLabel(p1WinLine2, ref _p1L2Home);
-        CacheAndHideLabel(p2WinLine1, ref _p2L1Home);
-        CacheAndHideLabel(p2WinLine2, ref _p2L2Home);
+        CacheAndHideLabel(WinTextLine1, ref _l1Home);
+        CacheAndHideLabel(WinTextLine2, ref _l2Home);
         UpdateHpBars();
     }
 
@@ -433,7 +432,8 @@ public partial class GameManager : Node2D
         _phase = Phase.Win;
         bool p1Won = winnerIndex == 0;
 
-        var frames = CharacterDb.Get((p1Won ? p1 : p2).Character).WinFrames;
+        var winner = p1Won ? p1 : p2;
+        var frames = CharacterDb.Get(winner.Character).WinFrames;
         bool playing = false;
         // HasAnimation guard: the squirrel splash is a placeholder copy today, and whatever art
         // replaces it must still contain the WinAnimName clip. Without this a mismatched resource
@@ -449,11 +449,12 @@ public partial class GameManager : Node2D
         else if (WinAnim != null)
         {
             GD.PushWarning($"[GameManager] no '{WinAnimName}' clip in the win splash for "
-                           + $"{(p1Won ? p1 : p2).Character}; skipping the victory animation.");
+                           + $"{winner.Character}; skipping the victory animation.");
         }
 
-        PlayWinTextFlyIn(p1Won ? p1WinLine1 : p2WinLine1, p1Won ? _p1L1Home : _p2L1Home, fromLeft: true, ref _line1Tween);
-        PlayWinTextFlyIn(p1Won ? p1WinLine2 : p2WinLine2, p1Won ? _p1L2Home : _p2L2Home, fromLeft: false, ref _line2Tween);
+        if (WinTextLine1 != null) WinTextLine1.Text = CharacterDb.Get(winner.Character).WinName;
+        PlayWinTextFlyIn(WinTextLine1, _l1Home, fromLeft: true, ref _line1Tween);
+        PlayWinTextFlyIn(WinTextLine2, _l2Home, fromLeft: false, ref _line2Tween);
 
         // No splash to wait on (missing node or missing art) => go straight to the next round rather
         // than hanging in Phase.Win forever.
@@ -494,10 +495,8 @@ public partial class GameManager : Node2D
         _phase = Phase.Resetting;
         if (_line1Tween != null && _line1Tween.IsValid()) _line1Tween.Kill();
         if (_line2Tween != null && _line2Tween.IsValid()) _line2Tween.Kill();
-        RestoreLabel(p1WinLine1, _p1L1Home);
-        RestoreLabel(p1WinLine2, _p1L2Home);
-        RestoreLabel(p2WinLine1, _p2L1Home);
-        RestoreLabel(p2WinLine2, _p2L2Home);
+        RestoreLabel(WinTextLine1, _l1Home);
+        RestoreLabel(WinTextLine2, _l2Home);
         if (WinAnim != null) { WinAnim.Visible = false; WinAnim.Stop(); }
 
         FreeProjectileViews();

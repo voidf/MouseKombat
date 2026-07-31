@@ -12,6 +12,11 @@ Both nodes already had identical position and scale (414, 299 @ 1.15) — they a
 splash, not something attached to a fighter — so only the SpriteFrames differed. This script turns
 each one into a standalone .tres that CharacterDb hands to a single WinAnim node at runtime.
 
+The four victory-text Labels had the same problem: P1WinTextLine1 read "BISON" and P2WinTextLine1
+read "KANGIEFOO", i.e. line 1 is the WINNER'S FIGHTING NAME, not a property of the seat. Line 2 is
+"WINS" for both. The two pairs differed by under a pixel of geometry (hand-copied), so they collapse
+into one pair whose line 1 is filled in from CharacterDb.WinName at win time.
+
 Squirrel has no win art yet, so it gets a copy of the hamster resource as a placeholder; replacing
 that one file is the whole art hand-off.
 
@@ -39,6 +44,11 @@ EXTRACT = [
 COPIES = [("Art/Win_Hamster.tres", "Art/Win_Squirrel.tres")]
 
 REMOVE_NODES = ("P1WinAnim", "P2WinAnim")
+
+# The P1 duplicates are dropped; the P2 blocks are RENAMED, so the surviving geometry is verbatim
+# original rather than hand-transcribed (the two pairs differed by sub-pixel amounts).
+RENAME_NODES = {"P2WinTextLine1": "WinTextLine1", "P2WinTextLine2": "WinTextLine2"}
+DROP_NODES = ("P1WinTextLine1", "P1WinTextLine2")
 
 # The single splash node that replaces them. Position/scale copied from the two identical originals.
 WIN_NODE = (
@@ -77,6 +87,8 @@ def build_entry(sections, ext_order, sub_order, ext_by_id, sub_by_id):
     for n in (s for s in sections if s.kind == "node"):
         name = n.attrs.get("name", "")
         parent = n.attrs.get("parent")
+        if parent == "." and name in DROP_NODES:
+            continue
         if name in REMOVE_NODES and parent == ".":
             if not placed:
                 # Same rule as split_chars: child order is draw order, so the replacement has to sit
@@ -86,10 +98,22 @@ def build_entry(sections, ext_order, sub_order, ext_by_id, sub_by_id):
             continue
 
         header, body = n.header, "".join(n.body)
+        if parent == "." and name in RENAME_NODES:
+            header = header.replace(f'name="{name}"', f'name="{RENAME_NODES[name]}"', 1)
+            # Line 1 is overwritten from CharacterDb.WinName on every win; leave an obvious
+            # placeholder rather than one character's name baked into the now-shared node.
+            if RENAME_NODES[name] == "WinTextLine1":
+                body = re.sub(r'^text = ".*"$', 'text = "NAME"', body, flags=re.M)
         if parent is None:  # scene root = the match director
             header = header.replace('"p1WinAnim", "p2WinAnim"', '"WinAnim"')
+            header = header.replace('"p1WinLine1", "p1WinLine2", "p2WinLine1", "p2WinLine2"',
+                                    '"WinTextLine1", "WinTextLine2"')
             body = body.replace('p1WinAnim = NodePath("P1WinAnim")\np2WinAnim = NodePath("P2WinAnim")\n',
                                 'WinAnim = NodePath("WinAnim")\n')
+            body = body.replace(
+                'p1WinLine1 = NodePath("P1WinTextLine1")\np1WinLine2 = NodePath("P1WinTextLine2")\n'
+                'p2WinLine1 = NodePath("P2WinTextLine1")\np2WinLine2 = NodePath("P2WinTextLine2")\n',
+                'WinTextLine1 = NodePath("WinTextLine1")\nWinTextLine2 = NodePath("WinTextLine2")\n')
         items.append((header, body))
 
     seed = set()

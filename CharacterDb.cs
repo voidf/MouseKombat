@@ -20,6 +20,7 @@ public static class CharacterDb
         public string PortraitPath;
         public Rect2 PortraitRegion;
         public string WinFramesPath;   // victory splash; see GameManager.BeginWin
+        public string WinName;         // line 1 of the victory text ("BISON" / "KANGIEFOO" / ...)
 
         private PackedScene _scene;
         private Texture2D _portrait;
@@ -55,20 +56,21 @@ public static class CharacterDb
             Id = CharacterId.Hamster, DisplayName = "仓鼠",
             ScenePath = "res://Char_Hamster.tscn",
             PortraitPath = "res://Art/csIdleAtlas.png", PortraitRegion = new Rect2(0, 0, 512, 512),
-            WinFramesPath = "res://Art/Win_Hamster.tres",
+            WinFramesPath = "res://Art/Win_Hamster.tres", WinName = "BISON",
         },
         new Entry {
             Id = CharacterId.Kangaroo, DisplayName = "袋鼠",
             ScenePath = "res://Char_Kangaroo.tscn",
             PortraitPath = "res://Art/dsIdleAtlas.png", PortraitRegion = new Rect2(0, 0, 512, 512),
-            WinFramesPath = "res://Art/Win_Kangaroo.tres",
+            WinFramesPath = "res://Art/Win_Kangaroo.tres", WinName = "KANGIEFOO",
         },
         new Entry {
             Id = CharacterId.Squirrel, DisplayName = "松鼠",
             ScenePath = "res://Char_Squirrel.tscn",
             PortraitPath = "res://Art/ssIdleAtlas.png", PortraitRegion = new Rect2(0, 0, 512, 512),
-            // placeholder: a copy of the hamster splash until the squirrel art lands
-            WinFramesPath = "res://Art/Win_Squirrel.tres",
+            // placeholders until the squirrel art lands: the splash is a copy of the hamster's,
+            // and the fighting name still needs picking (the others are Street Fighter puns).
+            WinFramesPath = "res://Art/Win_Squirrel.tres", WinName = "SQUIRREL",
         },
     };
 
