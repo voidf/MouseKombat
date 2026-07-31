@@ -78,6 +78,22 @@ internal static class Program
         return new GameSim(c1, c2, 40f, 760f, 800f);
     }
 
+    // same stage, but the corner-pushback knobs are overridden (1 = default, 0 = old behavior)
+    private static GameSim MakeSimPushback(float p1x, float p2x, float p1Scale, float p2Scale = 1f)
+    {
+        var c1 = new PlayerConfig
+        {
+            Character = CharacterId.Hamster, StartPos = new Vec2(p1x, 560), StartFacingRight = true,
+            CornerPushbackScale = p1Scale,
+        };
+        var c2 = new PlayerConfig
+        {
+            Character = CharacterId.Kangaroo, StartPos = new Vec2(p2x, 560), StartFacingRight = false,
+            CornerPushbackScale = p2Scale,
+        };
+        return new GameSim(c1, c2, 40f, 760f, 800f);
+    }
+
     private static int Mask(AttackButton b) => 1 << (int)b;
 
     // press a button on frame 0 only, neutral after; run `frames` steps. p1 attacks, p2 optional hold.
@@ -330,6 +346,80 @@ internal static class Program
                 && a.P1.State == b.P1.State && a.P2.State == b.P2.State
                 && a.P2.Position.X == b.P2.Position.X && a.P2.Position.Y == b.P2.Position.Y,
                 "determinism holds with throws");
+        }
+
+        CornerPushbackTests();
+    }
+
+    // ---- corner pushback: knockback a stage wall can't absorb is transferred to the ATTACKER ----
+    // Without this, a cornered opponent never gets pushed away, so a fast-startup normal can
+    // re-hit forever. Hamster 5LP: Knockback = 6px, no MotionTimeline, so the arithmetic is exact.
+    private static void CornerPushbackTests()
+    {
+        // L1. defender flush against the right wall: it cannot move at all, so the attacker eats
+        // the whole 6px and is shoved back out of range.
+        {
+            var sim = MakeSim(630, 760);
+            RunScenario(sim, 12, Mask(AttackButton.LP));
+            Check(sim.P2.Hp == 97, $"corner: 5LP connected at the wall (P2 Hp {sim.P2.Hp})");
+            Check(MathF.Abs(sim.P2.Position.X - 760f) < 0.01f,
+                $"corner: cornered defender stayed at the wall (got {sim.P2.Position.X:F2})");
+            Check(MathF.Abs(sim.P1.Position.X - 624f) < 0.01f,
+                $"corner: attacker pushed back the full 6px 630 -> 624 (got {sim.P1.Position.X:F2})");
+        }
+
+        // L1b. partial absorption: 3px of room left, so the defender takes 3 and the attacker 3.
+        {
+            var sim = MakeSim(630, 757);
+            RunScenario(sim, 12, Mask(AttackButton.LP));
+            Check(MathF.Abs(sim.P2.Position.X - 760f) < 0.01f,
+                $"corner: defender used its remaining 3px (got {sim.P2.Position.X:F2})");
+            Check(MathF.Abs(sim.P1.Position.X - 627f) < 0.01f,
+                $"corner: attacker took only the leftover 3px 630 -> 627 (got {sim.P1.Position.X:F2})");
+        }
+
+        // L2. mid-stage: the wall is not involved, so nothing about the old behavior changes.
+        {
+            var sim = MakeSim(300, 360);
+            RunScenario(sim, 12, Mask(AttackButton.LP));
+            Check(MathF.Abs(sim.P1.Position.X - 300f) < 0.01f,
+                $"mid-stage: attacker does NOT move (got {sim.P1.Position.X:F2})");
+            Check(MathF.Abs(sim.P2.Position.X - 366f) < 0.01f,
+                $"mid-stage: defender takes the whole 6px 360 -> 366 (got {sim.P2.Position.X:F2})");
+        }
+
+        // L3. CornerPushbackScale = 0 restores the pre-fix behavior exactly.
+        {
+            var sim = MakeSimPushback(630, 760, p1Scale: 0f);
+            RunScenario(sim, 12, Mask(AttackButton.LP));
+            Check(sim.P2.Hp == 97, "corner scale 0: hit still lands");
+            Check(MathF.Abs(sim.P1.Position.X - 630f) < 0.01f,
+                $"corner scale 0: attacker stays put (got {sim.P1.Position.X:F2})");
+        }
+
+        // L4. blocked hits transfer too. P2's 5HK (KnockbackOnBlock 12) vs a P1 cornered on the
+        // LEFT wall holding back. 5HK carries a MotionTimeline, so assert the RELATIVE outcome:
+        // with the transfer on, the attacker ends up further from the wall than with it off.
+        {
+            float EndAttackerX(float scale)
+            {
+                var sim = MakeSimPushback(40, 200, p1Scale: 1f, p2Scale: scale);
+                for (int i = 0; i < 40; i++)
+                {
+                    var f1 = new InputFrame(true, false, false, false, 0);          // P1 holds back = block
+                    var f2 = new InputFrame(false, false, false, false, i == 0 ? Mask(AttackButton.HK) : 0);
+                    sim.Step(f1, f2);
+                }
+                Check(sim.P1.Hp < 100 && sim.P1.Hp >= 98,
+                    $"corner block: P1 chip-blocked 5HK (Hp {sim.P1.Hp})");
+                Check(MathF.Abs(sim.P1.Position.X - 40f) < 0.01f,
+                    $"corner block: cornered blocker stayed at the wall (got {sim.P1.Position.X:F2})");
+                return sim.P2.Position.X;
+            }
+            float on = EndAttackerX(1f);
+            float off = EndAttackerX(0f);
+            Check(on - off > 11.9f,
+                $"corner block: attacker pushed ~12px further off the wall (on {on:F2} vs off {off:F2})");
         }
     }
 }

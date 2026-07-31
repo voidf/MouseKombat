@@ -67,6 +67,11 @@ public sealed class SimPlayer
     private int _juggleHitCount = 0;        // consecutive juggle hits (resets on ground hit)
     private const int MaxJuggleHits = 3;    // juggle limit before forced air reset
 
+    // Horizontal knockback this player owes from a hit/block taken THIS frame, in world px.
+    // ApplyDamage only records it; GameSim.ResolveKnockback moves us and hands the part the stage
+    // wall swallowed back to the attacker (see PlayerConfig.CornerPushbackScale).
+    private float _pendingPushX = 0f;
+
     // ---- throws ----
     private bool _grabbing = false;          // attacker side: this move's grab connected and is holding
     private bool _throwWhiffApplied = false; // attacker side: whiff recovery already swapped in
@@ -110,6 +115,16 @@ public sealed class SimPlayer
     public int MaxHp => _cfg.MaxHp;                          // for the view's HP bar
     public float WalkSpeedPxPerSec => _cfg.WalkSpeedPxPerSec; // for GameSim.ResolveMovement
     public CharacterId Character => _cfg.Character;           // for observation (asymmetric matchup)
+    public float CornerPushbackScale => _cfg.CornerPushbackScale; // for GameSim.ResolveKnockback
+
+    // Hand this frame's owed knockback to the caller (GameSim). Clears it, so it is applied once.
+    public bool ConsumePendingPush(out float pushX)
+    {
+        if (_pendingPushX == 0f) { pushX = 0f; return false; }
+        pushX = _pendingPushX;
+        _pendingPushX = 0f;
+        return true;
+    }
 
     public bool IsDefending =>
         (State == PlayerState.Idle || State == PlayerState.Walk || State == PlayerState.Crouch || State == PlayerState.CrouchExit)
@@ -725,7 +740,7 @@ public sealed class SimPlayer
             _defHitStunDuration = move.oB > 0 ? move.oB : _cfg.DefHitStunFrames;
             PlayAnim(crouchBlock ? _cfg.CrouchDefAnimName : _cfg.DefAnimName, true);
             if (move.KnockbackOnBlock > 0)
-                Position += new Vec2(pushDir * move.KnockbackOnBlock, 0);
+                _pendingPushX = pushDir * move.KnockbackOnBlock;
             return HitResult.Blocked;
         }
 
@@ -773,7 +788,7 @@ public sealed class SimPlayer
             _hurtStunDuration = move.oH > 0 ? move.oH : _cfg.HurtStunFrames;
             PlayAnim(_cfg.HurtAnimName, true);
             if (move.Knockback > 0)
-                Position += new Vec2(pushDir * move.Knockback, 0);
+                _pendingPushX = pushDir * move.Knockback;
         }
         return HitResult.Hit;
     }
@@ -806,6 +821,7 @@ public sealed class SimPlayer
         _throwWhiffApplied = false;
         _grabbedAnim = null;
         _throwImmune = 0;
+        _pendingPushX = 0f;
         _buffer.Clear();
         InLeft = InRight = InUpHeld = InDownHeld = false;
         DesiredDeltaX = 0;

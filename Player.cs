@@ -45,6 +45,11 @@ public partial class Player : Node2D
 
     [Export] public float DefDamageMultiplier = 0.1f;
 
+    // Corner pushback: share of a hit's knockback that a stage wall swallowed which gets handed
+    // back to THIS player (the attacker), shoving it away from a cornered opponent. Stops fast
+    // normals from looping someone in the corner. 1 = full, 0 = old behavior.
+    [Export] public float CornerPushbackScale = 1f;
+
     [Export] public bool ArtFacesRight = false;
     [Export] public bool StartFacingRight = true;
 
@@ -95,6 +100,7 @@ public partial class Player : Node2D
         MaxHp = MaxHp,
         WalkSpeedPxPerSec = WalkSpeedPxPerSec,
         DefDamageMultiplier = DefDamageMultiplier,
+        CornerPushbackScale = CornerPushbackScale,
         HurtStunFrames = HurtStunFrames,
         DefHitStunFrames = DefHitStunFrames,
         CrouchEnterFrames = CrouchEnterFrames,

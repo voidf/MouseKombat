@@ -213,6 +213,39 @@ public sealed class GameSim
         p.Position = pos;
     }
 
+    // Apply the positional knockback ApplyDamage just recorded on `defender`, then hand whatever
+    // the stage wall refused to absorb back to `attacker`, pushing IT away instead.
+    //
+    // This is the corner-loop fix: against a wall the defender can't be moved, so the spacing reset
+    // that knockback normally provides never happens and a fast-startup normal can re-hit forever.
+    // Transferring the swallowed part to the attacker restores that reset. attacker == null means
+    // nobody to shove (a fireball has no body), so the residual is simply dropped.
+    //
+    // Note the defender is clamped HERE rather than only at the end of Step, so the second TryHit
+    // of the frame judges against an in-bounds position. Outside the corner case nothing changes:
+    // residual is 0 and the later clamps are no-ops.
+    private void ResolveKnockback(SimPlayer defender, SimPlayer attacker)
+    {
+        if (!defender.ConsumePendingPush(out float push)) return;
+
+        float before = defender.Position.X;
+        var dp = defender.Position;
+        dp.X += push;
+        defender.Position = dp;
+        ClampToStage(defender);
+
+        float residual = push - (defender.Position.X - before);
+        if (attacker == null || MathF.Abs(residual) < 0.01f) return;
+
+        float scale = attacker.CornerPushbackScale;
+        if (scale <= 0f) return;
+
+        var ap = attacker.Position;
+        ap.X -= residual * scale;   // residual points into the wall => attacker moves the other way
+        attacker.Position = ap;
+        ClampToStage(attacker);
+    }
+
     private void ProcessSpecials(StepResult res)
     {
         if (P1.ConsumeProjectileSpawn(out var s1)) SpawnProjectile(0, s1, res);
@@ -254,6 +287,7 @@ public sealed class GameSim
             int pushDir = attacker.Position.X <= defender.Position.X ? 1 : -1;
             var r = defender.ApplyDamage(attacker.CurrentMove, pushDir);
             attacker.ConsumeAttackHit();
+            ResolveKnockback(defender, attacker);
             res.Hits.Add(new HitFeedback { Result = r, WorldHitbox = hitBox, DefenderIndex = defIdx });
         }
     }
@@ -341,6 +375,9 @@ public sealed class GameSim
                 && target.HurtboxOverlaps(pr.GetWorldHitbox()))
             {
                 var r = target.ApplyDamage(pr.Hit, pr.Dir);
+                // attacker = null: a fireball has no body, so a cornered target's knockback is
+                // simply absorbed by the wall (the owner is nowhere near it).
+                ResolveKnockback(target, null);
                 res.Hits.Add(new HitFeedback { Result = r, WorldHitbox = pr.GetWorldHitbox(), DefenderIndex = defIdx });
                 pr.Alive = false;
             }

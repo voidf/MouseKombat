@@ -13,6 +13,13 @@ public sealed class PlayerConfig
     public float WalkSpeedPxPerSec = 220f;
     public float DefDamageMultiplier = 0.1f;
 
+    // Corner pushback: when a hit's knockback shoves the defender into a stage wall, the part the
+    // wall refuses to absorb is handed BACK to this attacker (it gets pushed away instead). Without
+    // it, a fast-startup normal can loop a cornered opponent forever, since the knockback that would
+    // normally reset the spacing goes nowhere. 1 = full transfer, 0 = disabled (old behavior).
+    // Read off the ATTACKER's config.
+    public float CornerPushbackScale = 1f;
+
     public int HurtStunFrames = 14;
     public int DefHitStunFrames = 10;
     public int CrouchEnterFrames = 8;
