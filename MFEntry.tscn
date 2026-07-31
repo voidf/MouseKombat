@@ -30,9 +30,9 @@ P1Slot = NodePath("P1Slot")
 P2Slot = NodePath("P2Slot")
 hp1Fill = NodePath("HUD/P1Bar/Fill")
 hp2Fill = NodePath("HUD/P2Bar/Fill")
-WinAnim = NodePath("WinAnim")
-WinTextLine1 = NodePath("WinTextLine1")
-WinTextLine2 = NodePath("WinTextLine2")
+WinAnim = NodePath("WinFx/WinAnim")
+WinTextLine1 = NodePath("WinTextFx/WinTextLine1")
+WinTextLine2 = NodePath("WinTextFx/WinTextLine2")
 HitFxScene = ExtResource("fx_hit")
 GuardFxScene = ExtResource("fx_guard")
 CmdPopupScene = ExtResource("45_qnk4y")
@@ -53,12 +53,18 @@ position = Vector2(650, 560)
 [node name="P1Slot" type="Node2D" parent="."]
 position = Vector2(120, 560)
 
-[node name="WinAnim" type="AnimatedSprite2D" parent="."]
+[node name="WinFx" type="CanvasLayer" parent="."]
+layer = 2
+
+[node name="WinAnim" type="AnimatedSprite2D" parent="WinFx"]
 visible = false
 position = Vector2(414, 299)
 scale = Vector2(1.15, 1.15)
 
-[node name="WinTextLine2" type="Label" parent="." unique_id=1583152654]
+[node name="WinTextFx" type="CanvasLayer" parent="."]
+layer = 3
+
+[node name="WinTextLine2" type="Label" parent="WinTextFx" unique_id=1583152654]
 visible = false
 anchors_preset = 7
 anchor_left = 0.5
@@ -76,7 +82,7 @@ label_settings = SubResource("LabelSettings_254nc")
 horizontal_alignment = 1
 vertical_alignment = 1
 
-[node name="WinTextLine1" type="Label" parent="." unique_id=573368500]
+[node name="WinTextLine1" type="Label" parent="WinTextFx" unique_id=573368500]
 visible = false
 anchors_preset = 8
 anchor_left = 0.5
@@ -95,6 +101,7 @@ horizontal_alignment = 3
 vertical_alignment = 3
 
 [node name="HUD" type="CanvasLayer" parent="." unique_id=1998954204]
+layer = 1
 
 [node name="P1Bar" type="Control" parent="HUD" unique_id=2069848012]
 layout_mode = 3

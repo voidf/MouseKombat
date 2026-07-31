@@ -30,6 +30,14 @@ public partial class GameManager : Node2D
     // WINNING CHARACTER's roster entry, because the splash belongs to the character, not the seat:
     // with two side-specific nodes, a P2 win played the kangaroo splash even when P2 had picked the
     // hamster (and mirror matches made that visible immediately).
+    //
+    // LAYERING (MFEntry canvas layers, lowest first):
+    //   0  the world — background, fighters, hit FX, projectiles, the floating name tags
+    //   1  HUD        — HP bars
+    //   2  WinFx      — this splash
+    //   3  WinTextFx  — the victory text
+    // Canvas layer, not child order, is what decides this: HUD is a CanvasLayer, so it used to draw
+    // over the splash no matter where the splash sat among its siblings.
     [Export] public AnimatedSprite2D WinAnim;
     [Export] public string WinAnimName = "default";
 
@@ -131,9 +139,11 @@ public partial class GameManager : Node2D
         p1 = CharacterDb.Spawn(c1, this, P1StartPos, 0);
         p2 = CharacterDb.Spawn(c2, this, P2StartPos, 1);
 
-        // Draw order: a runtime AddChild lands last and would paint over the win splash. Slot each
-        // fighter in where its marker sits among the director's children instead, so the marker
-        // controls layering as well as position (background behind, win animation in front).
+        // Draw order WITHIN the world layer: a runtime AddChild lands last, which would put the
+        // fighters over the hit FX and name tags. Slot each one in where its marker sits among the
+        // director's children instead, so the marker controls layering as well as position (the
+        // background TextureRect stays behind them). The victory splash and text are on their own
+        // canvas layers and are unaffected by this — see the layering note on WinAnim.
         if (p1 != null && P1Slot != null) MoveChild(p1, P1Slot.GetIndex());
         if (p2 != null && P2Slot != null) MoveChild(p2, P2Slot.GetIndex());
 
@@ -151,6 +161,10 @@ public partial class GameManager : Node2D
     // A "name ▼" label floating over each fighter. Local play shows 1P / 2P; online fills in the
     // player-supplied name (display only — never an identity). Built in code rather than as a scene
     // because the fighters themselves are now created at runtime.
+    //
+    // These live in the WORLD (canvas layer 0), which is what puts them under the victory splash and
+    // text. Draw order within the world comes from child order: they are added after the fighters, so
+    // they sit above them. See the layering note on WinAnim.
     [Export] public int TagFontSize = 15;
     [Export] public Color P1TagColor = new Color(0.55f, 0.85f, 1f);
     [Export] public Color P2TagColor = new Color(1f, 0.72f, 0.55f);
@@ -173,7 +187,6 @@ public partial class GameManager : Node2D
             VerticalAlignment = VerticalAlignment.Center,
             Size = new Vector2(180, 44),
             MouseFilter = Control.MouseFilterEnum.Ignore,
-            ZIndex = 50,
         };
         l.AddThemeFontSizeOverride("font_size", TagFontSize);
         l.AddThemeColorOverride("font_color", color);
