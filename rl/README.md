@@ -32,7 +32,22 @@ by hosting the `MouseKombat.Sim` .NET library in-process via pythonnet (no Godot
 - `eval_vs.py <p1> <p2> [games]` — head-to-head win counts (spec = `statemachine` or a `.zip`), sides alternated.
 - `export_onnx.py <ckpt> <out>` — export a checkpoint to `ai_rl_model/<out>.onnx` (validated vs SB3).
 - `verify_reset.py` — regression check for the cross-round agent-reset bug.
-- Per character: `set MK_CHAR=Kangaroo` (default Hamster) for selfplay/eval.
+- Per character: `set MK_CHAR=Kangaroo` (default Hamster) for selfplay/eval. Roster is
+  Hamster / Kangaroo / **Squirrel**.
+
+## Roster & mirror matches (changed)
+- Three characters now. `selfplay.py` draws the learner's character AND the opponent's
+  independently from the whole roster, so **mirror matches are trained** — character select does
+  not forbid picking the same character on both sides, and the old code forced opponent != learner,
+  which left the policy having never seen a mirror.
+- Squirrel's frame data is currently **seeded from Hamster's table** (`MoveSets.BuildSs`) and only
+  its IDLE art exists. It plays legally but is not yet differentiated; re-run training after its
+  numbers are tuned.
+- Everything trained before Squirrel existed only ever saw 0/1 in the two character observation
+  slots and never played a mirror. **Warm-start from the newest two-character checkpoint and
+  retrain** rather than trusting old win rates:
+  `selfplay.bat 2000000 checkpoints\ppo_selfplay_v7.zip ppo_selfplay_v8`
+  (keep v7 in `checkpoints/pool/` as the anchor — see the recipe note above).
 
 ## Results so far
 - `train.py` 150k → `ppo_hamster_v0`: beats state-machine 40/0, but weak (crouch/poke).

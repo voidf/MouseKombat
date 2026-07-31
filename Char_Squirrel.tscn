@@ -1,0 +1,82 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" uid="uid://c371721sxj4ig" path="res://Player.cs" id="1_tu88n"]
+[ext_resource type="Texture2D" uid="uid://cyyy3md40jx0f" path="res://Art/ssIdleAtlas.png" id="8_bxo6i"]
+[ext_resource type="PackedScene" uid="uid://cblwghenscetk" path="res://dsProjectile.tscn" id="proj_ds"]
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_7x62x"]
+atlas = ExtResource("8_bxo6i")
+region = Rect2(1024, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_ly7oh"]
+atlas = ExtResource("8_bxo6i")
+region = Rect2(512, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_d634e"]
+atlas = ExtResource("8_bxo6i")
+region = Rect2(0, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_50bj1"]
+atlas = ExtResource("8_bxo6i")
+region = Rect2(512, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_cqnql"]
+atlas = ExtResource("8_bxo6i")
+region = Rect2(1024, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_cw63d"]
+atlas = ExtResource("8_bxo6i")
+region = Rect2(1536, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_yphaw"]
+atlas = ExtResource("8_bxo6i")
+region = Rect2(2048, 0, 512, 512)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_xr0l6"]
+atlas = ExtResource("8_bxo6i")
+region = Rect2(1536, 0, 512, 512)
+
+[sub_resource type="SpriteFrames" id="SpriteFrames_8llm0"]
+animations = [{
+"frames": [{
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_7x62x")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_ly7oh")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_d634e")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_50bj1")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_cqnql")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_cw63d")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_yphaw")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_xr0l6")
+}],
+"loop": true,
+"name": &"IDLE",
+"speed": 10.0
+}]
+
+[node name="Player" type="Node2D" unique_id=2050235557 node_paths=PackedStringArray("anim")]
+script = ExtResource("1_tu88n")
+anim = NodePath("松鼠")
+Character = 2
+CrouchEnterFrames = 3
+ProjectileScene = ExtResource("proj_ds")
+
+[node name="松鼠" type="AnimatedSprite2D" parent="." unique_id=942326356]
+position = Vector2(0, -107)
+sprite_frames = SubResource("SpriteFrames_8llm0")
+animation = &"IDLE"
+frame_progress = 0.49385104

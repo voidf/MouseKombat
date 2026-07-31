@@ -5,10 +5,21 @@ using MouseKombat.Sim;
 // Presentation VIEW + match director. Owns the headless GameSim, feeds it two InputFrames
 // per physics tick, and renders the returned events: HP bars, hit/guard FX + SFX, command
 // popups, projectile view nodes, and the win/reset sequence. All combat logic is in the sim.
+//
+// The two fighters are NOT part of this scene: the ready screen picks a character per seat, and
+// _Ready instantiates the matching Char_*.tscn into P1Slot / P2Slot (see CharacterDb).
 public partial class GameManager : Node2D
 {
-    [Export] public Player p1;
-    [Export] public Player p2;
+    [Export] public Node2D P1Slot;   // empty marker; the chosen character is instantiated into it
+    [Export] public Node2D P2Slot;
+
+    // Resolved after the characters are spawned. Everything below reads these, never the slots.
+    private Player p1;
+    private Player p2;
+
+    // Fallback for opening MFEntry.tscn straight from the editor with no lobby selection.
+    [Export] public CharacterId DebugP1Character = CharacterId.Hamster;
+    [Export] public CharacterId DebugP2Character = CharacterId.Kangaroo;
 
     [Export] public ColorRect hp1Fill;
     [Export] public ColorRect hp2Fill;
@@ -60,12 +71,14 @@ public partial class GameManager : Node2D
     {
         StartBgm();
 
+        if (!SpawnFighters()) return; // nothing to run a match with; the errors are already logged
+
         // device bindings chosen in the ready screen; null Source => InputMap fallback.
         // An Agent (state-machine or ONNX policy) overrides the device when set.
         if (GameSession.Configured)
         {
-            if (p1 != null) { p1.Source = GameSession.P1; p1.Agent = GameSession.P1Agent; }
-            if (p2 != null) { p2.Source = GameSession.P2; p2.Agent = GameSession.P2Agent; }
+            p1.Source = GameSession.P1; p1.Agent = GameSession.P1Agent;
+            p2.Source = GameSession.P2; p2.Agent = GameSession.P2Agent;
         }
         else
         {
@@ -105,6 +118,83 @@ public partial class GameManager : Node2D
         UpdateHpBars();
     }
 
+    // Instantiate the two selected characters into their slots. The slot markers carry the world
+    // position, so a character scene needs no knowledge of which side it is on.
+    private bool SpawnFighters()
+    {
+        var c1 = GameSession.Configured ? GameSession.P1Char : DebugP1Character;
+        var c2 = GameSession.Configured ? GameSession.P2Char : DebugP2Character;
+
+        if (P1Slot == null || P2Slot == null)
+        {
+            GD.PushError("[GameManager] P1Slot / P2Slot not assigned; cannot build the match.");
+            return false;
+        }
+        P1Slot.Position = P1StartPos;
+        P2Slot.Position = P2StartPos;
+
+        p1 = CharacterDb.Spawn(c1, P1Slot, 0);
+        p2 = CharacterDb.Spawn(c2, P2Slot, 1);
+        if (p1 == null || p2 == null)
+        {
+            GD.PushError($"[GameManager] failed to spawn fighters ({c1} vs {c2}).");
+            return false;
+        }
+
+        BuildNameTags();
+        return true;
+    }
+
+    // ---- name tags ----
+    // A "name ▼" label floating over each fighter. Local play shows 1P / 2P; online fills in the
+    // player-supplied name (display only — never an identity). Built in code rather than as a scene
+    // because the fighters themselves are now created at runtime.
+    [Export] public int TagFontSize = 15;
+    [Export] public Color P1TagColor = new Color(0.55f, 0.85f, 1f);
+    [Export] public Color P2TagColor = new Color(1f, 0.72f, 0.55f);
+
+    private Label _p1Tag, _p2Tag;
+
+    private void BuildNameTags()
+    {
+        _p1Tag = MakeTag(GameSession.P1Name, P1TagColor);
+        _p2Tag = MakeTag(GameSession.P2Name, P2TagColor);
+        UpdateNameTags();
+    }
+
+    private Label MakeTag(string text, Color color)
+    {
+        var l = new Label
+        {
+            Text = (string.IsNullOrWhiteSpace(text) ? "?" : text) + "\n▼",
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            Size = new Vector2(180, 44),
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+            ZIndex = 50,
+        };
+        l.AddThemeFontSizeOverride("font_size", TagFontSize);
+        l.AddThemeColorOverride("font_color", color);
+        l.AddThemeColorOverride("font_outline_color", new Color(0, 0, 0, 0.85f));
+        l.AddThemeConstantOverride("outline_size", 4);
+        AddChild(l);
+        return l;
+    }
+
+    // Follows the fighter's feet anchor, so it tracks jumps and knockdowns rather than hovering at
+    // a fixed height. Called on the logic tick alongside the animation.
+    private void UpdateNameTags()
+    {
+        PlaceTag(_p1Tag, p1);
+        PlaceTag(_p2Tag, p2);
+    }
+
+    private static void PlaceTag(Label tag, Player who)
+    {
+        if (tag == null || who == null) return;
+        tag.Position = who.Position + new Vector2(-tag.Size.X * 0.5f, who.TagOffsetY);
+    }
+
     [Export] public string ReadyScenePath = "res://ReadyScreen.tscn";
 
     // Esc bails out of the match and returns to the ready screen so devices can be re-bound.
@@ -128,6 +218,8 @@ public partial class GameManager : Node2D
 
     public override void _PhysicsProcess(double delta)
     {
+        if (_sim == null) return; // SpawnFighters failed; errors already logged in _Ready
+
         if (_phase != Phase.Fighting)
         {
             // The sim is paused, but the ANIMATION clock is the physics tick now (see
@@ -135,6 +227,7 @@ public partial class GameManager : Node2D
             // mid-pose during the win sequence.
             p1.TickAnimation();
             p2.TickAnimation();
+            UpdateNameTags();
             UpdateHpBars();
             return;
         }
@@ -147,6 +240,7 @@ public partial class GameManager : Node2D
         p2.SyncFromSim();
         p1.TickAnimation();
         p2.TickAnimation();
+        UpdateNameTags();
 
         foreach (int id in res.SpawnedProjectileIds) SpawnProjectileView(id);
         SyncProjectileViews();

@@ -2,14 +2,25 @@ using Godot;
 using System.Collections.Generic;
 using MouseKombat.Sim;
 
-// Pre-fight lobby. A slot (P1/P2) can be claimed by a DEVICE (keyboard seat / gamepad, via its
-// confirm key) or by an AI (backtick opens a menu listing the state-machine AI + every .onnx in
-// /ai_rl_model). Backspace unbinds the "last" ready slot. Start: a bound human presses confirm, or
-// — when both slots are AI — press Space. Bindings are handed to GameManager via GameSession.
+// Pre-fight lobby. Flow per seat (P1 = 0, P2 = 1):
+//
+//   Seats  ── device confirm ──▶ CharSelect(that device) ── confirm ──▶ seat bound, back to Seats
+//     │                              └─ cancel ──▶ seat released, back to Seats
+//     └───── backtick ──────▶ CharSelect(keyboard, AI) ── Enter ──▶ AiSelect ── Enter ──▶ bound
+//                                    └─ ` ──▶ released          └─ ` ──▶ back to CharSelect
+//
+// While a panel is open EVERY other device is ignored, so two players cannot fight over the same
+// seat mid-selection. The seat being chosen for counts as occupied while its panel is open.
+//
+// Start: a bound HUMAN device presses confirm, or — when both seats are AI — press Space.
+// Esc leaves for the main menu (期3); today it is a no-op placeholder.
+// Choices are handed to GameManager through GameSession.
 public partial class ReadyScreen : Control
 {
     [Export] public TextureRect P1Portrait;
     [Export] public TextureRect P2Portrait;
+    [Export] public Label P1Label;     // "P1 · 仓鼠" — the character name half is filled in here
+    [Export] public Label P2Label;
     [Export] public Label P1Status;   // "准备中"
     [Export] public Label P2Status;
     [Export] public Label P1Prompt;   // floating lock prompt
@@ -18,7 +29,7 @@ public partial class ReadyScreen : Control
     [Export] public Label P2CancelHint;
     [Export] public Label StartLabel; // bottom-center start prompt
 
-    [Export] public string PromptText = "按手柄A / 键盘J / 数字键1 锁定该角色（~键选择AI）";
+    [Export] public string PromptText = "按手柄A / 键盘J / 数字键1 占用该机位（~键交给AI）";
     [Export] public string StatusText = "准备中";
     [Export] public string StartText = "按确认键开始游戏";
     [Export] public string StartTextAi = "按空格键开始游戏"; // shown when both slots are AI
@@ -28,28 +39,45 @@ public partial class ReadyScreen : Control
 
     [Export] public string AiModelDir = "ai_rl_model"; // scanned for *.onnx (relative to res:// and the exe)
 
+    private enum LobbyState { Seats, CharSelect, AiSelect }
+    private LobbyState _state = LobbyState.Seats;
+
+    private const int SeatCount = 2;
+
+    // Per-seat choices. Index 0 = P1, 1 = P2. A seat is BOUND once it has a device or an agent.
+    private readonly IInputSource[] _dev = new IInputSource[SeatCount];
+    private readonly IAgent[] _agent = new IAgent[SeatCount];
+    private readonly string[] _aiName = new string[SeatCount];
+    private readonly CharacterId[] _char = new CharacterId[SeatCount];
+
+    // Seat currently being configured (-1 = none). Counts as occupied so nobody else can claim it.
+    private int _busySeat = -1;
+
     private readonly List<IInputSource> _sources = new();
-    private IInputSource _devP1, _devP2;   // human device bindings
-    private IAgent _agP1, _agP2;           // AI bindings
-    private string _aiNameP1 = "", _aiNameP2 = "";
+    private IInputSource _menuNav;      // keyboard arrows/Enter/backtick — drives the AI seat's panels
     private double _blinkClock;
 
-    private bool P1Bound => _devP1 != null || _agP1 != null;
-    private bool P2Bound => _devP2 != null || _agP2 != null;
-    private bool BothAi => _agP1 != null && _agP2 != null;
+    private bool Bound(int seat) => _dev[seat] != null || _agent[seat] != null;
+    private bool Occupied(int seat) => Bound(seat) || _busySeat == seat;
+    private bool BothBound => Bound(0) && Bound(1);
+    private bool BothAi => _agent[0] != null && _agent[1] != null;
 
-    // ---- AI menu (built programmatically; no .tscn changes needed) ----
-    private bool _menuOpen;
-    private int _menuSlot;   // 0 = P1, 1 = P2
+    // ---- AI model menu (built programmatically; no .tscn changes needed) ----
     private int _menuIndex;
     private readonly List<(string name, bool isOnnx, string path)> _menuItems = new();
     private Control _menuRoot;
     private VBoxContainer _menuList;
     private Label _backspaceHint;
 
+    private CharSelect _charSelect;
+
     public override void _Ready()
     {
         GameSession.Clear();
+
+        // default picks: the roster order, so P1/P2 start on different characters
+        _char[0] = CharacterDb.All[0].Id;
+        _char[1] = CharacterDb.All[Mathf.Min(1, CharacterDb.All.Length - 1)].Id;
 
         _sources.Add(KeyboardSource.LeftSeat());
         _sources.Add(KeyboardSource.RightSeat());
@@ -57,11 +85,18 @@ public partial class ReadyScreen : Control
             _sources.Add(new GamepadSource(dev));
         Input.JoyConnectionChanged += OnJoyConnectionChanged;
 
+        _menuNav = KeyboardSource.MenuSeat();
+
         if (P1Prompt != null) P1Prompt.Text = PromptText;
         if (P2Prompt != null) P2Prompt.Text = PromptText;
         if (P1Status != null) P1Status.Text = StatusText;
         if (P2Status != null) P2Status.Text = StatusText;
         if (StartLabel != null) StartLabel.Text = StartText;
+
+        _charSelect = new CharSelect();
+        AddChild(_charSelect);
+        _charSelect.Confirmed += OnCharConfirmed;
+        _charSelect.Cancelled += OnCharCancelled;
 
         BuildMenuUi();
         BuildBackspaceHint();
@@ -80,25 +115,29 @@ public partial class ReadyScreen : Control
         {
             if (_sources.Find(s => s.Id == id) == null)
                 _sources.Add(new GamepadSource((int)device));
+            return;
         }
-        else
-        {
-            var src = _sources.Find(s => s.Id == id);
-            if (src != null)
-            {
-                if (_devP1 == src) _devP1 = null;
-                if (_devP2 == src) _devP2 = null;
-                _sources.Remove(src);
-            }
-        }
+
+        var src = _sources.Find(s => s.Id == id);
+        if (src == null) return;
+        _sources.Remove(src);
+
+        // unplugged while it was driving a panel: bail out, or the seat stays busy forever
+        if (ReferenceEquals(src, _panelNav)) { AbortSelection(); return; }
+        for (int seat = 0; seat < SeatCount; seat++)
+            if (_dev[seat] == src) ReleaseSeat(seat);
     }
 
-    // ---- keyboard: backtick (AI menu), backspace (unbind), space (AI start), menu nav ----
+    private IInputSource _panelNav;   // device driving the currently open panel
+
+    // ---- keyboard: backtick (hand a seat to an AI), backspace (unbind), space (AI start) ----
+    // Panel navigation runs off IInputSource in _PhysicsProcess, not here, so that a gamepad and a
+    // keyboard seat share one code path.
     public override void _Input(InputEvent @event)
     {
         if (@event is not InputEventKey k || !k.Pressed || k.Echo) return;
 
-        if (_menuOpen)
+        if (_state == LobbyState.AiSelect)
         {
             switch (k.Keycode)
             {
@@ -106,19 +145,26 @@ public partial class ReadyScreen : Control
                 case Key.Down: MoveMenu(+1); break;
                 case Key.Enter:
                 case Key.KpEnter: ConfirmMenu(); break;
-                case Key.Quoteleft:      // backtick — toggle closed
-                case Key.Escape: CloseMenu(); break;
+                case Key.Quoteleft: BackToCharSelectFromAi(); break;
+                case Key.Escape: AbortSelection(); break;
             }
             AcceptEvent();
             return;
         }
 
+        if (_state == LobbyState.CharSelect)
+        {
+            // Esc is a hard bail-out for a stuck panel; everything else belongs to the owning device
+            if (k.Keycode == Key.Escape) { AbortSelection(); AcceptEvent(); }
+            return;
+        }
+
         switch (k.Keycode)
         {
-            case Key.Quoteleft: OpenMenuForFreeSlot(); AcceptEvent(); break;
+            case Key.Quoteleft: BeginAiSeat(); AcceptEvent(); break;
             case Key.Backspace: UnbindLast(); AcceptEvent(); break;
             case Key.Space:
-                if (P1Bound && P2Bound) { StartGame(); AcceptEvent(); }
+                if (BothBound) { StartGame(); AcceptEvent(); }
                 break;
         }
     }
@@ -128,51 +174,142 @@ public partial class ReadyScreen : Control
         _blinkClock += delta;
 
         foreach (var s in _sources) s.Poll();
+        _menuNav.Poll();
 
-        // device binding is suspended while the AI menu is open
-        if (!_menuOpen)
+        switch (_state)
         {
-            bool bothBound = P1Bound && P2Bound;
-            foreach (var s in _sources)
-            {
-                bool bound = s == _devP1 || s == _devP2;
-                if (bound)
-                {
-                    if (bothBound && s.ConfirmJustPressed) { StartGame(); return; }
-                    if (s.CancelJustPressed)
-                    {
-                        if (_devP1 == s) _devP1 = null;
-                        else if (_devP2 == s) _devP2 = null;
-                    }
-                }
-                else if (s.ConfirmJustPressed)
-                {
-                    if (!P1Bound) _devP1 = s;       // lowest free slot first
-                    else if (!P2Bound) _devP2 = s;
-                }
-            }
+            case LobbyState.Seats: TickSeats(); break;
+            case LobbyState.CharSelect: _charSelect.Tick(); break;
+            case LobbyState.AiSelect: break; // driven by _Input
         }
 
         UpdatePresentation();
     }
 
-    // ---------- AI menu ----------
-    private void OpenMenuForFreeSlot()
+    // Seat claiming / releasing / starting. Only reached while no panel is open, which is how the
+    // "lock out every other device during selection" rule is enforced.
+    private void TickSeats()
     {
-        int slot = !P1Bound ? 0 : (!P2Bound ? 1 : -1);
-        if (slot < 0) return; // both bound; nothing to assign an AI to
-        _menuSlot = slot;
+        foreach (var s in _sources)
+        {
+            int seat = SeatOf(s);
+            if (seat >= 0)
+            {
+                if (BothBound && s.ConfirmJustPressed) { StartGame(); return; }
+                if (s.CancelJustPressed) ReleaseSeat(seat);
+                continue;
+            }
+
+            if (!s.ConfirmJustPressed) continue;
+            int free = FreeSeat();
+            if (free < 0) continue;
+            BeginCharSelect(free, s, aiMode: false);
+            return;   // one claim per frame: the panel now owns input
+        }
+    }
+
+    private int SeatOf(IInputSource s)
+    {
+        for (int seat = 0; seat < SeatCount; seat++)
+            if (_dev[seat] == s) return seat;
+        return -1;
+    }
+
+    private int FreeSeat()
+    {
+        for (int seat = 0; seat < SeatCount; seat++)
+            if (!Occupied(seat)) return seat;
+        return -1;
+    }
+
+    // ---------- selection flow ----------
+    private void BeginCharSelect(int seat, IInputSource nav, bool aiMode)
+    {
+        _busySeat = seat;
+        _panelNav = nav;
+        _state = LobbyState.CharSelect;
+        CloseMenu();
+        _charSelect.Open(seat, nav, _char[seat], aiMode);
+    }
+
+    private void BeginAiSeat()
+    {
+        int seat = FreeSeat();
+        if (seat < 0) return;
+        BeginCharSelect(seat, _menuNav, aiMode: true);
+    }
+
+    private bool AiSeatPending => _panelNav == _menuNav;
+
+    private void OnCharConfirmed(int seat, CharacterId picked)
+    {
+        _char[seat] = picked;
+        if (AiSeatPending)
+        {
+            // AI seat: character chosen, now pick which brain drives it
+            _charSelect.Close();
+            OpenAiMenu();
+            return;
+        }
+
+        _dev[seat] = _panelNav;
+        _agent[seat] = null;
+        _aiName[seat] = "";
+        FinishSelection();
+    }
+
+    private void OnCharCancelled(int seat)
+    {
+        ReleaseSeat(seat);
+        FinishSelection();
+    }
+
+    // Leaves whatever panel is open and returns the seat to nobody. Used by Esc and by a gamepad
+    // being unplugged mid-selection.
+    private void AbortSelection()
+    {
+        if (_busySeat >= 0 && !Bound(_busySeat)) ReleaseSeat(_busySeat);
+        FinishSelection();
+    }
+
+    private void FinishSelection()
+    {
+        _charSelect.Close();
+        CloseMenu();
+        _busySeat = -1;
+        _panelNav = null;
+        _state = LobbyState.Seats;
+    }
+
+    private void ReleaseSeat(int seat)
+    {
+        _dev[seat] = null;
+        _agent[seat] = null;
+        _aiName[seat] = "";
+    }
+
+    // ---------- AI model menu ----------
+    private void OpenAiMenu()
+    {
         _menuIndex = 0;
         BuildMenuItems();
         PopulateMenuList();
-        _menuOpen = true;
+        _state = LobbyState.AiSelect;
         _menuRoot.Visible = true;
     }
 
     private void CloseMenu()
     {
-        _menuOpen = false;
-        _menuRoot.Visible = false;
+        if (_menuRoot != null) _menuRoot.Visible = false;
+    }
+
+    private void BackToCharSelectFromAi()
+    {
+        CloseMenu();
+        int seat = _busySeat;
+        if (seat < 0) { AbortSelection(); return; }
+        _state = LobbyState.CharSelect;
+        _charSelect.Open(seat, _menuNav, _char[seat], aiMode: true);
     }
 
     private void MoveMenu(int dir)
@@ -184,13 +321,15 @@ public partial class ReadyScreen : Control
 
     private void ConfirmMenu()
     {
-        if (_menuItems.Count == 0) { CloseMenu(); return; }
+        int seat = _busySeat;
+        if (seat < 0 || _menuItems.Count == 0) { AbortSelection(); return; }
+
         var item = _menuItems[_menuIndex];
         IAgent agent;
         string name;
         if (!item.isOnnx)
         {
-            agent = new StateMachineAgent(_menuSlot);
+            agent = new StateMachineAgent(seat);
             name = item.name;
         }
         else
@@ -206,15 +345,15 @@ public partial class ReadyScreen : Control
             catch (System.Exception e)
             {
                 GD.PushError($"[ReadyScreen] failed to load ONNX {item.path}: {e.Message}; using state machine.");
-                agent = new StateMachineAgent(_menuSlot);
+                agent = new StateMachineAgent(seat);
                 name = item.name + "(载入失败)";
             }
         }
 
-        if (_menuSlot == 0) { _agP1 = agent; _devP1 = null; _aiNameP1 = name; }
-        else { _agP2 = agent; _devP2 = null; _aiNameP2 = name; }
-
-        CloseMenu();
+        _agent[seat] = agent;
+        _dev[seat] = null;
+        _aiName[seat] = name;
+        FinishSelection();
     }
 
     private void BuildMenuItems()
@@ -253,10 +392,11 @@ public partial class ReadyScreen : Control
         var bg = new ColorRect { Color = new Color(0, 0, 0, 0.82f), Position = new Vector2(250, 165), Size = new Vector2(300, 270) };
         _menuRoot.AddChild(bg);
 
-        var title = new Label { Text = "选择 AI  (↑↓ 选择 · 回车确定 · ~ 取消)", Position = new Vector2(262, 175), Size = new Vector2(276, 24) };
+        var title = new Label { Text = "选择 AI  (↑↓ 选择 · 回车确定 · ~ 返回选角色)", Position = new Vector2(262, 175), Size = new Vector2(276, 44) };
+        title.AutowrapMode = TextServer.AutowrapMode.WordSmart;
         _menuRoot.AddChild(title);
 
-        _menuList = new VBoxContainer { Position = new Vector2(266, 210), Size = new Vector2(268, 210) };
+        _menuList = new VBoxContainer { Position = new Vector2(266, 224), Size = new Vector2(268, 196) };
         _menuRoot.AddChild(_menuList);
     }
 
@@ -281,56 +421,63 @@ public partial class ReadyScreen : Control
 
     // ---------- unbind ----------
     // both ready -> unbind P2; else unbind whichever is ready; none -> nothing.
-    private int BackspaceTarget() => (P1Bound && P2Bound) ? 2 : (P1Bound ? 1 : (P2Bound ? 2 : 0));
+    private int BackspaceTarget() => (Bound(0) && Bound(1)) ? 2 : (Bound(0) ? 1 : (Bound(1) ? 2 : 0));
 
     private void UnbindLast()
     {
-        switch (BackspaceTarget())
-        {
-            case 1: _devP1 = null; _agP1 = null; _aiNameP1 = ""; break;
-            case 2: _devP2 = null; _agP2 = null; _aiNameP2 = ""; break;
-        }
+        int t = BackspaceTarget();
+        if (t > 0) ReleaseSeat(t - 1);
     }
 
     // ---------- presentation ----------
     private void UpdatePresentation()
     {
-        bool p1Bound = P1Bound;
-        bool p2Bound = P2Bound;
+        bool p1Bound = Bound(0);
+        bool p2Bound = Bound(1);
         bool blinkOn = ((int)(_blinkClock / Mathf.Max(0.05f, BlinkInterval))) % 2 == 0;
+        bool panelOpen = _state != LobbyState.Seats;
 
-        if (P1Portrait != null) P1Portrait.Modulate = p1Bound ? BoundTint : FreeTint;
-        if (P2Portrait != null) P2Portrait.Modulate = p2Bound ? BoundTint : FreeTint;
+        SetSeatPortrait(P1Portrait, 0, p1Bound);
+        SetSeatPortrait(P2Portrait, 1, p2Bound);
+        if (P1Label != null) P1Label.Text = $"P1 · {CharacterDb.NameOf(_char[0])}";
+        if (P2Label != null) P2Label.Text = $"P2 · {CharacterDb.NameOf(_char[1])}";
 
-        if (P1Status != null) { P1Status.Visible = p1Bound; P1Status.Text = _agP1 != null ? _aiNameP1 : StatusText; }
-        if (P2Status != null) { P2Status.Visible = p2Bound; P2Status.Text = _agP2 != null ? _aiNameP2 : StatusText; }
+        if (P1Status != null) { P1Status.Visible = p1Bound; P1Status.Text = _agent[0] != null ? _aiName[0] : StatusText; }
+        if (P2Status != null) { P2Status.Visible = p2Bound; P2Status.Text = _agent[1] != null ? _aiName[1] : StatusText; }
 
-        // lock prompt only under the lowest free slot; blinks.
-        if (P1Prompt != null) P1Prompt.Visible = !p1Bound && blinkOn;
-        if (P2Prompt != null) P2Prompt.Visible = p1Bound && !p2Bound && blinkOn;
+        // lock prompt only under the lowest free slot; blinks; hidden while a panel is up.
+        if (P1Prompt != null) P1Prompt.Visible = !panelOpen && !p1Bound && blinkOn;
+        if (P2Prompt != null) P2Prompt.Visible = !panelOpen && p1Bound && !p2Bound && blinkOn;
 
         // device-specific cancel hint under a device-bound slot; no blink. (AI slots use backspace.)
-        SetCancelHint(P1CancelHint, _devP1);
-        SetCancelHint(P2CancelHint, _devP2);
+        SetCancelHint(P1CancelHint, panelOpen ? null : _dev[0]);
+        SetCancelHint(P2CancelHint, panelOpen ? null : _dev[1]);
 
         // start prompt when both bound; blinks; text depends on whether both are AI.
         if (StartLabel != null)
         {
             StartLabel.Text = BothAi ? StartTextAi : StartText;
-            StartLabel.Visible = p1Bound && p2Bound && blinkOn;
+            StartLabel.Visible = !panelOpen && p1Bound && p2Bound && blinkOn;
         }
 
         // blinking global backspace hint naming the slot it would unbind
         if (_backspaceHint != null)
         {
             int t = BackspaceTarget();
-            if (t == 0) _backspaceHint.Visible = false;
+            if (panelOpen || t == 0) _backspaceHint.Visible = false;
             else
             {
                 _backspaceHint.Text = $"按 Backspace 键取消准备 {(t == 1 ? "P1" : "P2")}";
                 _backspaceHint.Visible = blinkOn;
             }
         }
+    }
+
+    private void SetSeatPortrait(TextureRect rect, int seat, bool bound)
+    {
+        if (rect == null) return;
+        rect.Texture = CharacterDb.Get(_char[seat]).Portrait;
+        rect.Modulate = bound ? BoundTint : FreeTint;
     }
 
     private static void SetCancelHint(Label l, IInputSource src)
@@ -343,10 +490,14 @@ public partial class ReadyScreen : Control
 
     private void StartGame()
     {
-        GameSession.P1 = _devP1;
-        GameSession.P2 = _devP2;
-        GameSession.P1Agent = _agP1;
-        GameSession.P2Agent = _agP2;
+        GameSession.P1 = _dev[0];
+        GameSession.P2 = _dev[1];
+        GameSession.P1Agent = _agent[0];
+        GameSession.P2Agent = _agent[1];
+        GameSession.P1Char = _char[0];
+        GameSession.P2Char = _char[1];
+        GameSession.P1Name = "1P";
+        GameSession.P2Name = "2P";
         GameSession.Configured = true;
         GetTree().ChangeSceneToFile("res://MFEntry.tscn");
     }

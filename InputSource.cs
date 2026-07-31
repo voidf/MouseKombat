@@ -102,12 +102,24 @@ public sealed class KeyboardSource : InputSourceBase
         btn: new[] { (int)Key.Kp4, (int)Key.Kp5, (int)Key.Kp6, (int)Key.Kp1, (int)Key.Kp2, (int)Key.Kp3 },
         confirm: (int)Key.Kp1, cancel: (int)Key.Kp2, cancelLabel: "小键盘2");
 
+    // Menu-only seat: arrows to navigate, Enter to confirm, backtick to back out. Used to drive an
+    // AI seat's panels through the SAME code path a human device uses, so the select screens do not
+    // need a separate keyboard branch. Has no attack buttons — it is never bound to a Player.
+    public static KeyboardSource MenuSeat() => new KeyboardSource(
+        "menu",
+        left: (int)Key.Left, right: (int)Key.Right, up: (int)Key.Up, down: (int)Key.Down,
+        btn: new[] { 0, 0, 0, 0, 0, 0 },
+        confirm: (int)Key.Enter, cancel: (int)Key.Quoteleft, cancelLabel: "`");
+
     public override void Poll()
     {
         var held = new bool[6];
-        for (int i = 0; i < 6; i++) held[i] = Input.IsPhysicalKeyPressed((Key)_btn[i]);
+        for (int i = 0; i < 6; i++)
+            held[i] = _btn[i] != 0 && Input.IsPhysicalKeyPressed((Key)_btn[i]);
         CommitFrame(held,
-            confirm: Input.IsPhysicalKeyPressed((Key)_confirm),
+            confirm: Input.IsPhysicalKeyPressed((Key)_confirm)
+                     // Enter: accept the numpad twin too, matching the AI menu's old behavior
+                     || (_confirm == (int)Key.Enter && Input.IsPhysicalKeyPressed(Key.KpEnter)),
             cancel: Input.IsPhysicalKeyPressed((Key)_cancel),
             left: Input.IsPhysicalKeyPressed((Key)_left),
             right: Input.IsPhysicalKeyPressed((Key)_right),

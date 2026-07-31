@@ -40,6 +40,7 @@ NUM_ACT = 10
 class MouseKombatEnv(gym.Env):
     metadata = {"render_modes": []}
 
+    # agent_char / opp_char are CharacterId names: "Hamster", "Kangaroo" or "Squirrel".
     def __init__(self, agent_char="Hamster", opp_char="Kangaroo", max_steps=3600, opp_seed=0):
         super().__init__()
         self.observation_space = spaces.Box(low=-4.0, high=4.0, shape=(OBS,), dtype=np.float32)

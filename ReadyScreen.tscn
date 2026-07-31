@@ -12,7 +12,7 @@ region = Rect2(0, 0, 512, 512)
 atlas = ExtResource("3_ds")
 region = Rect2(0, 0, 512, 512)
 
-[node name="ReadyScreen" type="Control" node_paths=PackedStringArray("P1Portrait", "P2Portrait", "P1Status", "P2Status", "P1Prompt", "P2Prompt", "P1CancelHint", "P2CancelHint", "StartLabel")]
+[node name="ReadyScreen" type="Control" node_paths=PackedStringArray("P1Portrait", "P2Portrait", "P1Label", "P2Label", "P1Status", "P2Status", "P1Prompt", "P2Prompt", "P1CancelHint", "P2CancelHint", "StartLabel")]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -20,6 +20,8 @@ anchor_bottom = 1.0
 script = ExtResource("1_rs")
 P1Portrait = NodePath("P1Portrait")
 P2Portrait = NodePath("P2Portrait")
+P1Label = NodePath("P1Label")
+P2Label = NodePath("P2Label")
 P1Status = NodePath("P1Status")
 P2Status = NodePath("P2Status")
 P1Prompt = NodePath("P1Prompt")
@@ -84,7 +86,7 @@ offset_top = 444.0
 offset_right = 396.0
 offset_bottom = 476.0
 theme_override_font_sizes/font_size = 16
-text = "按手柄A / 键盘J / 数字键1 锁定该角色"
+text = "按手柄A / 键盘J / 数字键1 占用该机位（~键交给AI）"
 horizontal_alignment = 1
 
 [node name="P1CancelHint" type="Label" parent="."]
@@ -137,7 +139,7 @@ offset_top = 444.0
 offset_right = 740.0
 offset_bottom = 476.0
 theme_override_font_sizes/font_size = 16
-text = "按手柄A / 键盘J / 数字键1 锁定该角色"
+text = "按手柄A / 键盘J / 数字键1 占用该机位（~键交给AI）"
 horizontal_alignment = 1
 
 [node name="P2CancelHint" type="Label" parent="."]

@@ -86,6 +86,10 @@ public partial class Player : Node2D
 
     [Export] public PackedScene ProjectileScene; // fireball scene spawned by motion specials (GameManager reads)
 
+    // Y offset (world px, negative = up) where the match director puts this fighter's name tag.
+    // Per-character because the sprites differ in height.
+    [Export] public float TagOffsetY = -250f;
+
     [Export] public bool DebugDrawBoxes = true;
 
     // Build the sim config from the exported tuning. GameManager overrides StartPos/facing

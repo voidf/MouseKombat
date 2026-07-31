@@ -1,8 +1,10 @@
-"""Self-play PPO for the ASYMMETRIC matchup. Each episode the learner randomly plays Hamster OR
-Kangaroo, on a random side, at a random start distance; the opponent is always the OTHER character
-(mirrors the real game, which is never same-vs-same). Opponent = a sampled past snapshot (shared
-policy that plays both characters, char is in the observation) or a scripted teacher (state-machine
-/ zoner / rusher, zoner-heavy to force learning to approach through fireballs & crouch-block lows).
+"""Self-play PPO across the WHOLE roster. Each episode the learner plays a random character on a
+random side at a random start distance, and the opponent is drawn independently from the roster —
+INCLUDING the same character, because character select does not forbid mirror matches. (An earlier
+version forced opponent != learner, which left the policy having never seen a mirror.) Opponent =
+a sampled past snapshot (one shared policy plays every character; the char ids are in the
+observation) or a scripted teacher (state-machine / zoner / rusher, zoner-heavy to force learning
+to approach through fireballs & crouch-block lows).
 
 Pool is on the FILESYSTEM (checkpoints/pool/*.zip) so SubprocVecEnv workers across all CPU cores
 share it. Env vars: MK_NENVS (default 16), MK_SUBPROC (default 1).
@@ -30,6 +32,9 @@ from MouseKombat.Sim import (  # noqa: E402
 
 OBS = 32
 NUM_ACT = 10
+# Every CharacterId the sim knows. Squirrel was added third; policies trained before it existed
+# only ever saw 0/1 in the character observation slots, so they need a warm-start retrain.
+ROSTER = [CharacterId.Hamster, CharacterId.Kangaroo, CharacterId.Squirrel]
 HERE = os.path.dirname(__file__)
 POOL_DIR = os.path.join(HERE, "checkpoints", "pool")
 POOL_RECENT = 20  # sample opponents from the most-recent N snapshots (bounds per-worker cache)
@@ -78,8 +83,8 @@ class SelfPlayEnv(gym.Env):
         self._pool_prob = pool_prob
 
     def _make(self):
-        learner = random.choice([CharacterId.Hamster, CharacterId.Kangaroo])
-        opp = CharacterId.Kangaroo if learner == CharacterId.Hamster else CharacterId.Hamster
+        learner = random.choice(ROSTER)
+        opp = random.choice(ROSTER)                # independent draw: mirror matches are legal
         self._self = random.randint(0, 1)          # learner side: 0 = left (P1), 1 = right (P2)
         self._opp = 1 - self._self
         left_char, right_char = (learner, opp) if self._self == 0 else (opp, learner)
@@ -104,7 +109,9 @@ class SelfPlayEnv(gym.Env):
         return self._obs(self._self), {}
 
     def _gap(self):
-        return abs(self._sim.Player(self._opp).Position.X - self._sim.Player(self._self).Position.X)
+        # .ToFloat(): the sim is fixed-point, and Python cannot abs() the opaque Fix struct
+        return abs(self._sim.Player(self._opp).Position.X.ToFloat()
+                   - self._sim.Player(self._self).Position.X.ToFloat())
 
     def _obs(self, idx):
         return np.array(list(Observation.Get(self._sim, idx)), dtype=np.float32)

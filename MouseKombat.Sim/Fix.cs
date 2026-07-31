@@ -72,6 +72,10 @@ public readonly struct Fix : IEquatable<Fix>, IComparable<Fix>, IFormattable
     public static explicit operator float(Fix f) => f.Raw / (float)OneRaw;
     public static explicit operator double(Fix f) => f.Raw / (double)OneRaw;
 
+    // Named twin of the explicit float cast, for callers that cannot use a C# conversion operator:
+    // the pythonnet RL bridge sees Fix as an opaque struct, so `abs(a.X - b.X)` in Python throws.
+    public float ToFloat() => Raw / (float)OneRaw;
+
     // truncates toward zero, matching a C# (int) cast on a float
     public static explicit operator int(Fix f) => f.Raw >= 0 ? f.Raw >> FracBits : -((-f.Raw) >> FracBits);
 
