@@ -279,6 +279,67 @@ def verify(name, text):
         if int(m.group(1)) != want:
             errs.append(f"{name}: load_steps={m.group(1)} but the file declares "
                         f"{len(declared)} resources (expected {want})")
+
+    errs += check_offscreen_ui(name, text)
+    return errs
+
+
+# Base viewport from project.godot; the project uses the "viewport" stretch mode, so this rect is
+# what UI anchors resolve against no matter how large the window is.
+VIEWPORT = (800, 600)
+
+
+def check_offscreen_ui(name, text):
+    """Flag Control nodes whose computed rect falls entirely outside the viewport.
+
+    A Control's anchors resolve against its PARENT'S rect, and that rect depends on what the parent
+    is: a CanvasLayer anchors its Control children to the viewport, while a plain Node2D parent has
+    no rect at all, so anchors contribute nothing and the offsets act as absolute coordinates.
+
+    Reparenting a Control between those two silently changes what its numbers mean. That is exactly
+    how the victory text ended up off-screen: it was authored under the Node2D root with
+    anchor (0.5, 1.0) — inert there — and moving it onto a CanvasLayer made those anchors live,
+    adding (400, 600) and pushing the whole thing to (616, 980).
+    """
+    W, H = VIEWPORT
+    kinds = {}   # node path -> type
+    errs = []
+    for m in re.finditer(r'^\[node name="([^"]+)" type="([^"]+)"(?:[^\]]*parent="([^"]*)")?[^\]]*\]'
+                         r'((?:\n(?!\[).*)*)', text, flags=re.M):
+        node, kind, parent, body = m.group(1), m.group(2), m.group(3), m.group(4) or ""
+        path = node if parent in (None, ".") else f"{parent}/{node}"
+        kinds[path] = kind
+        if parent is None:
+            continue
+
+        parent_kind = kinds.get(parent, "")
+        # Only the two unambiguous cases, which are also the only ones where the semantics differ.
+        if parent_kind == "CanvasLayer":
+            aw, ah = W, H
+        elif parent_kind in ("Node2D", "AnimatedSprite2D", "Sprite2D"):
+            aw, ah = 0, 0
+        else:
+            continue
+
+        def num(prop, default=0.0):
+            mm = re.search(rf"^{prop} = (-?[\d.e+]+)$", body, flags=re.M)
+            return float(mm.group(1)) if mm else default
+
+        # not a Control (no offsets/anchors at all) -> nothing to check
+        if not re.search(r"^(offset|anchor)_", body, flags=re.M):
+            continue
+
+        left = num("anchor_left") * aw + num("offset_left")
+        top = num("anchor_top") * ah + num("offset_top")
+        right = num("anchor_right") * aw + num("offset_right")
+        bottom = num("anchor_bottom") * ah + num("offset_bottom")
+        # Requires the rect to be fully INSIDE, not merely overlapping: the broken victory text had
+        # one label wholly off-screen and the other hanging off the bottom-right corner, and only
+        # the strict form caught both. Verified to produce no false positives on any scene here.
+        if left < -0.5 or top < -0.5 or right > W + 0.5 or bottom > H + 0.5:
+            errs.append(f"{name}: '{path}' computes to rect "
+                        f"({left:.0f},{top:.0f})-({right:.0f},{bottom:.0f}), not fully inside the "
+                        f"{W}x{H} viewport (parent is a {parent_kind})")
     return errs
 
 
