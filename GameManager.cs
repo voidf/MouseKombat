@@ -26,8 +26,11 @@ public partial class GameManager : Node2D
     [Export] public ColorRect hp2Fill;
     [Export] public float HpBarFullWidth = 260f;
 
-    [Export] public AnimatedSprite2D p1WinAnim;
-    [Export] public AnimatedSprite2D p2WinAnim;
+    // ONE victory splash node for both sides. Its SpriteFrames is swapped per match from the
+    // WINNING CHARACTER's roster entry, because the splash belongs to the character, not the seat:
+    // with two side-specific nodes, a P2 win played the kangaroo splash even when P2 had picked the
+    // hamster (and mirror matches made that visible immediately).
+    [Export] public AnimatedSprite2D WinAnim;
     [Export] public string WinAnimName = "default";
 
     [Export] public Label p1WinLine1;
@@ -102,15 +105,10 @@ public partial class GameManager : Node2D
         p1.Bind(_sim.P1);
         p2.Bind(_sim.P2);
 
-        if (p1WinAnim != null)
+        if (WinAnim != null)
         {
-            p1WinAnim.Visible = false;
-            p1WinAnim.AnimationFinished += OnWinAnimFinished;
-        }
-        if (p2WinAnim != null)
-        {
-            p2WinAnim.Visible = false;
-            p2WinAnim.AnimationFinished += OnWinAnimFinished;
+            WinAnim.Visible = false;
+            WinAnim.AnimationFinished += OnWinAnimFinished;
         }
         CacheAndHideLabel(p1WinLine1, ref _p1L1Home);
         CacheAndHideLabel(p1WinLine2, ref _p1L2Home);
@@ -258,8 +256,7 @@ public partial class GameManager : Node2D
         UpdateHpBars();
 
         // winner index: 1 = P2 won (P1 dead), 0 = P1 won (P2 dead) — matches old CheckKO mapping
-        if (res.MatchOverWinner == 1) BeginWin(p2WinAnim, p1);
-        else if (res.MatchOverWinner == 0) BeginWin(p1WinAnim, p2);
+        if (res.MatchOverWinner >= 0) BeginWin(res.MatchOverWinner);
     }
 
     // AI agent overrides device input when present; else poll the device / InputMap.
@@ -430,19 +427,37 @@ public partial class GameManager : Node2D
         }
     }
 
-    private void BeginWin(AnimatedSprite2D winAnim, Player loser)
+    // winnerIndex: 0 = P1 won, 1 = P2 won (matches StepResult.MatchOverWinner).
+    private void BeginWin(int winnerIndex)
     {
         _phase = Phase.Win;
-        if (winAnim != null)
+        bool p1Won = winnerIndex == 0;
+
+        var frames = CharacterDb.Get((p1Won ? p1 : p2).Character).WinFrames;
+        bool playing = false;
+        // HasAnimation guard: the squirrel splash is a placeholder copy today, and whatever art
+        // replaces it must still contain the WinAnimName clip. Without this a mismatched resource
+        // would leave the match stuck in Phase.Win with no animation to finish it.
+        if (WinAnim != null && frames != null && frames.HasAnimation(WinAnimName))
         {
-            winAnim.Visible = true;
-            winAnim.Frame = 0;
-            winAnim.Play(WinAnimName);
+            WinAnim.SpriteFrames = frames;
+            WinAnim.Visible = true;
+            WinAnim.SetFrameAndProgress(0, 0f);
+            WinAnim.Play(WinAnimName);
+            playing = true;
         }
-        bool p1Won = winAnim == p1WinAnim;
+        else if (WinAnim != null)
+        {
+            GD.PushWarning($"[GameManager] no '{WinAnimName}' clip in the win splash for "
+                           + $"{(p1Won ? p1 : p2).Character}; skipping the victory animation.");
+        }
+
         PlayWinTextFlyIn(p1Won ? p1WinLine1 : p2WinLine1, p1Won ? _p1L1Home : _p2L1Home, fromLeft: true, ref _line1Tween);
         PlayWinTextFlyIn(p1Won ? p1WinLine2 : p2WinLine2, p1Won ? _p1L2Home : _p2L2Home, fromLeft: false, ref _line2Tween);
-        if (winAnim == null) ResetMatch();
+
+        // No splash to wait on (missing node or missing art) => go straight to the next round rather
+        // than hanging in Phase.Win forever.
+        if (!playing) ResetMatch();
     }
 
     private void PlayWinTextFlyIn(Label l, Vector2 home, bool fromLeft, ref Tween slot)
@@ -483,8 +498,7 @@ public partial class GameManager : Node2D
         RestoreLabel(p1WinLine2, _p1L2Home);
         RestoreLabel(p2WinLine1, _p2L1Home);
         RestoreLabel(p2WinLine2, _p2L2Home);
-        if (p1WinAnim != null) { p1WinAnim.Visible = false; p1WinAnim.Stop(); }
-        if (p2WinAnim != null) { p2WinAnim.Visible = false; p2WinAnim.Stop(); }
+        if (WinAnim != null) { WinAnim.Visible = false; WinAnim.Stop(); }
 
         FreeProjectileViews();
         _sim.Reset();

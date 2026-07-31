@@ -19,9 +19,11 @@ public static class CharacterDb
         public string ScenePath;
         public string PortraitPath;
         public Rect2 PortraitRegion;
+        public string WinFramesPath;   // victory splash; see GameManager.BeginWin
 
         private PackedScene _scene;
         private Texture2D _portrait;
+        private SpriteFrames _winFrames;
 
         // Cached: the select grid asks for every portrait each time it opens, and a character scene
         // is re-instantiated every round.
@@ -38,6 +40,11 @@ public static class CharacterDb
                 return _portrait;
             }
         }
+
+        // The victory splash belongs to the CHARACTER, not to a side: the win animation used to be
+        // two nodes (P1WinAnim / P2WinAnim), so a P2 win always played the kangaroo splash even when
+        // P2 had picked the hamster. Extracted by tools/extract_win_anims.py.
+        public SpriteFrames WinFrames => _winFrames ??= ResourceLoader.Load<SpriteFrames>(WinFramesPath);
     }
 
     // Order here is the order the select grid shows, which is intentionally the CharacterId order:
@@ -48,16 +55,20 @@ public static class CharacterDb
             Id = CharacterId.Hamster, DisplayName = "仓鼠",
             ScenePath = "res://Char_Hamster.tscn",
             PortraitPath = "res://Art/csIdleAtlas.png", PortraitRegion = new Rect2(0, 0, 512, 512),
+            WinFramesPath = "res://Art/Win_Hamster.tres",
         },
         new Entry {
             Id = CharacterId.Kangaroo, DisplayName = "袋鼠",
             ScenePath = "res://Char_Kangaroo.tscn",
             PortraitPath = "res://Art/dsIdleAtlas.png", PortraitRegion = new Rect2(0, 0, 512, 512),
+            WinFramesPath = "res://Art/Win_Kangaroo.tres",
         },
         new Entry {
             Id = CharacterId.Squirrel, DisplayName = "松鼠",
             ScenePath = "res://Char_Squirrel.tscn",
             PortraitPath = "res://Art/ssIdleAtlas.png", PortraitRegion = new Rect2(0, 0, 512, 512),
+            // placeholder: a copy of the hamster splash until the squirrel art lands
+            WinFramesPath = "res://Art/Win_Squirrel.tres",
         },
     };
 
