@@ -169,12 +169,25 @@ public sealed class MoveSet
     private readonly List<MoveDef> _specials = new(); // motion moves, checked before normals
     private readonly List<MoveDef> _combos = new();   // simultaneous-press moves (throws), checked first
 
+    // Every move in authoring order, plus the reverse lookup. This is the SAVESTATE identity of a
+    // move: a rollback/replay stores which move a player is performing as an index into this list,
+    // because an object reference cannot be serialized and the Id string would cost bytes per frame.
+    // The order comes straight from the character's table builder, so it is stable for a given build
+    // — and it changes if the table is reordered, which is exactly why the golden checksum test
+    // guards the table.
+    private readonly List<MoveDef> _ordered = new();
+    private readonly Dictionary<MoveDef, int> _indexOf = new();
+
+    public int Count => _ordered.Count;
+
     private static int Key(Stance s, AttackButton b) => (int)s * 6 + (int)b;
 
     public MoveSet(IEnumerable<MoveDef> moves)
     {
         foreach (var m in moves)
         {
+            _indexOf[m] = _ordered.Count;
+            _ordered.Add(m);
             _byId[m.Id] = m;
             if (m.ComboButtons != null) _combos.Add(m);
             else if (m.Motion != MotionInput.None) _specials.Add(m);
@@ -220,7 +233,15 @@ public sealed class MoveSet
         return null;
     }
 
-    public MoveDef ById(string id) => id != null && _byId.TryGetValue(id, out var m) ? m : null;}
+    public MoveDef ById(string id) => id != null && _byId.TryGetValue(id, out var m) ? m : null;
+
+    // ---- savestate identity (see _ordered) ----
+    // -1 means "no move", which is what a player not attacking serializes as.
+    public int IndexOf(MoveDef m) => m != null && _indexOf.TryGetValue(m, out int i) ? i : -1;
+
+    public MoveDef ByIndex(int index) =>
+        index >= 0 && index < _ordered.Count ? _ordered[index] : null;
+}
 
 // Factory for character move tables. Edit here — readable top to bottom, no Inspector hunting.
 //
@@ -800,4 +821,33 @@ public sealed class InputBuffer
         _head = -1;
         _count = 0;
     }
+
+    // ---- savestate ----
+    // The whole ring is state: motion recognition looks back up to MotionWindow frames, so a rollback
+    // that restored only the head would resurrect a fireball input the player never made.
+    public void SaveTo(ref SimStateWriter w)
+    {
+        w.Int(_head);
+        w.Int(_count);
+        for (int i = 0; i < _slots.Length; i++)
+        {
+            w.Int(_slots[i].Mask);
+            w.Int(_slots[i].Num);
+            w.Bool(_slots[i].Consumed);
+        }
+    }
+
+    public void LoadFrom(ref SimStateReader r)
+    {
+        _head = r.Int();
+        _count = r.Int();
+        for (int i = 0; i < _slots.Length; i++)
+        {
+            _slots[i].Mask = r.Int();
+            _slots[i].Num = r.Int();
+            _slots[i].Consumed = r.Bool();
+        }
+    }
+
+    public int SlotCount => _slots.Length;
 }

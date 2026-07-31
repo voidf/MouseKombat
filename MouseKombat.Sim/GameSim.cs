@@ -131,6 +131,62 @@ public sealed class GameSim
         MatchOver = false;
     }
 
+    // ================= savestate =================
+    // The contract rollback netcode and the replay scrubber both stand on: SaveState at frame N,
+    // LoadState, replay the same inputs, and every subsequent frame must be bit-identical to a run
+    // that never rewound. The sim is fixed-point precisely so that holds across machines too.
+    //
+    // A plain Span<byte> on purpose — no netcode-library types reach this assembly, so the pythonnet
+    // RL bridge can still load it bare and swapping netcode libraries touches one adapter.
+    //
+    // Immutable config (stage bounds, cull bounds, PlayerConfig, MoveSet) is deliberately NOT stored:
+    // it is identical for every state of a given match, so persisting it would only create a way for
+    // a state to disagree with the sim that loads it.
+    public int SaveState(Span<byte> buffer)
+    {
+        var w = new SimStateWriter(buffer);
+        P1.SaveTo(ref w);
+        P2.SaveTo(ref w);
+
+        w.Int(_grabAttacker);
+        w.Int(_nextProjId);
+        w.Bool(MatchOver);
+
+        if (_projectiles.Count > SimState.MaxProjectiles)
+            throw new InvalidOperationException(
+                $"{_projectiles.Count} live projectiles exceeds SimState.MaxProjectiles "
+                + $"({SimState.MaxProjectiles}); raise the cap rather than dropping one — a silently "
+                + "missing projectile is a desync.");
+        w.Int(_projectiles.Count);
+        for (int i = 0; i < _projectiles.Count; i++) _projectiles[i].SaveTo(ref w);
+
+        return w.BytesWritten;
+    }
+
+    public void LoadState(ReadOnlySpan<byte> buffer)
+    {
+        var r = new SimStateReader(buffer);
+        P1.LoadFrom(ref r);
+        P2.LoadFrom(ref r);
+
+        _grabAttacker = r.Int();
+        _nextProjId = r.Int();
+        MatchOver = r.Bool();
+
+        _projectiles.Clear();
+        int n = r.Int();
+        for (int i = 0; i < n; i++) _projectiles.Add(SimProjectile.Restore(ref r));
+    }
+
+    // Convenience wrapper for desync detection and tests. Allocates, so it is not for the per-frame
+    // rollback path — that one reuses a preallocated buffer.
+    public uint Checksum()
+    {
+        Span<byte> buf = stackalloc byte[SimState.MaxSize];
+        int n = SaveState(buf);
+        return SimState.Checksum(buf.Slice(0, n));
+    }
+
     private void UpdateFacings()
     {
         if (!P1.IsAirborne && CanTurn(P1)) P1.FacingRight = P2.Position.X >= P1.Position.X;

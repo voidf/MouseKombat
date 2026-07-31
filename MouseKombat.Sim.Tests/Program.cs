@@ -461,7 +461,357 @@ internal static class Program
 
         CornerPushbackTests();
         AnimCommandTests();
+        SaveStateTests();
         GoldenChecksumTest();
+    }
+
+    // ---- SAVESTATE / ROLLBACK CONTRACT ----
+    // The property rollback netcode and replay scrubbing both rest on: save at frame N, do anything,
+    // load, feed the SAME inputs again, and every frame from N onward must be bit-identical to a run
+    // that never rewound. A field missing from SaveState/LoadState shows up here and nowhere else —
+    // in a real match it would surface as a desync minutes later.
+    private static void SaveStateTests()
+    {
+        // deterministic, busy input script: walking, jumping, crouching, normals, specials, throws
+        static (InputFrame, InputFrame) Script(int i)
+        {
+            int m = 0;
+            if (i % 17 == 0) m |= Mask((AttackButton)(i / 17 % 6));
+            if (i % 71 == 0) m |= Mask(AttackButton.LP) | Mask(AttackButton.LK);   // throw
+            // 236 + P on a cycle, to get fireballs (and thus live projectiles) into the state
+            bool down = i % 29 is 0 or 1;
+            bool fwd = i % 29 is 2 or 3 or 4;
+            if (i % 29 == 4) m |= Mask(AttackButton.MP);
+            var f1 = new InputFrame(i % 31 < 5, (i % 19 < 6) || fwd, i % 47 < 2, (i % 37 < 6) || down, m);
+            var f2 = new InputFrame(i % 23 < 5, i % 13 < 4, i % 53 < 2, i % 41 < 5,
+                                    (i % 11 == 0) ? Mask((AttackButton)(i / 11 % 6)) : 0);
+            return (f1, f2);
+        }
+
+        // A. save/load round-trips byte-for-byte and leaves the checksum unchanged
+        {
+            var sim = MakeSim(240, 520);
+            for (int i = 0; i < 137; i++) { var (a, b) = Script(i); sim.Step(a, b); }
+
+            var first = new byte[SimState.MaxSize];
+            int n1 = sim.SaveState(first);
+            uint c1 = sim.Checksum();
+
+            sim.LoadState(new System.ReadOnlySpan<byte>(first, 0, n1));
+            var second = new byte[SimState.MaxSize];
+            int n2 = sim.SaveState(second);
+
+            bool same = n1 == n2;
+            for (int i = 0; same && i < n1; i++) if (first[i] != second[i]) same = false;
+            Check(same, $"savestate: load(save(s)) round-trips byte-for-byte ({n1} bytes)");
+            Check(sim.Checksum() == c1, "savestate: checksum unchanged by a round-trip");
+            Check(n1 > 0 && n1 <= SimState.MaxSize,
+                $"savestate: {n1} bytes fits SimState.MaxSize ({SimState.MaxSize})");
+        }
+
+        // B. THE contract: rewind, run garbage, rewind again, replay — must match a clean run frame
+        // for frame. The garbage in between is what catches state the rewind fails to restore.
+        //
+        // Several scripts, because a single one covers only part of the state machine. Fault
+        // injection proved this matters: dropping _juggleHitCount from SaveState went UNDETECTED by
+        // the busy + throw scripts alone, since neither ever produces an airborne victim taking a
+        // follow-up hit. The coverage gate below now makes such a hole fail loudly instead.
+        _cov.Clear();
+        RollbackParity("busy script", 240, 520, 600, 23, Script);
+        RollbackParity("throw script", 300, 360, 90, 4, ThrowScript);
+        RollbackParity("juggle script", 300, 360, 240, 7, JuggleScript);
+        RollbackParity("block script", 300, 355, 600, 31, BlockScript);
+        RollbackParity("KO script", 300, 360, 900, 29, KoScript);
+        RollbackParity("jump script", 300, 360, 400, 11, JumpScript);
+        RollbackParity("crouch script", 300, 420, 300, 3, CrouchScript);
+
+        // Hand-written scripts only prove the fields they happen to disturb. Fault injection showed
+        // the gap concretely: _crouchFrame only counts during a few CrouchExit frames, and no script
+        // reliably parked a rewind there. Deterministic fuzz covers the tail without a script per
+        // field — a fixed LCG, so a failure is exactly reproducible from its seed.
+        for (int seed = 1; seed <= 6; seed++)
+            RollbackParity($"fuzz seed {seed}", 260, 430, 400, 3, FuzzScript(seed));
+        CoverageGate();
+        ThrowPoseRewindTest();
+    }
+
+    // p1 throws on frame 0 from close range, then both go neutral: frames 5..27 are the hold, 28 is
+    // the release, and the rest is the victim's juggle + knockdown + wakeup.
+    private static (InputFrame, InputFrame) ThrowScript(int i)
+    {
+        int mask = Mask(AttackButton.LP) | Mask(AttackButton.LK);
+        return (new InputFrame(false, false, false, false, i == 0 ? mask : 0), InputFrame.Neutral);
+    }
+
+    // 5HK launches, then p1 mashes a medium punch so follow-up hits land while the victim is
+    // airborne — that is what drives _juggleHitCount, MaxJuggleHits and the air-reset path.
+    private static (InputFrame, InputFrame) JuggleScript(int i)
+    {
+        int m = 0;
+        if (i == 0) m |= Mask(AttackButton.HK);              // launcher
+        else if (i % 9 == 0) m |= Mask(AttackButton.MP);     // juggle attempts
+        return (new InputFrame(false, false, false, false, m), InputFrame.Neutral);
+    }
+
+    // Point-blank pressure into a guarding p2 (p2 faces left, so holding Right is "back"),
+    // alternating stand-block and crouch-block: covers DefenseHit, chip damage and both guard tiers.
+    private static (InputFrame, InputFrame) BlockScript(int i)
+    {
+        int m = (i % 13 == 0) ? Mask((AttackButton)(i / 13 % 6)) : 0;
+        bool p2Crouch = (i / 60) % 2 == 0;
+        return (new InputFrame(false, false, false, i % 47 < 8, m),
+                new InputFrame(false, true, false, p2Crouch, 0));
+    }
+
+    // p1 walks in and lands a medium punch on a passive p2 until the KO — this is the only script
+    // that reaches PlayerState.Dead and MatchOver (and therefore the post-KO Reset path). 900 frames
+    // is enough for two KOs.
+    private static (InputFrame, InputFrame) KoScript(int i)
+        => (new InputFrame(false, true, false, false, i % 24 == 0 ? Mask(AttackButton.MP) : 0),
+            InputFrame.Neutral);
+
+    // p1 does nothing but hop; p2 anti-airs with a light normal. Covers Jump and getting hit out of
+    // the air. Kept separate because any script that mashes attacks is almost never in a state where
+    // a jump is allowed, which is why an earlier combined script never reached Jump at all.
+    private static (InputFrame, InputFrame) JumpScript(int i)
+        => (new InputFrame(false, false, i % 40 < 2, false, 0),
+            new InputFrame(false, false, false, false, i % 40 == 14 ? Mask(AttackButton.LP) : 0));
+
+    // Both players cycle crouch/stand out of range of each other. The point is the CrouchExit window:
+    // _crouchFrame only counts during those few frames, so without a script that parks there at a
+    // save point, omitting it from the savestate is undetectable — fault injection showed exactly
+    // that. Saving every 3 frames guarantees some rewinds land mid-exit.
+    private static (InputFrame, InputFrame) CrouchScript(int i)
+        => (new InputFrame(false, false, false, (i % 14) < 7, 0),
+            new InputFrame(false, false, false, (i % 10) < 5, 0));
+
+    // Deterministic pseudo-random inputs for both players. A plain LCG rather than System.Random so
+    // the sequence is fixed for a given seed on every machine and run — a fuzz failure has to be
+    // reproducible or it is useless.
+    private static System.Func<int, (InputFrame, InputFrame)> FuzzScript(int seed)
+    {
+        return i =>
+        {
+            uint s = (uint)(seed * 2654435761u + (uint)i * 40503u);
+            uint Next() { s = s * 1664525u + 1013904223u; return s >> 8; }
+            InputFrame One()
+            {
+                uint d = Next();
+                int m = 0;
+                uint bm = Next();
+                for (int b = 0; b < 6; b++) if ((bm & (1u << (b * 3))) != 0) m |= 1 << b;
+                return new InputFrame((d & 1) != 0, (d & 2) != 0, (d & 4) != 0, (d & 8) != 0, m);
+            }
+            return (One(), One());
+        };
+    }
+
+    // ---- exhaustive state comparison, by reflection ----
+    //
+    // A checksum cannot police its own blind spot: Checksum() is computed FROM SaveState, so a field
+    // omitted from SaveState is equally absent from the checksum, and only its indirect behavioural
+    // effect could ever show up. Fault injection proved that is not enough — deleting
+    // _juggleHitCount, _throwImmune or _crouchFrame from SaveState left every checksum-based
+    // assertion green.
+    //
+    // So compare the two sims field by field down the whole object graph instead. This needs no
+    // list to maintain: a field added to SimPlayer tomorrow is compared automatically, and if
+    // SaveState forgets it the parity test fails.
+    //
+    // Excluded, deliberately:
+    //   _cfg / _moves  immutable per-match config, and MoveSet instances differ between two sims
+    //   AnimEvents     a per-frame outbox the view drains, not logic state
+    private static readonly HashSet<string> _stateCompareSkip = new() { "_cfg", "_moves", "AnimEvents" };
+
+    // KNOWN LIMITATION, recorded rather than glossed over. Fault injection (delete a field from
+    // SaveState/LoadState, expect a failure) catches every field tried EXCEPT _crouchFrame:
+    //   _juggleHitCount, _throwImmune, _defHitFrame, _hurtStunDuration, _downFrame, _wakeFrame,
+    //   _projectileSpawned  -> all reported by name
+    //   _crouchFrame        -> NOT detected by any script or fuzz seed tried so far
+    // _crouchFrame only advances inside the few CrouchExit frames, and every garbage pattern
+    // attempted (horizontal, vertical-only, fuzz) left it equal to the clean run's value. It may be
+    // genuinely unobservable across a rewind boundary; that has not been proven either way, so treat
+    // it as untested rather than safe. Anyone changing crouch timing should re-run the injection.
+
+
+    private static string DiffState(object a, object b, string path)
+    {
+        if (a == null && b == null) return null;
+        if (a == null || b == null) return $"{path}: {(a == null ? "null" : a)} vs {(b == null ? "null" : b)}";
+
+        var t = a.GetType();
+        if (t != b.GetType()) return $"{path}: type {t.Name} vs {b.GetType().Name}";
+
+        // MoveDef is shared immutable data, but each sim owns its own MoveSet instance, so compare
+        // the identity that survives serialization: the move Id.
+        if (t == typeof(MoveDef))
+        {
+            var ia = ((MoveDef)a).Id; var ib = ((MoveDef)b).Id;
+            return ia == ib ? null : $"{path}.Id: {ia} vs {ib}";
+        }
+
+        if (t.IsPrimitive || t.IsEnum || t == typeof(string))
+            return a.Equals(b) ? null : $"{path}: {a} vs {b}";
+
+        if (a is System.Collections.IList la && b is System.Collections.IList lb)
+        {
+            if (la.Count != lb.Count) return $"{path}.Count: {la.Count} vs {lb.Count}";
+            for (int i = 0; i < la.Count; i++)
+            {
+                var d = DiffState(la[i], lb[i], $"{path}[{i}]");
+                if (d != null) return d;
+            }
+            return null;
+        }
+
+        // Fix / FixVec2 / SimRect / ProjectileSpec / SimPlayer / SimProjectile / InputBuffer ...
+        foreach (var f in t.GetFields(System.Reflection.BindingFlags.Instance
+                                     | System.Reflection.BindingFlags.Public
+                                     | System.Reflection.BindingFlags.NonPublic))
+        {
+            if (_stateCompareSkip.Contains(f.Name)) continue;
+            var d = DiffState(f.GetValue(a), f.GetValue(b), $"{path}.{f.Name}");
+            if (d != null) return d;
+        }
+        return null;
+    }
+
+    private static readonly HashSet<string> _cov = new();
+
+    private static void Observe(GameSim sim)
+    {
+        for (int idx = 0; idx < 2; idx++)
+        {
+            var p = sim.Player(idx);
+            _cov.Add("state:" + p.State);
+            if (p.JuggleHitCount > 0) _cov.Add("juggleHitCount>0");
+            if (p.ThrowImmune) _cov.Add("throwImmune");
+            if (p.IsAirborne) _cov.Add("airborne");
+        }
+        if (sim.Projectiles.Count > 0) _cov.Add("projectile");
+        if (sim.GrabAttacker >= 0) _cov.Add("grabPairing");
+        if (sim.MatchOver) _cov.Add("matchOver");
+    }
+
+    private static void CoverageGate()
+    {
+        var want = new List<string> { "juggleHitCount>0", "throwImmune", "airborne", "projectile",
+                                     "grabPairing", "matchOver" };
+        foreach (PlayerState st in Enum.GetValues(typeof(PlayerState))) want.Add("state:" + st);
+
+        var missing = want.FindAll(k => !_cov.Contains(k));
+        Check(missing.Count == 0,
+            missing.Count == 0
+                ? $"savestate coverage: the parity scripts reach all {want.Count} tracked conditions"
+                : $"savestate coverage: NEVER REACHED {string.Join(", ", missing)} — those savestate "
+                  + "fields are untested; extend a parity script");
+    }
+
+    // Runs the input script on TWO sims in lockstep: one straight through, one that rewinds to a
+    // savestate every `saveEvery` frames after simulating mispredicted garbage. Both must agree
+    //   (a) field for field immediately after each reload  — catches state SaveState forgot, and
+    //   (b) by checksum after every Step                   — catches divergence that only shows later.
+    // Running them in lockstep is what makes (a) possible: the clean sim is a valid reference for
+    // what the rewound sim should look like at that exact pre-step moment.
+    private static void RollbackParity(string label, float p1x, float p2x, int frames, int saveEvery,
+                                       System.Func<int, (InputFrame, InputFrame)> script)
+    {
+        var clean = MakeSim(p1x, p2x);
+        var rolled = MakeSim(p1x, p2x);
+        var snapshot = new byte[SimState.MaxSize];
+
+        string firstDiff = null;
+        int mismatchAt = -1;
+        int projFrames = 0, grabFrames = 0, rewinds = 0;
+
+        for (int i = 0; i < frames; i++)
+        {
+            if (i % saveEvery == 0)
+            {
+                int n = rolled.SaveState(snapshot);
+
+                // Mispredicted frames, exactly what a rollback session runs before the real inputs
+                // arrive. Varied per rewind and including crouches, throws and motion inputs, so the
+                // garbage actually DIRTIES state — an omitted field is only detectable if the reload
+                // has something to undo.
+                int garbage = 3 + (i % 7);
+                // Every third rewind uses garbage with NO horizontal input. That is not cosmetic:
+                // CrouchExit + a left/right press exits to Idle WITHOUT advancing _crouchFrame, so
+                // horizontal garbage always left that counter exactly equal to the clean run's and
+                // omitting it from the savestate was undetectable. Vertical-only garbage can sit in
+                // CrouchExit and advance it independently.
+                bool vertOnly = (i / saveEvery) % 3 == 0;
+                for (int k = 0; k < garbage; k++)
+                {
+                    int gm = 0;
+                    if (k % 3 == 0) gm |= Mask((AttackButton)((i + k) % 6));
+                    if (k % 5 == 0) gm |= Mask(AttackButton.LP) | Mask(AttackButton.LK);
+                    var bad = vertOnly
+                        ? new InputFrame(false, false, k % 4 == 0, k % 3 != 0, gm)
+                        : new InputFrame(k % 2 == 0, k % 3 == 1, k % 4 == 0, k % 2 == 1, gm);
+                    rolled.Step(bad, bad);
+                }
+
+                rolled.LoadState(new System.ReadOnlySpan<byte>(snapshot, 0, n));
+                rewinds++;
+
+                // the reload must have undone ALL of it, not just the parts SaveState remembers
+                string d = DiffState(clean, rolled, "sim");
+                if (d != null && firstDiff == null) firstDiff = $"frame {i}: {d}";
+            }
+
+            var (a, b) = script(i);
+            clean.Step(a, b);
+            rolled.Step(a, b);
+            Observe(clean);
+            if (clean.Projectiles.Count > 0) projFrames++;
+            if (clean.GrabAttacker >= 0) grabFrames++;
+
+            if (mismatchAt < 0 && clean.Checksum() != rolled.Checksum()) mismatchAt = i;
+            if (clean.MatchOver) { clean.Reset(); rolled.Reset(); }
+        }
+
+        Check(firstDiff == null,
+            firstDiff == null
+                ? $"savestate [{label}]: {rewinds} rewinds restore every field exactly"
+                : $"savestate [{label}]: LoadState did NOT restore {firstDiff} — that field is missing from SaveState/LoadState");
+        Check(mismatchAt < 0,
+            mismatchAt < 0
+                ? $"savestate [{label}]: {frames} frames stay checksum-identical across the rewinds"
+                : $"savestate [{label}]: DESYNC at frame {mismatchAt}");
+        Console.WriteLine($"  [coverage] {label}: {projFrames} frames with a live projectile, "
+                          + $"{grabFrames} frames with a live throw");
+    }
+
+    // A mid-throw rewind must not lose the victim's pose clip. It comes from the ATTACKER's bind
+    // timeline, so the victim cannot rederive it, and losing it re-emits PlayAnim on every
+    // rolled-back frame — the throw would visibly flicker.
+    private static void ThrowPoseRewindTest()
+    {
+        {
+            var sim = MakeSim(300, 360);
+            int mask = Mask(AttackButton.LP) | Mask(AttackButton.LK);
+            var snapshot = new byte[SimState.MaxSize];
+            bool checkedIt = false, restored = true;
+            for (int i = 0; i < 60; i++)
+            {
+                var f1 = new InputFrame(false, false, false, false, i == 0 ? mask : 0);
+                sim.Step(f1, InputFrame.Neutral);
+                if (sim.GrabAttacker < 0 || checkedIt) continue;
+
+                // mid-hold: a rewind here has to bring the pose back
+                int n = sim.SaveState(snapshot);
+                sim.P2.AnimEvents.Clear();
+                sim.LoadState(new System.ReadOnlySpan<byte>(snapshot, 0, n));
+                // one more bound frame; with the pose restored the binder must NOT restart the clip
+                sim.Step(InputFrame.Neutral, InputFrame.Neutral);
+                foreach (var c in sim.P2.AnimEvents)
+                    if (c.Kind == AnimKind.PlayRestart) restored = false;
+                checkedIt = true;
+            }
+            Check(checkedIt, "savestate: reached a held frame to test the throw pose");
+            Check(restored, "savestate: a mid-throw rewind keeps the victim's pose (no spurious clip restart)");
+        }
     }
 
     // ---- the AnimCommand contract the view depends on ----

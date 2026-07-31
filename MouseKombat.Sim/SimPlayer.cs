@@ -89,7 +89,12 @@ public sealed class SimPlayer
     public int AtkFrame => _atkFrame;      // exposed for observation / debug
     public Fix Vy => _vy;                   // exposed for the view's juggle clip swap
     public Fix GroundY => _groundY;
-    public string CurrentAtkAnim { get; private set; } = ""; // for the view's attack-tail sync
+    // The clip of the LAST move started, kept after that move ends: the view's attack-tail rule
+    // (Player.ReconcileSteadyStateClip) needs it while the player is already back in Idle. Held as
+    // the MoveDef rather than a string so a savestate can store a 4-byte index — and so it survives
+    // a rollback, which deriving it from _curMove would not (that is null once the move is over).
+    private MoveDef _atkAnimMove;
+    public string CurrentAtkAnim => _atkAnimMove?.AnimName ?? "";
 
     public int StateIndex => (int)State;
 
@@ -119,6 +124,10 @@ public sealed class SimPlayer
     public Fix WalkSpeedPxPerSec => _cfg.WalkSpeedPxPerSec;   // for GameSim.ResolveMovement
     public CharacterId Character => _cfg.Character;           // for observation (asymmetric matchup)
     public Fix CornerPushbackScale => _cfg.CornerPushbackScale;   // for GameSim.ResolveKnockback
+
+    // Diagnostics only (savestate coverage checks, debug overlays). Consecutive juggle hits taken;
+    // at MaxJuggleHits further air hits air-reset instead of extending the combo.
+    public int JuggleHitCount => _juggleHitCount;
 
     // Hand this frame's owed knockback to the caller (GameSim). Clears it, so it is applied once.
     public bool ConsumePendingPush(out Fix pushX)
@@ -393,7 +402,7 @@ public sealed class SimPlayer
         _curDamage = m.Damage;
         _curGuard = m.Guard;
         _curHitbox = m.Hitbox;
-        CurrentAtkAnim = m.AnimName;
+        _atkAnimMove = m;
         _curCancelFrom = m.ResolvedCancelFrom;
         _curCancelTo = m.ResolvedCancelTo;
         _grabbing = false;
@@ -407,16 +416,31 @@ public sealed class SimPlayer
         }
     }
 
+    // Both consumers null out the payload as well as the flag. Leaving a spent spec/label behind
+    // would be dead state that a savestate has to carry (or silently disagree about) for no reason —
+    // the reflection-based rollback parity test flags exactly that.
     public bool ConsumeProjectileSpawn(out ProjectileSpec spec)
     {
-        if (_pendingProjectile) { _pendingProjectile = false; spec = _pendingSpec; return true; }
+        if (_pendingProjectile)
+        {
+            _pendingProjectile = false;
+            spec = _pendingSpec;
+            _pendingSpec = default;
+            return true;
+        }
         spec = default;
         return false;
     }
 
     public bool ConsumeCommandSuccess(out string text)
     {
-        if (_pendingPopup) { _pendingPopup = false; text = _pendingPopupText; return true; }
+        if (_pendingPopup)
+        {
+            _pendingPopup = false;
+            text = _pendingPopupText;
+            _pendingPopupText = "";
+            return true;
+        }
         text = null;
         return false;
     }
@@ -796,6 +820,126 @@ public sealed class SimPlayer
         return HitResult.Hit;
     }
 
+    // ================= savestate =================
+    // Everything a rollback / replay has to reproduce. Notable choices:
+    //
+    //  * _curMove is stored as an index into this character's MoveSet (see MoveSet.IndexOf): an
+    //    object reference cannot be serialized, and the Id string would cost bytes every frame.
+    //  * CurrentAtkAnim is stored as the INDEX of the move it came from, not rederived from
+    //    _curMove: the view still needs it after the move ends (the attack-tail rule), and _curMove
+    //    is null by then. The reflection-based parity test caught this.
+    //  * _pendingProjectile / _pendingPopup are set in TickAdvanceTimers and consumed by
+    //    ProcessSpecials within the SAME Step, so they never actually straddle a frame boundary.
+    //    They are still written, with their payloads rederived from _curMove, rather than relying on
+    //    that ordering staying true.
+    //  * _grabbedAnim IS stored as a string: it comes from the ATTACKER's bind timeline, so a victim
+    //    cannot rederive it. Losing it would re-emit a PlayAnim every rolled-back frame of a throw,
+    //    restarting the clip and making the throw flicker.
+    //  * AnimEvents is deliberately absent. It is a per-frame outbox the view drains, not logic
+    //    state; the view keeps its own tiny savestate (clip / frame / reverse).
+    //  * _cfg and _moves are immutable config, shared by every state of this player.
+    public void SaveTo(ref SimStateWriter w)
+    {
+        w.Vec(Position);
+        w.Int(Hp);
+        w.Int((int)State);
+        w.Bool(FacingRight);
+
+        w.Bool(InLeft); w.Bool(InRight); w.Bool(InUpHeld); w.Bool(InDownHeld);
+        w.Fixed(DesiredDeltaX);
+
+        w.Int(_atkFrame);
+        w.Int(_hurtFrame);
+        w.Int(_defHitFrame);
+        w.Int(_crouchFrame);
+        w.Int(_downFrame);
+        w.Int(_wakeFrame);
+        w.Bool(_atkHitConsumed);
+
+        w.Int(_moves.IndexOf(_curMove));
+        w.Int(_moves.IndexOf(_atkAnimMove));
+        w.Bool(_airMove);
+        w.Bool(_projectileSpawned);
+        w.Bool(_pendingProjectile);
+        w.Bool(_pendingPopup);
+
+        _buffer.SaveTo(ref w);
+
+        w.Int(_curStartup); w.Int(_curActive); w.Int(_curRecovery); w.Int(_curDamage);
+        w.Int(_curCancelFrom); w.Int(_curCancelTo);
+        w.Rect(_curHitbox);
+        w.Int((int)_curGuard);
+
+        w.Fixed(_vy);
+        w.Fixed(_jumpHVel);
+        w.Fixed(_groundY);
+
+        w.Int(_hurtStunDuration);
+        w.Int(_defHitStunDuration);
+        w.Int(_juggleHitCount);
+        w.Fixed(_pendingPushX);
+
+        w.Bool(_grabbing);
+        w.Bool(_throwWhiffApplied);
+        w.ShortString(_grabbedAnim);
+        w.Int(_throwImmune);
+    }
+
+    public void LoadFrom(ref SimStateReader r)
+    {
+        Position = r.Vec();
+        Hp = r.Int();
+        State = (PlayerState)r.Int();
+        FacingRight = r.Bool();
+
+        InLeft = r.Bool(); InRight = r.Bool(); InUpHeld = r.Bool(); InDownHeld = r.Bool();
+        DesiredDeltaX = r.Fixed();
+
+        _atkFrame = r.Int();
+        _hurtFrame = r.Int();
+        _defHitFrame = r.Int();
+        _crouchFrame = r.Int();
+        _downFrame = r.Int();
+        _wakeFrame = r.Int();
+        _atkHitConsumed = r.Bool();
+
+        _curMove = _moves.ByIndex(r.Int());
+        _atkAnimMove = _moves.ByIndex(r.Int());
+        _airMove = r.Bool();
+        _projectileSpawned = r.Bool();
+        _pendingProjectile = r.Bool();
+        _pendingPopup = r.Bool();
+
+        // rederived rather than stored — see the note on SaveTo
+        _pendingSpec = _pendingProjectile && _curMove != null ? _curMove.Projectile : default;
+        _pendingPopupText = _pendingPopup && _curMove != null ? _curMove.CommandLabel : "";
+
+        _buffer.LoadFrom(ref r);
+
+        _curStartup = r.Int(); _curActive = r.Int(); _curRecovery = r.Int(); _curDamage = r.Int();
+        _curCancelFrom = r.Int(); _curCancelTo = r.Int();
+        _curHitbox = r.Rect();
+        _curGuard = (GuardHeight)r.Int();
+
+        _vy = r.Fixed();
+        _jumpHVel = r.Fixed();
+        _groundY = r.Fixed();
+
+        _hurtStunDuration = r.Int();
+        _defHitStunDuration = r.Int();
+        _juggleHitCount = r.Int();
+        _pendingPushX = r.Fixed();
+
+        _grabbing = r.Bool();
+        _throwWhiffApplied = r.Bool();
+        _grabbedAnim = r.ShortString();
+        _throwImmune = r.Int();
+
+        // A load replaces the frame's presentation intent entirely: anything queued before the
+        // rewind describes a frame that no longer happened.
+        AnimEvents.Clear();
+    }
+
     public void ResetForNewRound()
     {
         Position = _cfg.StartPos;
@@ -816,6 +960,7 @@ public sealed class SimPlayer
         _hurtStunDuration = _cfg.HurtStunFrames;
         _defHitStunDuration = _cfg.DefHitStunFrames;
         _curMove = null;
+        _atkAnimMove = null;
         _airMove = false;
         _projectileSpawned = false;
         _pendingProjectile = false;

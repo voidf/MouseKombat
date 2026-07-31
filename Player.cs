@@ -266,6 +266,29 @@ public partial class Player : Node2D
 
     private static float LogicFps => Engine.PhysicsTicksPerSecond;
 
+    // ---- view savestate ----
+    // A rollback rewinds the SIM, but what is on screen is a function of the sim state AND these
+    // three fields, which the sim knows nothing about. Restoring them alongside GameSim.LoadState is
+    // what stops a rewind from restarting the current clip (which would make every rolled-back frame
+    // of an attack or a throw flicker). Three fields is the entire cost of the frame-locked animation
+    // design — see TickAnimation.
+    public readonly struct ViewState
+    {
+        public readonly string Clip;
+        public readonly int Frame;
+        public readonly bool Reverse;
+        public ViewState(string clip, int frame, bool reverse) { Clip = clip; Frame = frame; Reverse = reverse; }
+    }
+
+    public ViewState SaveView() => new ViewState(_clip, _clipFrame, _clipReverse);
+
+    public void LoadView(ViewState v)
+    {
+        _clip = v.Clip;
+        _clipFrame = v.Frame;
+        _clipReverse = v.Reverse;
+    }
+
     // Switch the displayed clip. A missing clip is ignored (keeps the current pose), matching the
     // old PlayAnimSafe behavior — that is what lets a character ship with partial art.
     private void SetClip(string clip, bool restart, bool reverse)
