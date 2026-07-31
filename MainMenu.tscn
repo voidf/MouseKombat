@@ -1,0 +1,113 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://MainMenu.cs" id="1_mm"]
+[ext_resource type="Texture2D" uid="uid://bv3dc8cf3ldcu" path="res://Art/BG.png" id="2_bg"]
+
+[node name="MainMenu" type="Control" node_paths=PackedStringArray("StatusLabel")]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("1_mm")
+StatusLabel = NodePath("Layout/Status")
+ReadyScenePath = "res://ReadyScreen.tscn"
+
+[node name="BG" type="TextureRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+texture = ExtResource("2_bg")
+expand_mode = 1
+stretch_mode = 6
+
+[node name="Scrim" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+color = Color(0.03, 0.035, 0.05, 0.55)
+
+[node name="Layout" type="Control" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+
+[node name="Title" type="Label" parent="Layout"]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_top = 48.0
+offset_bottom = 112.0
+theme_override_colors/font_color = Color(1, 0.92, 0.7, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.8)
+theme_override_constants/outline_size = 6
+theme_override_font_sizes/font_size = 44
+text = "真鼠快打"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Buttons" type="VBoxContainer" parent="Layout"]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -130.0
+offset_top = -120.0
+offset_right = 130.0
+offset_bottom = 120.0
+theme_override_constants/separation = 16
+
+[node name="LobbyButton" type="Button" parent="Layout/Buttons"]
+custom_minimum_size = Vector2(260, 48)
+layout_mode = 2
+theme_override_font_sizes/font_size = 22
+text = "大厅联机"
+
+[node name="LanButton" type="Button" parent="Layout/Buttons"]
+custom_minimum_size = Vector2(260, 48)
+layout_mode = 2
+theme_override_font_sizes/font_size = 22
+text = "局域网联机"
+
+[node name="LocalButton" type="Button" parent="Layout/Buttons"]
+custom_minimum_size = Vector2(260, 48)
+layout_mode = 2
+theme_override_font_sizes/font_size = 22
+text = "本地游戏"
+
+[node name="ReplayButton" type="Button" parent="Layout/Buttons"]
+custom_minimum_size = Vector2(260, 48)
+layout_mode = 2
+theme_override_font_sizes/font_size = 22
+text = "回放"
+
+[node name="Status" type="Label" parent="Layout"]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_top = 452.0
+offset_bottom = 484.0
+theme_override_colors/font_color = Color(1, 0.72, 0.4, 1)
+theme_override_font_sizes/font_size = 17
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="SettingsButton" type="Button" parent="Layout"]
+custom_minimum_size = Vector2(96, 40)
+layout_mode = 1
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -120.0
+offset_top = -60.0
+offset_right = -24.0
+offset_bottom = -20.0
+theme_override_font_sizes/font_size = 18
+text = "设置"

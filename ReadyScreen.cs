@@ -13,7 +13,7 @@ using MouseKombat.Sim;
 // seat mid-selection. The seat being chosen for counts as occupied while its panel is open.
 //
 // Start: a bound HUMAN device presses confirm, or — when both seats are AI — press Space.
-// Esc leaves for the main menu (期3); today it is a no-op placeholder.
+// Esc goes UP one level: out of a select panel if one is open, otherwise back to the main menu.
 // Choices are handed to GameManager through GameSession.
 public partial class ReadyScreen : Control
 {
@@ -38,6 +38,7 @@ public partial class ReadyScreen : Control
     [Export] public Color BoundTint = new Color(1, 1, 1);
 
     [Export] public string AiModelDir = "ai_rl_model"; // scanned for *.onnx (relative to res:// and the exe)
+    [Export] public string MainMenuScenePath = "res://MainMenu.tscn";
 
     private enum LobbyState { Seats, CharSelect, AiSelect }
     private LobbyState _state = LobbyState.Seats;
@@ -165,6 +166,12 @@ public partial class ReadyScreen : Control
             case Key.Backspace: UnbindLast(); AcceptEvent(); break;
             case Key.Space:
                 if (BothBound) { StartGame(); AcceptEvent(); }
+                break;
+            // no panel open, so Esc goes up a level: back to the main menu
+            case Key.Escape:
+                AcceptEvent();
+                GameSession.Clear();
+                GetTree().ChangeSceneToFile(MainMenuScenePath);
                 break;
         }
     }

@@ -17,13 +17,18 @@ config/name_localized={
 "zh_CN": "真鼠快打"
 }
 config/version="0.0.7"
-run/main_scene="res://ReadyScreen.tscn"
+run/main_scene="res://MainMenu.tscn"
 config/features=PackedStringArray("4.6", "C#", "Mobile")
 config/icon="uid://betfal31o5rh8"
 
 [autoload]
 
 AspectLock="*res://AspectLock.cs"
+AppSettings="*res://AppSettings.cs"
+
+[audio]
+
+buses/default_bus_layout="res://default_bus_layout.tres"
 
 [display]
 

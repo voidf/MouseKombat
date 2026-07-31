@@ -143,9 +143,12 @@ environment = SubResource("Environment_erxer")
 stream = ExtResource("bgm_combat")
 volume_db = -9.567
 autoplay = true
+bus = &"Music"
 
 [node name="SfxHit" type="AudioStreamPlayer" parent="." unique_id=176566228]
 stream = ExtResource("sfx_hit")
+bus = &"SFX"
 
 [node name="SfxGuard" type="AudioStreamPlayer" parent="." unique_id=2116235897]
 stream = ExtResource("sfx_guard")
+bus = &"SFX"
