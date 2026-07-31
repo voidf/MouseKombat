@@ -828,6 +828,9 @@ public sealed class SimPlayer
         _buffer.Clear();
         InLeft = InRight = InUpHeld = InDownHeld = false;
         DesiredDeltaX = 0;
-        PlayAnim(_cfg.IdleAnimName);
+        // restart, not plain Play: a round reset must put the idle cycle back to frame 0. A plain
+        // Play is a no-op for a view already showing IDLE, which would leave the two fighters'
+        // idle phases desynced and make the round's opening view state depend on the last round.
+        PlayAnim(_cfg.IdleAnimName, true);
     }
 }

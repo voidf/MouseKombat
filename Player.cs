@@ -196,7 +196,11 @@ public partial class Player : Node2D
                 case AnimKind.Play: SetClip(c.Name, restart: false, reverse: false); break;
                 case AnimKind.PlayRestart: SetClip(c.Name, restart: true, reverse: false); break;
                 case AnimKind.PlayBackwards: SetClip(c.Name, restart: true, reverse: true); break;
-                case AnimKind.Stop: _frozen = true; break;
+                // Stop is only ever emitted at Hp == 0, and TickAnimation derives the death
+                // freeze from PlayerState.Dead instead. Latching a flag here would strand the
+                // view: the round reset re-emits Play(IDLE), which is a no-op when IDLE was
+                // already the displayed clip, so the flag would never be cleared.
+                case AnimKind.Stop: break;
             }
         }
         events.Clear();
@@ -226,7 +230,6 @@ public partial class Player : Node2D
     private string _clip = "";
     private int _clipFrame;      // logic frames elapsed in _clip
     private bool _clipReverse;
-    private bool _frozen;        // AnimKind.Stop (death): hold the current sprite frame
 
     private ClipTimeline Timeline(string clip)
     {
@@ -268,7 +271,6 @@ public partial class Player : Node2D
         _clip = clip;
         _clipFrame = 0;
         _clipReverse = reverse;
-        _frozen = false;
     }
 
     // Advance the animation by exactly one logic frame. Called every physics tick by GameManager —
@@ -279,26 +281,28 @@ public partial class Player : Node2D
 
         anim.FlipH = ArtFacesRight ? !Sim.FacingRight : Sim.FacingRight;
 
-        if (!_frozen) ReconcileSteadyStateClip();
+        // Dead: hold whatever pose was on screen when the KO landed. Derived from sim STATE, not
+        // latched from the AnimKind.Stop event, so a round reset — which just moves State back to
+        // Idle — always restores animation on its own.
+        if (Sim.State == PlayerState.Dead) return;
+
+        ReconcileSteadyStateClip();
 
         var t = Timeline(_clip);
         if (t == null) return;
 
-        if (!_frozen)
-        {
-            int i = _clipFrame;
-            if (t.Loop) i %= t.LogicLength;
-            else if (i >= t.LogicLength) i = t.LogicLength - 1;   // one-shot: hold the last frame
+        int i = _clipFrame;
+        if (t.Loop) i %= t.LogicLength;
+        else if (i >= t.LogicLength) i = t.LogicLength - 1;   // one-shot: hold the last frame
 
-            int sprite = _clipReverse ? t.FrameAt[t.LogicLength - 1 - i] : t.FrameAt[i];
-            if (anim.Animation != _clip) anim.Animation = _clip;
-            anim.SetFrameAndProgress(sprite, 0f);
+        int sprite = _clipReverse ? t.FrameAt[t.LogicLength - 1 - i] : t.FrameAt[i];
+        if (anim.Animation != _clip) anim.Animation = _clip;
+        anim.SetFrameAndProgress(sprite, 0f);
 
-            _clipFrame++;
-            // keep a looping clip's counter bounded: it is part of the view state a rollback has to
-            // save/restore, and an unbounded counter would drift toward int overflow while idling
-            if (t.Loop && _clipFrame >= t.LogicLength) _clipFrame -= t.LogicLength;
-        }
+        _clipFrame++;
+        // keep a looping clip's counter bounded: it is part of the view state a rollback has to
+        // save/restore, and an unbounded counter would drift toward int overflow while idling
+        if (t.Loop && _clipFrame >= t.LogicLength) _clipFrame -= t.LogicLength;
     }
 
     // Clips the sim does NOT emit an event for, because they are steady-state rather than a
@@ -306,16 +310,16 @@ public partial class Player : Node2D
     // swap. Evaluated from logic state on the logic tick, so it stays frame-exact.
     private void ReconcileSteadyStateClip()
     {
+        // Overflow frames are authored on purpose (the artist sets per-frame durations in the
+        // editor), so a clip that runs LONGER than its move keeps playing until something actually
+        // interrupts it. Only the locomotion states defer like this; every other state change
+        // arrives with its own AnimCommand from the sim, which replaces the clip outright.
+        if ((Sim.State == PlayerState.Idle || Sim.State == PlayerState.Walk) && AttackTailRunning())
+            return;
+
         switch (Sim.State)
         {
             case PlayerState.Idle:
-                // Attack tail: the logic move is over but its clip may be longer than the move.
-                // Let it run to its authored end, then fall back to IDLE.
-                if (!string.IsNullOrEmpty(Sim.CurrentAtkAnim) && _clip == Sim.CurrentAtkAnim)
-                {
-                    var atk = Timeline(_clip);
-                    if (atk != null && _clipFrame < atk.LogicLength) return;
-                }
                 SetClip(IdleAnimName, restart: false, reverse: false);
                 break;
 
@@ -341,6 +345,15 @@ public partial class Player : Node2D
                     restart: false, reverse: false);
                 break;
         }
+    }
+
+    // True while the last attack's clip still has authored frames left to show. CurrentAtkAnim
+    // stays set after a move ends, which is what lets the overflow outlive the move itself.
+    private bool AttackTailRunning()
+    {
+        if (string.IsNullOrEmpty(Sim.CurrentAtkAnim) || _clip != Sim.CurrentAtkAnim) return false;
+        var t = Timeline(_clip);
+        return t != null && !t.Loop && _clipFrame < t.LogicLength;
     }
 
     public override void _Process(double delta)

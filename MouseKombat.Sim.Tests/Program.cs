@@ -460,7 +460,54 @@ internal static class Program
         }
 
         CornerPushbackTests();
+        AnimCommandTests();
         GoldenChecksumTest();
+    }
+
+    // ---- the AnimCommand contract the view depends on ----
+    // Player.cs drives the sprite one frame per LOGIC frame and takes clip SELECTION from this
+    // event stream, so "which kind of command is emitted when" is now an interface, not an
+    // implementation detail. Both checks below encode a bug that actually shipped:
+    //   * a round reset emitting plain Play left a fighter already showing IDLE unrestarted, so the
+    //     two idle cycles desynced and the round's opening view state depended on the last round;
+    //   * the view latching a freeze flag on Stop stranded a fighter KO'd while IDLE was showing —
+    //     the reset's Play(IDLE) was a no-op, so it never unfroze. The view now derives the death
+    //     freeze from PlayerState.Dead, which is why Stop must coincide with Dead.
+    private static void AnimCommandTests()
+    {
+        // a round reset must RESTART idle, not merely select it
+        {
+            var sim = MakeSim(300, 360);
+            sim.Step(InputFrame.Neutral, InputFrame.Neutral);
+            sim.P1.AnimEvents.Clear();
+            sim.Reset();
+            bool restarted = false;
+            foreach (var c in sim.P1.AnimEvents)
+                if (c.Kind == AnimKind.PlayRestart && c.Name == "IDLE") restarted = true;
+            Check(restarted, "anim: round reset emits PlayRestart(IDLE)");
+        }
+
+        // Stop is emitted only on death, and always together with PlayerState.Dead.
+        // Driven by the state-machine AI because it actually closes distance and finishes the KO —
+        // a stationary masher pushes its victim out of range with knockback and never lands one.
+        {
+            var sim = MakeSim(300, 360);
+            var ai = new StateMachineAgent(0);
+            bool sawStop = false, stopWhileNotDead = false;
+            for (int i = 0; i < 60 * 60 && !sim.MatchOver; i++)
+            {
+                sim.P2.AnimEvents.Clear();
+                sim.Step(ai.Decide(sim, 0), InputFrame.Neutral);
+                foreach (var c in sim.P2.AnimEvents)
+                {
+                    if (c.Kind != AnimKind.Stop) continue;
+                    sawStop = true;
+                    if (sim.P2.State != PlayerState.Dead) stopWhileNotDead = true;
+                }
+            }
+            Check(sawStop, $"anim: a KO emits AnimKind.Stop (P2 Hp {sim.P2.Hp})");
+            Check(!stopWhileNotDead, "anim: Stop is only emitted together with PlayerState.Dead");
+        }
     }
 
     // Hash of everything a rollback savestate / replay has to reproduce. Reads Fix.Raw directly,
