@@ -26,7 +26,11 @@ public enum PlayerState { Idle, Walk, Attack, Hurt, Dead, DefenseHit, Jump, Crou
 
 public enum HurtRegion { Head, Body, Arms, Legs }
 
-public enum CharacterId { Hamster, Kangaroo }
+// NOTE: append new members at the END only. Observation feeds the raw int to the RL policy, so
+// reordering would silently invalidate every trained model. Squirrel (松鼠) was appended third:
+// policies trained before it existed only ever saw 0/1 in that slot, so they need a retrain (a
+// warm start from the last two-character checkpoint) before they can handle the matchup.
+public enum CharacterId { Hamster, Kangaroo, Squirrel }
 
 // outcome of ApplyDamage, drives FX/SFX. Grabbed = a throw connected (no impact spark; the
 // throw's damage arrives later as a separate Hit at the release frame).

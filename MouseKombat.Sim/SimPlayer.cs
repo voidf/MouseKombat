@@ -147,7 +147,7 @@ public sealed class SimPlayer
     public SimPlayer(PlayerConfig cfg)
     {
         _cfg = cfg;
-        _moves = MoveSets.ForCharacter(cfg.Character.ToString());
+        _moves = MoveSets.ForCharacter(cfg.Character);
         Position = cfg.StartPos;
         _groundY = cfg.StartPos.Y;
         Hp = cfg.MaxHp;

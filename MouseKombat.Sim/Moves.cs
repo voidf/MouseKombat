@@ -5,8 +5,8 @@ namespace MouseKombat.Sim;
 
 // ---- combat move data + recognition (ported from the Godot Moves.cs, Godot-free) ----
 // Type swaps vs the original: Godot.Vector2 -> Vec2 (System.Numerics), Rect2 -> SimRect,
-// Mathf -> Fix helpers, GD.Print removed. The MoveSets.BuildCs/BuildDs authoring tables
-// below are kept in the SAME shape maintainers edit today.
+// Mathf -> Fix helpers, GD.Print removed. The MoveSets per-character authoring tables below are
+// kept in the SAME shape maintainers edit today.
 
 // Spawned projectile config — reused for ground/air fireballs by varying the values.
 public struct ProjectileSpec
@@ -223,18 +223,37 @@ public sealed class MoveSet
     public MoveDef ById(string id) => id != null && _byId.TryGetValue(id, out var m) ? m : null;}
 
 // Factory for character move tables. Edit here — readable top to bottom, no Inspector hunting.
+//
+// Shape: one `<Char>Moves()` function per character that RETURNS A FRESH List<MoveDef> (every entry
+// is a `new MoveDef`), and one `Build<Xx>()` that wraps it in a MoveSet. Because the list is rebuilt
+// from scratch on every call, one character's table can be seeded from another's WITHOUT the two
+// sharing MoveDef instances — mutating a seeded entry cannot leak back into the original.
 public static class MoveSets
 {
-    public static MoveSet ForCharacter(string characterId)
+    public static MoveSet ForCharacter(CharacterId characterId) => characterId switch
     {
-        // both characters share the table for now; split when movesets diverge
-        if (characterId == "Hamster")
-            return BuildCs();
-        else
-            return BuildDs();
-    }
+        CharacterId.Hamster => BuildCs(),
+        CharacterId.Kangaroo => BuildDs(),
+        CharacterId.Squirrel => BuildSs(),
+        _ => BuildCs(),
+    };
 
-    private static MoveSet BuildCs()
+    private static MoveSet BuildCs() => new MoveSet(HamsterMoves());
+    private static MoveSet BuildDs() => new MoveSet(KangarooMoves());
+
+    // ---- 松鼠 (Squirrel) ----
+    // First pass: SEEDED FROM THE HAMSTER TABLE, deliberately. Only IDLE art exists so far, so
+    // there is nothing to tune against yet and the clip names below are placeholders that resolve
+    // to no-ops until the atlases land (Player.PlayAnimSafe skips missing clips).
+    //
+    // TODO 数值: differentiate. The seam is right here — grab an entry by Id off `moves` and
+    // overwrite the fields, e.g.
+    //     var lp = moves.Find(m => m.Id == "5LP");
+    //     lp.Startup = 3; lp.Damage = 2; lp.Knockback = 4f;   // faster, weaker
+    // Anything left untouched keeps the Hamster value, so a partial pass is always valid.
+    private static MoveSet BuildSs() => new MoveSet(HamsterMoves());
+
+    private static List<MoveDef> HamsterMoves()
     {
         // 6 standing normals. Light->Medium->Heavy gatling chains demonstrate the cancel system.
         // Guard tiers seeded for testing: 5HP = Mid (overhead, stand-block only), 5LK = Low (crouch-block only).
@@ -397,10 +416,10 @@ public static class MoveSets
                 // new MoveKey { From = 17, To = 25, PerFrame = new Vec2(4f,  30f) },
             },
         });
-        return new MoveSet(moves);
+        return moves;
     }
 
-    private static MoveSet BuildDs()
+    private static List<MoveDef> KangarooMoves()
     {
         // 6 standing normals. Light->Medium->Heavy gatling chains demonstrate the cancel system.
         // Guard tiers seeded for testing: 5HP = Mid (overhead, stand-block only), 5LK = Low (crouch-block only).
@@ -557,7 +576,7 @@ public static class MoveSets
                 oB = 26,
             },
         });
-        return new MoveSet(moves);
+        return moves;
     }
 
     // Crouch normals (down stance, Low guard — must crouch-block) and air normals

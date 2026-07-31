@@ -61,8 +61,8 @@ internal static class Program
         Check(center.X == 5 && center.Y == 5, "GetCenter = (5,5)");
 
         // ---- move tables build and resolve; projectile hitboxes baked per character ----
-        var cs = MoveSets.ForCharacter("Hamster");
-        var ds = MoveSets.ForCharacter("Kangaroo");
+        var cs = MoveSets.ForCharacter(CharacterId.Hamster);
+        var ds = MoveSets.ForCharacter(CharacterId.Kangaroo);
         Check(cs.ById("5LP") != null && cs.ById("236P") != null && cs.ById("623P_DP") != null,
             "Hamster table has 5LP/236P/623P_DP");
         Check(ds.ById("5HK") != null && ds.ById("236P") != null, "Kangaroo table has 5HK/236P");
@@ -73,6 +73,7 @@ internal static class Program
         Check(dsFire.Position.X == -60 && dsFire.Position.Y == -26 && dsFire.Size.X == 138 && dsFire.Size.Y == 73,
             "Kangaroo fireball hitbox = dsProjectile.tscn (-60,-26,138,73)");
 
+        MoveTableTests();
         GameSimTests();
 
         Console.WriteLine(_fail == 0 ? "\nALL PASS" : $"\n{_fail} FAILURE(S)");
@@ -117,6 +118,59 @@ internal static class Program
         threw = false;
         try { Fix _ = float.NaN; } catch (ArgumentOutOfRangeException) { threw = true; }
         Check(threw, "Fix: NaN conversion throws");
+    }
+
+    // ---- every character's table must be complete and self-consistent ----
+    // Runs over CharacterId, so adding a character makes these checks cover it automatically —
+    // a new table that forgets a normal or ships two moves with the same Id fails here, not in a
+    // match. Also pins the Squirrel table's "seeded from Hamster, no shared instances" property.
+    private static void MoveTableTests()
+    {
+        // the full command grid every character owes: stand + crouch + air, 6 buttons each
+        string[] standIds = { "5LP", "5MP", "5HP", "5LK", "5MK", "5HK" };
+        string[] crouchIds = { "2LP", "2MP", "2HP", "2LK", "2MK", "2HK" };
+        string[] airIds = { "jLP", "jMP", "jHP", "jLK", "jMK", "jHK" };
+
+        foreach (CharacterId id in Enum.GetValues(typeof(CharacterId)))
+        {
+            var set = MoveSets.ForCharacter(id);
+            bool complete = true;
+            foreach (var mid in standIds) if (set.ById(mid) == null) complete = false;
+            foreach (var mid in crouchIds) if (set.ById(mid) == null) complete = false;
+            foreach (var mid in airIds) if (set.ById(mid) == null) complete = false;
+            if (set.ById("THROW") == null) complete = false;
+            Check(complete, $"{id}: table has all 18 normals + THROW");
+
+            // every stand/crouch/air command must resolve through the same path the sim uses
+            bool resolves = true;
+            for (int b = 0; b < 6; b++)
+            {
+                if (set.Resolve(Stance.Stand, (AttackButton)b) == null) resolves = false;
+                if (set.Resolve(Stance.Crouch, (AttackButton)b) == null) resolves = false;
+                if (set.Resolve(Stance.Air, (AttackButton)b) == null) resolves = false;
+            }
+            Check(resolves, $"{id}: every (stance, button) command resolves");
+
+            // frame data has to be positive-length, and a CancelInto target must actually exist
+            bool sane = true;
+            foreach (var mid in standIds)
+            {
+                var m = set.ById(mid);
+                if (m.Startup <= 0 || m.TotalFrames <= 0) sane = false;
+                foreach (var target in m.CancelInto) if (set.ById(target) == null) sane = false;
+            }
+            Check(sane, $"{id}: frame data positive + every CancelInto target exists");
+        }
+
+        // Squirrel is seeded from Hamster but must NOT share MoveDef instances, or tuning one
+        // character would silently retune the other.
+        var ham = MoveSets.ForCharacter(CharacterId.Hamster);
+        var squ = MoveSets.ForCharacter(CharacterId.Squirrel);
+        Check(!ReferenceEquals(ham.ById("5LP"), squ.ById("5LP")),
+            "Squirrel: seeded from Hamster WITHOUT sharing MoveDef instances");
+        squ.ById("5LP").Damage = 999;
+        Check(ham.ById("5LP").Damage != 999,
+            "Squirrel: mutating its table does not leak into Hamster's");
     }
 
     private static GameSim MakeSim(float p1x, float p2x)
@@ -209,16 +263,29 @@ internal static class Program
         {
             var sim = MakeSim(300, 360);
             bool leftGround = false;
+            int airFrames = 0;
             Fix startY = sim.P1.Position.Y;
+            Fix apex = Fix.Zero;
             for (int i = 0; i < 90; i++)
             {
                 var f1 = new InputFrame(false, false, i < 2, false, 0); // tap up
                 sim.Step(f1, InputFrame.Neutral);
-                if (sim.P1.IsAirborne) leftGround = true;
+                if (sim.P1.IsAirborne)
+                {
+                    leftGround = true;
+                    airFrames++;
+                    apex = Fix.Max(apex, startY - sim.P1.Position.Y);
+                }
             }
             Check(leftGround, "jump: player left the ground");
             Check(!sim.P1.IsAirborne && Fix.Abs(sim.P1.Position.Y - startY) < 0.6f,
                 "jump: player landed back on the ground");
+
+            // Airtime is FRAME-QUANTIZED and sits ~0.02% from the 43/44 boundary, so any nudge to
+            // JumpVelocity / Gravity / Dt can flip it by a whole frame — which would silently
+            // invalidate anti-air timings and any jump animation authored to this length. Pin it.
+            Check(airFrames == 43, $"jump: airtime is exactly 43 logic frames (got {airFrames})");
+            Check(Fix.Abs(apex - 242f) < 0.05f, $"jump: apex ~242px (got {apex:F3})");
         }
 
         // F. fireball: 236P spawns a projectile that travels and damages the opponent
