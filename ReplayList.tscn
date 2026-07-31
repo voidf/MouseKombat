@@ -2,13 +2,14 @@
 
 [ext_resource type="Script" path="res://ReplayListScreen.cs" id="1_rl"]
 
-[node name="ReplayList" type="Control" node_paths=PackedStringArray("Rows", "EmptyLabel", "CountLabel")]
+[node name="ReplayList" type="Control" node_paths=PackedStringArray("Rows", "HeaderHost", "EmptyLabel", "CountLabel")]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 script = ExtResource("1_rl")
 Rows = NodePath("Body/Scroll/Rows")
+HeaderHost = NodePath("Header/ColumnsHost")
 EmptyLabel = NodePath("Body/Empty")
 CountLabel = NodePath("Header/Count")
 
@@ -45,15 +46,14 @@ theme_override_colors/font_color = Color(0.7, 0.72, 0.8, 1)
 theme_override_font_sizes/font_size = 14
 vertical_alignment = 1
 
-[node name="Columns" type="Label" parent="Header"]
-layout_mode = 0
-offset_left = 24.0
-offset_top = 84.0
-offset_right = 776.0
-offset_bottom = 104.0
-theme_override_colors/font_color = Color(0.55, 0.58, 0.68, 1)
-theme_override_font_sizes/font_size = 13
-text = "分类      战斗时间              时长    房间号/主机          对战双方"
+[node name="ColumnsHost" type="VBoxContainer" parent="Header"]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_left = 20.0
+offset_top = 80.0
+offset_right = -20.0
+offset_bottom = 108.0
 
 [node name="Body" type="Control" parent="."]
 layout_mode = 1

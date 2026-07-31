@@ -581,6 +581,29 @@ internal static class Program
                 "replay: stepping back from frame 0 is a no-op, not an underflow");
         }
 
+        // keyframe spacing is a speed/memory knob only: results must not depend on it. The replay
+        // player uses spacing 1 (a savestate per frame) so that seeking backwards and reverse playback
+        // cost a state load instead of up to `spacing` re-simulated steps.
+        {
+            var dense = new ReplaySession(back, new PlayerConfig(), new PlayerConfig(), keyframeSpacing: 1);
+            var sparse = new ReplaySession(back, new PlayerConfig(), new PlayerConfig(), keyframeSpacing: 60);
+            int[] targets = { 500, 137, 0, 499, 61, 60, 59, 1, 250, 42 };
+            bool same = true;
+            foreach (int t in targets)
+            {
+                dense.SeekTo(t);
+                sparse.SeekTo(t);
+                if (dense.Sim.Checksum() != sparse.Sim.Checksum()) { same = false; break; }
+            }
+            Check(same, "replay: seek results are identical at keyframe spacing 1 and 60");
+            dense.SeekTo(500);
+            Check(dense.KeyframeCount == 501,
+                $"replay: spacing 1 stores a keyframe per frame ({dense.KeyframeCount} for 500 frames)");
+            sparse.SeekTo(500);
+            Check(sparse.KeyframeCount == 500 / 60 + 1,
+                $"replay: spacing 60 stores far fewer ({sparse.KeyframeCount})");
+        }
+
         // a build whose tuning no longer matches must be DETECTED, not silently mis-played
         {
             var tampered = ReplayData.Decode(file, out _);

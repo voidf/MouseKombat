@@ -318,6 +318,31 @@ public partial class Player : Node2D
         var t = Timeline(_clip);
         if (t == null) return;
 
+        WriteSpriteFrame(t);
+
+        _clipFrame++;
+        // keep a looping clip's counter bounded: it is part of the view state a rollback has to
+        // save/restore, and an unbounded counter would drift toward int overflow while idling
+        if (t.Loop && _clipFrame >= t.LogicLength) _clipFrame -= t.LogicLength;
+    }
+
+    // Render the CURRENT view state without touching it: no steady-state reconcile, no advance.
+    //
+    // For callers that OWN the clip position rather than letting it run forward — the replay player
+    // (which restores a precomputed view state per frame, and must show the same pose whether it
+    // arrived there forwards, backwards or by scrubbing) and, later, a rollback session. Advancing
+    // here is what made a paused replay keep animating and a reversed replay animate FORWARDS.
+    public void ApplyAnimation()
+    {
+        if (Sim == null || anim == null) return;
+        anim.FlipH = ArtFacesRight ? !Sim.FacingRight : Sim.FacingRight;
+        var t = Timeline(_clip);
+        if (t == null) return;
+        WriteSpriteFrame(t);
+    }
+
+    private void WriteSpriteFrame(ClipTimeline t)
+    {
         int i = _clipFrame;
         if (t.Loop) i %= t.LogicLength;
         else if (i >= t.LogicLength) i = t.LogicLength - 1;   // one-shot: hold the last frame
@@ -325,11 +350,6 @@ public partial class Player : Node2D
         int sprite = _clipReverse ? t.FrameAt[t.LogicLength - 1 - i] : t.FrameAt[i];
         if (anim.Animation != _clip) anim.Animation = _clip;
         anim.SetFrameAndProgress(sprite, 0f);
-
-        _clipFrame++;
-        // keep a looping clip's counter bounded: it is part of the view state a rollback has to
-        // save/restore, and an unbounded counter would drift toward int overflow while idling
-        if (t.Loop && _clipFrame >= t.LogicLength) _clipFrame -= t.LogicLength;
     }
 
     // Clips the sim does NOT emit an event for, because they are steady-state rather than a

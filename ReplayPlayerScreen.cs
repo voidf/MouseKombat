@@ -37,6 +37,22 @@ public partial class ReplayPlayerScreen : Control
     private ReplaySession _session;
     private Player _p1, _p2;
 
+    // ---- precomputed timeline ----
+    // The whole replay is simulated once at load, capturing each frame's ANIMATION state for both
+    // fighters. Sim states are captured too, by giving ReplaySession a keyframe spacing of 1, so a
+    // seek costs a state load instead of up to `spacing` re-simulated steps.
+    //
+    // This is not only a speed win. Animation position is view state the sim knows nothing about, and
+    // Player.TickAnimation only ever advances it FORWARD — so before this, a paused replay kept
+    // animating and a reversed replay animated forwards. Having the exact pose for every frame makes
+    // pause freeze on the right frame and reverse actually run the animation backwards.
+    private Player.ViewState[] _v1, _v2;
+
+    // Budget for the per-frame savestates. At ~640 bytes a frame this is ~27 minutes at spacing 1;
+    // a knockout is seconds to a minute, so spacing 1 is what actually happens. Longer recordings
+    // degrade to a wider spacing (slower seeks) rather than to an unbounded allocation.
+    private const long StateBudgetBytes = 64L * 1024 * 1024;
+
     private enum Transport { Paused, Forward, Reverse }
     private Transport _mode = Transport.Paused;
 
@@ -62,9 +78,14 @@ public partial class ReplayPlayerScreen : Control
         if (P1Slot != null) World.MoveChild(_p1, P1Slot.GetIndex());
         if (P2Slot != null) World.MoveChild(_p2, P2Slot.GetIndex());
 
-        _session = new ReplaySession(data, _p1.BuildConfig(), _p2.BuildConfig());
+        int spacing = 1;
+        long need = (long)(data.FrameCount + 1) * (SimState.MaxSize / 3);   // states are ~630 B
+        if (need > StateBudgetBytes) spacing = (int)(need / StateBudgetBytes) + 1;
+
+        _session = new ReplaySession(data, _p1.BuildConfig(), _p2.BuildConfig(), spacing);
         _p1.Bind(_session.Sim.P1);
         _p2.Bind(_session.Sim.P2);
+        Precompute();
 
         if (TitleLabel != null)
         {
@@ -84,22 +105,43 @@ public partial class ReplayPlayerScreen : Control
         }
         if (PlayButton != null) PlayButton.Pressed += () => SetMode(_mode == Transport.Forward ? Transport.Paused : Transport.Forward);
         if (ReverseButton != null) ReverseButton.Pressed += () => SetMode(_mode == Transport.Reverse ? Transport.Paused : Transport.Reverse);
-        if (StepBackButton != null) StepBackButton.Pressed += () => { SetMode(Transport.Paused); _session.StepBackward(); PushView(); };
-        if (StepForwardButton != null) StepForwardButton.Pressed += () => { SetMode(Transport.Paused); _session.StepForward(); PushView(); };
+        if (StepBackButton != null) StepBackButton.Pressed += () => { SetMode(Transport.Paused); ShowFrame(_session.Frame - 1); };
+        if (StepForwardButton != null) StepForwardButton.Pressed += () => { SetMode(Transport.Paused); ShowFrame(_session.Frame + 1); };
 
         // Integrity: a replay recorded before a balance change no longer simulates the same way. Say
         // so rather than presenting a match that never happened.
         VerifyAndWarn(data);
 
-        PushView();
+        ShowFrame(0);
         SetMode(Transport.Forward);
+    }
+
+    // Run the recording once, front to back, recording each frame's animation state. Frame index i
+    // holds the state AFTER i steps, so index 0 is the untouched start and TotalFrames is the end.
+    private void Precompute()
+    {
+        int n = _session.TotalFrames;
+        _v1 = new Player.ViewState[n + 1];
+        _v2 = new Player.ViewState[n + 1];
+
+        _session.Restart();
+        _p1.SyncFromSim(); _p2.SyncFromSim();
+        _p1.TickAnimation(); _p2.TickAnimation();
+        _v1[0] = _p1.SaveView(); _v2[0] = _p2.SaveView();
+
+        for (int i = 1; i <= n; i++)
+        {
+            _session.StepForward();
+            _p1.SyncFromSim(); _p2.SyncFromSim();
+            _p1.TickAnimation(); _p2.TickAnimation();   // forward-only, exactly as live play would
+            _v1[i] = _p1.SaveView(); _v2[i] = _p2.SaveView();
+        }
     }
 
     private void VerifyAndWarn(ReplayData data)
     {
         if (WarnLabel == null) return;
         bool ok = _session.Verify(out uint expected, out uint actual);
-        _session.Restart();
         if (ok)
         {
             WarnLabel.Visible = false;
@@ -137,8 +179,7 @@ public partial class ReplayPlayerScreen : Control
     {
         if (_syncingScrub || _session == null) return;
         SetMode(Transport.Paused);
-        _session.SeekTo((int)v);
-        PushView();
+        ShowFrame((int)v);
     }
 
     // Playback advances on the PHYSICS tick, not the render frame: one recorded frame is one logic
@@ -147,27 +188,32 @@ public partial class ReplayPlayerScreen : Control
     {
         if (_session == null) return;
 
-        if (_mode == Transport.Forward && !_session.StepForward())
-            SetMode(Transport.Paused);                       // reached the end
-        else if (_mode == Transport.Reverse && !_session.StepBackward())
-            SetMode(Transport.Paused);                       // reached the start
-
-        // Tick the view every frame regardless of whether the playhead moved, so looping idle
-        // animations keep breathing while paused — the same reason GameManager ticks them during the
-        // win sequence.
-        PushView();
+        // Paused means PAUSED: nothing is re-ticked, so the pose stays exactly the one belonging to
+        // this frame. (An earlier version kept ticking the animation to "keep the fighters
+        // breathing", which read as the replay still running while stopped.)
+        if (_mode == Transport.Forward) ShowFrame(_session.Frame + 1);
+        else if (_mode == Transport.Reverse) ShowFrame(_session.Frame - 1);
     }
 
-    // One path for both stepping and seeking: a seek goes through GameSim.LoadState, which already
-    // clears the players' queued AnimEvents, so there is never a stale intent to discard here.
-    private void PushView()
+    // Put the view exactly at `frame`: restore the sim state, restore the precomputed animation
+    // state, then render it WITHOUT advancing. Same result whether the frame was reached forwards,
+    // backwards or by dragging the scrub bar.
+    private void ShowFrame(int frame)
     {
         if (_session == null) return;
 
+        int target = Mathf.Clamp(frame, 0, _session.TotalFrames);
+        // A request that had to be clamped means we ran off one end — that is the stop condition for
+        // both play directions, and for the ±1 buttons at the boundaries.
+        if (target != frame) SetMode(Transport.Paused);
+
+        _session.SeekTo(target);
+        if (_v1 != null && target < _v1.Length) { _p1.LoadView(_v1[target]); _p2.LoadView(_v2[target]); }
+
         _p1.SyncFromSim();
         _p2.SyncFromSim();
-        _p1.TickAnimation();
-        _p2.TickAnimation();
+        _p1.ApplyAnimation();
+        _p2.ApplyAnimation();
 
         UpdateHpBars();
 
@@ -215,11 +261,11 @@ public partial class ReplayPlayerScreen : Control
                 break;
             case Key.Left:
                 GetViewport().SetInputAsHandled();
-                SetMode(Transport.Paused); _session?.StepBackward(); PushView();
+                SetMode(Transport.Paused); if (_session != null) ShowFrame(_session.Frame - 1);
                 break;
             case Key.Right:
                 GetViewport().SetInputAsHandled();
-                SetMode(Transport.Paused); _session?.StepForward(); PushView();
+                SetMode(Transport.Paused); if (_session != null) ShowFrame(_session.Frame + 1);
                 break;
         }
     }

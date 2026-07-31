@@ -17,14 +17,71 @@ public partial class ReplayListScreen : Control
     [Export] public string MainMenuScenePath = "res://MainMenu.tscn";
     [Export] public string PlayerScenePath = "res://ReplayPlayer.tscn";
     [Export] public VBoxContainer Rows;          // inside a ScrollContainer
+    [Export] public VBoxContainer HeaderHost;    // the column-title row is built into this
     [Export] public Label EmptyLabel;
     [Export] public Label CountLabel;
+
+    // ONE definition of the columns, used to build both the header and every data row. Width 0 means
+    // "take the remaining space". The header used to be a hand-spaced Label while rows were HBox
+    // cells, which is why the two could never line up: two layout systems describing one table.
+    private static readonly (string Title, int Width)[] Columns =
+    {
+        ("分类", 70),
+        ("战斗时间", 140),
+        ("时长", 60),
+        ("房间号/主机", 120),
+        ("对战双方", 0),
+    };
+
+    // Trailing per-row buttons the header has to reserve space for, so the last column ends in the
+    // same place in both.
+    private const int PlayButtonWidth = 64;
+    private const int DeleteButtonWidth = 34;
 
     private readonly List<ReplayStore.Entry> _entries = new();
 
     public override void _Ready()
     {
+        BuildHeader();
         Refresh();
+    }
+
+    // Built with the same container recipe as a data row — same margins, same separation, same widths
+    // — so alignment is structural rather than arithmetic.
+    private void BuildHeader()
+    {
+        if (HeaderHost == null) return;
+        foreach (var c in HeaderHost.GetChildren()) c.QueueFree();
+
+        var line = RowShell(new Color(0, 0, 0, 0), out Control shell);
+        foreach (var (title, width) in Columns)
+        {
+            var l = Cell(title, width, expand: width == 0);
+            l.AddThemeColorOverride("font_color", new Color(0.55f, 0.58f, 0.68f));
+            l.AddThemeFontSizeOverride("font_size", 13);
+            line.AddChild(l);
+        }
+        line.AddChild(new Control { CustomMinimumSize = new Vector2(PlayButtonWidth, 0) });
+        line.AddChild(new Control { CustomMinimumSize = new Vector2(DeleteButtonWidth, 0) });
+        HeaderHost.AddChild(shell);
+    }
+
+    // The shared row chrome: a PanelContainer with fixed content margins wrapping an HBox with fixed
+    // separation. Returns the HBox to fill, and the shell to parent.
+    private static HBoxContainer RowShell(Color bg, out Control shell)
+    {
+        var panel = new PanelContainer();
+        var style = new StyleBoxFlat { BgColor = bg };
+        style.SetCornerRadiusAll(4);
+        style.ContentMarginLeft = 10; style.ContentMarginRight = 10;
+        style.ContentMarginTop = 6; style.ContentMarginBottom = 6;
+        panel.AddThemeStyleboxOverride("panel", style);
+
+        var line = new HBoxContainer();
+        line.AddThemeConstantOverride("separation", 10);
+        panel.AddChild(line);
+        shell = panel;
+        return line;
     }
 
     public override void _Input(InputEvent @event)
@@ -58,38 +115,31 @@ public partial class ReplayListScreen : Control
 
     private Control BuildRow(ReplayStore.Entry e)
     {
-        var row = new PanelContainer();
-        var style = new StyleBoxFlat { BgColor = new Color(0.12f, 0.13f, 0.17f, 0.92f) };
-        style.SetCornerRadiusAll(4);
-        style.ContentMarginLeft = 10; style.ContentMarginRight = 10;
-        style.ContentMarginTop = 6; style.ContentMarginBottom = 6;
-        row.AddThemeStyleboxOverride("panel", style);
+        var line = RowShell(new Color(0.12f, 0.13f, 0.17f, 0.92f), out Control row);
 
-        var line = new HBoxContainer();
-        line.AddThemeConstantOverride("separation", 10);
-        row.AddChild(line);
-
-        line.AddChild(Cell(ReplayStore.ModeLabel(e.Mode), 70));
+        // Column 0 is always the mode; a broken file fills the rest with its error so the row still
+        // has a working delete button.
+        line.AddChild(Cell(ReplayStore.ModeLabel(e.Mode), Columns[0].Width));
 
         if (e.Header == null)
         {
             var bad = Cell($"损坏：{e.Error}", 0, expand: true);
             bad.AddThemeColorOverride("font_color", new Color(1f, 0.5f, 0.45f));
             line.AddChild(bad);
+            line.AddChild(new Control { CustomMinimumSize = new Vector2(PlayButtonWidth, 0) });
         }
         else
         {
-            line.AddChild(Cell(ReplayStore.FormatBattleTime(e.Header.StartedUnixUtc), 140));
-            line.AddChild(Cell(ReplayStore.FormatDuration(e.Header.FrameCount), 60));
-            line.AddChild(Cell(ReplayStore.FormatSource(e), 120));
+            line.AddChild(Cell(ReplayStore.FormatBattleTime(e.Header.StartedUnixUtc), Columns[1].Width));
+            line.AddChild(Cell(ReplayStore.FormatDuration(e.Header.FrameCount), Columns[2].Width));
+            line.AddChild(Cell(ReplayStore.FormatSource(e), Columns[3].Width));
 
             string p1 = string.IsNullOrEmpty(e.Header.P1Name) ? "1P" : e.Header.P1Name;
             string p2 = string.IsNullOrEmpty(e.Header.P2Name) ? "2P" : e.Header.P2Name;
-            var vs = Cell($"{p1} ({CharacterDb.NameOf(e.Header.P1Char)})  vs  "
-                          + $"{p2} ({CharacterDb.NameOf(e.Header.P2Char)})", 0, expand: true);
-            line.AddChild(vs);
+            line.AddChild(Cell($"{p1} ({CharacterDb.NameOf(e.Header.P1Char)})  vs  "
+                               + $"{p2} ({CharacterDb.NameOf(e.Header.P2Char)})", 0, expand: true));
 
-            var play = new Button { Text = "播放", CustomMinimumSize = new Vector2(64, 28) };
+            var play = new Button { Text = "播放", CustomMinimumSize = new Vector2(PlayButtonWidth, 28) };
             string path = e.Path;
             play.Pressed += () => OpenReplay(path);
             line.AddChild(play);
@@ -99,7 +149,7 @@ public partial class ReplayListScreen : Control
         var del = new Button
         {
             Text = "🗑",
-            CustomMinimumSize = new Vector2(34, 28),
+            CustomMinimumSize = new Vector2(DeleteButtonWidth, 28),
             TooltipText = "删除该回放（立即生效，无二次确认）",
         };
         del.AddThemeColorOverride("font_color", new Color(1f, 0.55f, 0.5f));
