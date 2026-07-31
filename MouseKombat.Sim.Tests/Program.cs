@@ -75,6 +75,7 @@ internal static class Program
 
         MoveTableTests();
         GameSimTests();
+        ReplayTests();
 
         Console.WriteLine(_fail == 0 ? "\nALL PASS" : $"\n{_fail} FAILURE(S)");
         return _fail == 0 ? 0 : 1;
@@ -463,6 +464,145 @@ internal static class Program
         AnimCommandTests();
         SaveStateTests();
         GoldenChecksumTest();
+    }
+
+    // ---- REPLAY: record -> encode -> decode -> replay must reproduce the match exactly ----
+    // The whole feature rests on the same determinism rollback does, so the assertions are about
+    // reproduction rather than about file plumbing: a replay that plays back "nearly" right is a
+    // replay that is wrong.
+    private static void ReplayTests()
+    {
+        // record a match, capturing both the inputs and a per-frame checksum trail to compare against
+        var rec = new ReplayData
+        {
+            Mode = ReplayData.ModeLocal,
+            GameVersion = "test",
+            StartedUnixUtc = 1_700_000_000,
+            P1Name = "  hamster\nguy  ",      // control chars + padding must be scrubbed
+            P2Name = "袋鼠玩家",
+            P1Char = CharacterId.Hamster,
+            P2Char = CharacterId.Kangaroo,
+            // must mirror MakeSim(240, 520) below: the header's start positions are what playback
+            // rebuilds the match from, so a mismatch here shows up as divergence on frame 0
+            P1StartX = 240f, P1StartY = 560f,
+            P2StartX = 520f, P2StartY = 560f,
+        };
+
+        var live = MakeSim(240, 520);
+        var trail = new List<uint>();
+        for (int i = 0; i < 500; i++)
+        {
+            var (a, b) = FuzzScript(7)(i);
+            rec.Record(a, b);
+            live.Step(a, b);
+            trail.Add(live.Checksum());
+        }
+        rec.FinalChecksum = live.Checksum();
+
+        Check(rec.FrameCount == 500, $"replay: recorded 500 frames (got {rec.FrameCount})");
+        Check(Math.Abs(rec.DurationSeconds - 500.0 / 60.0) < 1e-9, "replay: duration derives from frames");
+
+        // names: control characters stripped, trimmed, byte-budgeted
+        Check(ReplayData.SanitizeName("  hamster\nguy  ") == "hamsterguy",
+            "replay: name sanitizing strips control chars and trims");
+        Check(System.Text.Encoding.UTF8.GetByteCount(ReplayData.SanitizeName("袋鼠玩家袋鼠玩家")) <= 18,
+            "replay: name sanitizing respects the 18-byte budget");
+        Check(ReplayData.SanitizeName("袋鼠玩家袋鼠玩家") == "袋鼠玩家袋鼠",
+            "replay: 18-byte budget cuts on a character boundary, not mid-rune");
+
+        // encode / decode round trip
+        byte[] file = rec.Encode();
+        var back = ReplayData.Decode(file, out string err);
+        Check(back != null, $"replay: decodes what it encoded (err: {err})");
+        Check(back.FrameCount == 500, "replay: frame count survives the round trip");
+        Check(back.P1Name == "hamsterguy" && back.P2Name == "袋鼠玩家", "replay: names survive");
+        Check(back.P1Char == CharacterId.Hamster && back.P2Char == CharacterId.Kangaroo,
+            "replay: characters survive");
+        Check(back.FinalChecksum == rec.FinalChecksum, "replay: final checksum survives");
+        Check(back.StartedUnixUtc == 1_700_000_000, "replay: timestamp survives");
+
+        bool inputsMatch = true;
+        for (int i = 0; i < 500; i++)
+        {
+            var x = rec.P1At(i); var y = back.P1At(i);
+            if (x.Left != y.Left || x.Right != y.Right || x.Up != y.Up || x.Down != y.Down
+                || x.JustPressedMask != y.JustPressedMask) inputsMatch = false;
+        }
+        Check(inputsMatch, "replay: every packed input frame round-trips bit-exactly");
+
+        // 4 bytes of body per frame, plus a header
+        Check(file.Length > 500 * 4 && file.Length < 500 * 4 + 512,
+            $"replay: {file.Length} bytes = 2000 bytes of input + a small header");
+
+        // playing the decoded file back must walk the SAME checksum trail
+        {
+            var session = new ReplaySession(back, new PlayerConfig(), new PlayerConfig());
+            int diverged = -1;
+            for (int i = 0; i < 500; i++)
+            {
+                session.StepForward();
+                if (diverged < 0 && session.Sim.Checksum() != trail[i]) diverged = i;
+            }
+            Check(diverged < 0,
+                diverged < 0 ? "replay: playback reproduces the recorded match frame for frame"
+                             : $"replay: playback diverged from the recording at frame {diverged}");
+            Check(session.AtEnd, "replay: playback ends exactly at the recorded frame count");
+
+            uint exp, act;
+            Check(session.Verify(out exp, out act),
+                $"replay: stored checksum verifies ({exp:X8} vs {act:X8})");
+        }
+
+        // seeking: every landing point must equal what straight playback had at that frame
+        {
+            var session = new ReplaySession(back, new PlayerConfig(), new PlayerConfig());
+            int[] targets = { 500, 0, 137, 499, 61, 60, 59, 1, 250, 249, 248, 300, 42 };
+            int bad = -1;
+            foreach (int t in targets)
+            {
+                session.SeekTo(t);
+                if (session.Frame != t) { bad = t; break; }
+                uint want = t == 0 ? 0u : trail[t - 1];
+                if (t > 0 && session.Sim.Checksum() != want) { bad = t; break; }
+            }
+            Check(bad < 0, bad < 0 ? "replay: seeking to any frame lands on the exact recorded state"
+                                   : $"replay: seek to frame {bad} produced the wrong state");
+
+            // reverse playback: stepping back one frame at a time from the end
+            session.SeekTo(200);
+            bool revOk = true;
+            for (int t = 199; t >= 150; t--)
+            {
+                session.StepBackward();
+                if (session.Frame != t || session.Sim.Checksum() != trail[t - 1]) { revOk = false; break; }
+            }
+            Check(revOk, "replay: frame-by-frame reverse playback matches the recording");
+            Check(!new ReplaySession(back, new PlayerConfig(), new PlayerConfig()).StepBackward(),
+                "replay: stepping back from frame 0 is a no-op, not an underflow");
+        }
+
+        // a build whose tuning no longer matches must be DETECTED, not silently mis-played
+        {
+            var tampered = ReplayData.Decode(file, out _);
+            var weak = new PlayerConfig { WalkSpeedPxPerSec = 999f };   // stand-in for "tuning changed"
+            var session = new ReplaySession(tampered, weak, new PlayerConfig());
+            bool ok = session.Verify(out uint exp, out uint act);
+            Check(!ok, $"replay: mismatched tuning fails verification ({exp:X8} vs {act:X8})");
+        }
+
+        // corrupt input must degrade to an error, not an exception: the replay list shows whatever
+        // files exist and one bad file must not take the screen down
+        {
+            Check(ReplayData.Decode(null, out _) == null, "replay: null bytes decode to null");
+            Check(ReplayData.Decode(new byte[] { 1, 2, 3 }, out _) == null, "replay: truncated file decodes to null");
+            Check(ReplayData.Decode(System.Text.Encoding.UTF8.GetBytes("fmt=1\nnoblankline"), out _) == null,
+                "replay: header with no terminator decodes to null");
+            var wrongFmt = System.Text.Encoding.UTF8.GetBytes("fmt=99\n\n\0\0\0\0");
+            Check(ReplayData.Decode(wrongFmt, out string e2) == null && e2 != null,
+                "replay: unsupported format version is refused with a message");
+            var headerOnly = System.Text.Encoding.UTF8.GetBytes("fmt=1\n\n");
+            Check(ReplayData.Decode(headerOnly, out _) == null, "replay: header with no frames decodes to null");
+        }
     }
 
     // ---- SAVESTATE / ROLLBACK CONTRACT ----
