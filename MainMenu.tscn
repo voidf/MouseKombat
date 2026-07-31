@@ -11,6 +11,7 @@ anchor_bottom = 1.0
 script = ExtResource("1_mm")
 StatusLabel = NodePath("Layout/Status")
 ReadyScenePath = "res://ReadyScreen.tscn"
+ReplayScenePath = "res://ReplayList.tscn"
 
 [node name="BG" type="TextureRect" parent="."]
 layout_mode = 1

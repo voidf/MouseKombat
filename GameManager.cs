@@ -83,6 +83,12 @@ public partial class GameManager : Node2D
     private enum Phase { Fighting, Win, Resetting }
     private Phase _phase = Phase.Fighting;
 
+    // ---- replay recording ----
+    // One file per KO: a "match" is a single knockout (the round then resets and a fresh recording
+    // starts), which is also the unit the networked modes return to the lobby on.
+    [Export] public bool RecordReplays = true;
+    private ReplayData _recording;
+
     private GameSim _sim;
     private readonly Dictionary<int, Projectile> _projViews = new(); // sim projectile id -> view node
     private readonly HashSet<int> _liveIds = new();
@@ -131,6 +137,45 @@ public partial class GameManager : Node2D
         CacheAndHideLabel(WinTextLine1, ref _l1Home);
         CacheAndHideLabel(WinTextLine2, ref _l2Home);
         UpdateHpBars();
+        StartRecording();
+    }
+
+    // A recording captures ONE knockout. The header carries everything playback needs to rebuild the
+    // match except the per-character tuning, which is deliberately left out (see ReplayData).
+    private void StartRecording()
+    {
+        if (!RecordReplays || _sim == null) { _recording = null; return; }
+        _recording = new ReplayData
+        {
+            Mode = GameSession.Mode,
+            GameVersion = (string)ProjectSettings.GetSetting("application/config/version", ""),
+            StartedUnixUtc = System.DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+            P1Name = GameSession.P1Name,
+            P2Name = GameSession.P2Name,
+            P1Char = p1.Character,
+            P2Char = p2.Character,
+            StageMinX = StageMinX,
+            StageMaxX = StageMaxX,
+            WorldWidth = GetViewport().GetVisibleRect().Size.X,
+            P1StartX = P1StartPos.X, P1StartY = P1StartPos.Y,
+            P2StartX = P2StartPos.X, P2StartY = P2StartPos.Y,
+            RoomId = GameSession.RoomId,
+            Host = GameSession.Host,
+        };
+    }
+
+    // Stamp the end-state checksum and write the file. The checksum is what lets playback detect that
+    // this build no longer simulates these inputs the same way (a balance change since recording).
+    private void FinishRecording()
+    {
+        if (_recording == null) return;
+        if (_recording.FrameCount > 0)
+        {
+            _recording.FinalChecksum = _sim.Checksum();
+            string path = ReplayStore.Save(_recording);
+            if (path != null) GD.Print($"[replay] saved {path} ({_recording.FrameCount} frames)");
+        }
+        _recording = null;
     }
 
     // Instantiate the two selected characters. The slot markers are DESIGN-TIME anchors: when
@@ -227,6 +272,9 @@ public partial class GameManager : Node2D
         if (@event is InputEventKey k && k.Pressed && !k.Echo && k.Keycode == Key.Escape)
         {
             GetViewport().SetInputAsHandled();
+            // Drop the partial recording: a replay file represents a completed knockout, and half a
+            // round with no result is not something the list should offer.
+            _recording = null;
             GameSession.Clear();
             GetTree().ChangeSceneToFile(ReadyScenePath);
         }
@@ -256,7 +304,13 @@ public partial class GameManager : Node2D
             return;
         }
 
-        var res = _sim.Step(FrameFor(p1, 0), FrameFor(p2, 1));
+        // Record the frames ACTUALLY fed to the sim, which includes anything an AI decided. That is
+        // what makes an AI match replayable without shipping the model: the replay carries the
+        // resulting inputs, not the policy.
+        var f1 = FrameFor(p1, 0);
+        var f2 = FrameFor(p2, 1);
+        _recording?.Record(f1, f2);
+        var res = _sim.Step(f1, f2);
 
         // push logic -> views (position + this frame's animation commands), then advance the
         // animation by exactly one logic frame
@@ -277,7 +331,11 @@ public partial class GameManager : Node2D
         UpdateHpBars();
 
         // winner index: 1 = P2 won (P1 dead), 0 = P1 won (P2 dead) — matches old CheckKO mapping
-        if (res.MatchOverWinner >= 0) BeginWin(res.MatchOverWinner);
+        if (res.MatchOverWinner >= 0)
+        {
+            FinishRecording();
+            BeginWin(res.MatchOverWinner);
+        }
     }
 
     // AI agent overrides device input when present; else poll the device / InputMap.
@@ -564,6 +622,7 @@ public partial class GameManager : Node2D
         p2.TickAnimation();
 
         UpdateHpBars();
+        StartRecording();   // the next knockout is a new replay file
         _phase = Phase.Fighting;
     }
 

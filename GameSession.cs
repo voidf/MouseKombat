@@ -19,6 +19,15 @@ public static class GameSession
     public static string P1Name = "1P";
     public static string P2Name = "2P";
 
+    // Which replay folder this match's recording belongs in (ReplayData.ModeLocal / Lan / Lobby).
+    // Retention is counted per mode, so this also decides which folder gets pruned.
+    public static string Mode = MouseKombat.Sim.ReplayData.ModeLocal;
+
+    // Filled in by the networked lobbies so a recording can say where it came from; the replay list
+    // shows the room id for lobby games and the host for LAN games.
+    public static string RoomId = "";
+    public static string Host = "";
+
     public static bool Configured;
 
     public static void Set(IInputSource p1, IInputSource p2)
@@ -38,6 +47,9 @@ public static class GameSession
         P2Char = CharacterId.Kangaroo;
         P1Name = "1P";
         P2Name = "2P";
+        Mode = MouseKombat.Sim.ReplayData.ModeLocal;
+        RoomId = "";
+        Host = "";
         Configured = false;
     }
 }

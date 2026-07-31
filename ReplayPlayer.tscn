@@ -1,0 +1,180 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://ReplayPlayerScreen.cs" id="1_rp"]
+[ext_resource type="Texture2D" uid="uid://bv3dc8cf3ldcu" path="res://Art/BG.png" id="2_bg"]
+
+[node name="ReplayPlayer" type="Control" node_paths=PackedStringArray("World", "P1Slot", "P2Slot", "Hp1Fill", "Hp2Fill", "TitleLabel", "FrameLabel", "WarnLabel", "Scrub", "PlayButton", "ReverseButton", "StepBackButton", "StepForwardButton")]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("1_rp")
+World = NodePath("World")
+P1Slot = NodePath("World/P1Slot")
+P2Slot = NodePath("World/P2Slot")
+Hp1Fill = NodePath("HUD/P1Bar/Fill")
+Hp2Fill = NodePath("HUD/P2Bar/Fill")
+TitleLabel = NodePath("HUD/Title")
+FrameLabel = NodePath("HUD/Transport/FrameLabel")
+WarnLabel = NodePath("HUD/Warn")
+Scrub = NodePath("HUD/Transport/Scrub")
+PlayButton = NodePath("HUD/Transport/Buttons/Play")
+ReverseButton = NodePath("HUD/Transport/Buttons/Reverse")
+StepBackButton = NodePath("HUD/Transport/Buttons/StepBack")
+StepForwardButton = NodePath("HUD/Transport/Buttons/StepForward")
+
+[node name="World" type="Node2D" parent="."]
+
+[node name="BG" type="TextureRect" parent="World"]
+offset_right = 800.0
+offset_bottom = 600.0
+texture = ExtResource("2_bg")
+expand_mode = 2
+
+[node name="P2Slot" type="Node2D" parent="World"]
+position = Vector2(650, 560)
+
+[node name="P1Slot" type="Node2D" parent="World"]
+position = Vector2(120, 560)
+
+[node name="HUD" type="CanvasLayer" parent="."]
+layer = 1
+
+[node name="P1Bar" type="Control" parent="HUD"]
+anchors_preset = 0
+offset_left = 20.0
+offset_top = 16.0
+offset_right = 280.0
+offset_bottom = 34.0
+
+[node name="Bg" type="ColorRect" parent="HUD/P1Bar"]
+anchors_preset = 0
+offset_right = 260.0
+offset_bottom = 18.0
+color = Color(0.1, 0.1, 0.12, 0.8)
+
+[node name="Fill" type="ColorRect" parent="HUD/P1Bar"]
+anchors_preset = 0
+offset_right = 260.0
+offset_bottom = 18.0
+color = Color(0.35, 0.85, 0.45, 1)
+
+[node name="P2Bar" type="Control" parent="HUD"]
+anchors_preset = 0
+offset_left = 520.0
+offset_top = 16.0
+offset_right = 780.0
+offset_bottom = 34.0
+
+[node name="Bg" type="ColorRect" parent="HUD/P2Bar"]
+anchors_preset = 0
+offset_right = 260.0
+offset_bottom = 18.0
+color = Color(0.1, 0.1, 0.12, 0.8)
+
+[node name="Fill" type="ColorRect" parent="HUD/P2Bar"]
+anchors_preset = 0
+offset_right = 260.0
+offset_bottom = 18.0
+color = Color(0.9, 0.6, 0.35, 1)
+
+[node name="Title" type="Label" parent="HUD"]
+anchors_preset = 0
+offset_left = 20.0
+offset_top = 40.0
+offset_right = 780.0
+offset_bottom = 62.0
+theme_override_colors/font_color = Color(0.85, 0.88, 0.95, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.8)
+theme_override_constants/outline_size = 4
+theme_override_font_sizes/font_size = 15
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Warn" type="Label" parent="HUD"]
+visible = false
+anchors_preset = 0
+offset_left = 20.0
+offset_top = 64.0
+offset_right = 780.0
+offset_bottom = 104.0
+theme_override_colors/font_color = Color(1, 0.75, 0.35, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.85)
+theme_override_constants/outline_size = 4
+theme_override_font_sizes/font_size = 13
+autowrap_mode = 2
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Transport" type="Control" parent="HUD"]
+anchors_preset = 0
+offset_left = 0.0
+offset_top = 508.0
+offset_right = 800.0
+offset_bottom = 600.0
+
+[node name="Panel" type="ColorRect" parent="HUD/Transport"]
+anchors_preset = 0
+offset_right = 800.0
+offset_bottom = 92.0
+color = Color(0.05, 0.055, 0.07, 0.82)
+
+[node name="Scrub" type="HSlider" parent="HUD/Transport"]
+anchors_preset = 0
+offset_left = 20.0
+offset_top = 10.0
+offset_right = 780.0
+offset_bottom = 30.0
+
+[node name="Buttons" type="HBoxContainer" parent="HUD/Transport"]
+anchors_preset = 0
+offset_left = 20.0
+offset_top = 40.0
+offset_right = 400.0
+offset_bottom = 76.0
+theme_override_constants/separation = 8
+
+[node name="StepBack" type="Button" parent="HUD/Transport/Buttons"]
+custom_minimum_size = Vector2(48, 32)
+layout_mode = 2
+tooltip_text = "后退一帧 (←)"
+text = "|◀"
+
+[node name="Reverse" type="Button" parent="HUD/Transport/Buttons"]
+custom_minimum_size = Vector2(56, 32)
+layout_mode = 2
+tooltip_text = "倒放"
+text = "◀◀"
+
+[node name="Play" type="Button" parent="HUD/Transport/Buttons"]
+custom_minimum_size = Vector2(56, 32)
+layout_mode = 2
+tooltip_text = "播放 / 暂停 (空格)"
+text = "▶"
+
+[node name="StepForward" type="Button" parent="HUD/Transport/Buttons"]
+custom_minimum_size = Vector2(48, 32)
+layout_mode = 2
+tooltip_text = "前进一帧 (→)"
+text = "▶|"
+
+[node name="FrameLabel" type="Label" parent="HUD/Transport"]
+anchors_preset = 0
+offset_left = 420.0
+offset_top = 40.0
+offset_right = 660.0
+offset_bottom = 76.0
+theme_override_colors/font_color = Color(0.8, 0.83, 0.9, 1)
+theme_override_font_sizes/font_size = 14
+vertical_alignment = 1
+
+[node name="Back" type="Button" parent="HUD/Transport"]
+custom_minimum_size = Vector2(110, 32)
+anchors_preset = 0
+offset_left = 670.0
+offset_top = 40.0
+offset_right = 780.0
+offset_bottom = 72.0
+text = "返回 (Esc)"
+
+[connection signal="pressed" from="HUD/Transport/Back" to="." method="OnBackPressed"]
