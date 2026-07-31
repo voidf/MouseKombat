@@ -187,6 +187,27 @@ public sealed class GameSim
         return SimState.Checksum(buf.Slice(0, n));
     }
 
+    // ---- array overloads, for callers that cannot express a Span ----
+    // pythonnet marshals byte[] but NOT Span<byte>, so the RL bridge and any Python-side tooling
+    // (batch-validating replays, seeding an episode from a stored mid-match state, a search-based
+    // agent that clones the sim) could not reach the savestate at all through the Span signatures.
+    // byte[] converts to Span<byte> implicitly in C#, so these cost nothing and keep the whole
+    // savestate surface usable from both sides.
+    public int SaveStateTo(byte[] buffer) => SaveState(buffer);
+
+    public byte[] SaveStateBytes()
+    {
+        var buf = new byte[SimState.MaxSize];
+        int n = SaveState(buf);
+        System.Array.Resize(ref buf, n);
+        return buf;
+    }
+
+    public void LoadStateFrom(byte[] buffer, int length) =>
+        LoadState(new ReadOnlySpan<byte>(buffer, 0, length));
+
+    public void LoadStateFrom(byte[] buffer) => LoadState(buffer);
+
     private void UpdateFacings()
     {
         if (!P1.IsAirborne && CanTurn(P1)) P1.FacingRight = P2.Position.X >= P1.Position.X;
