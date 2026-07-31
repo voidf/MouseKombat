@@ -34,18 +34,21 @@ public static class Observation
         int i = 0;
         o[i++] = self.Hp / (float)self.MaxHp;
         o[i++] = opp.Hp / (float)opp.MaxHp;
-        o[i++] = self.Position.X / worldWidth;
-        o[i++] = self.Position.Y / worldHeight;
-        o[i++] = opp.Position.X / worldWidth;
-        o[i++] = opp.Position.Y / worldHeight;
-        o[i++] = (opp.Position.X - self.Position.X) / worldWidth;   // signed horizontal gap
-        o[i++] = (opp.Position.Y - self.Position.Y) / worldHeight;
+        // Fix -> float happens HERE, at the observation boundary: the RL contract is 32 floats.
+        // The sim itself stays fixed-point, so the numbers being converted are already identical
+        // on every machine.
+        o[i++] = (float)self.Position.X / worldWidth;
+        o[i++] = (float)self.Position.Y / worldHeight;
+        o[i++] = (float)opp.Position.X / worldWidth;
+        o[i++] = (float)opp.Position.Y / worldHeight;
+        o[i++] = (float)(opp.Position.X - self.Position.X) / worldWidth;   // signed horizontal gap
+        o[i++] = (float)(opp.Position.Y - self.Position.Y) / worldHeight;
         o[i++] = self.FacingRight ? 1f : 0f;
         o[i++] = opp.FacingRight ? 1f : 0f;
         o[i++] = self.IsAirborne ? 1f : 0f;
         o[i++] = opp.IsAirborne ? 1f : 0f;
-        o[i++] = self.Vy / 2000f;
-        o[i++] = opp.Vy / 2000f;
+        o[i++] = (float)self.Vy / 2000f;
+        o[i++] = (float)opp.Vy / 2000f;
         o[i++] = self.StateIndex / 13f;      // divisor intentionally frozen at 13 — see the throw block below
         o[i++] = opp.StateIndex / 13f;
         o[i++] = self.AttackPhase() / 3f;
@@ -62,21 +65,21 @@ public static class Observation
         // All zero when nothing is on screen, so a policy trained before this still sees zeros
         // most of the time — only the brief fireball window is new information.
         SimProjectile incoming = null;
-        float bestDx = float.MaxValue;
+        Fix bestDx = Fix.FromRaw(int.MaxValue); // sentinel: float.MaxValue would overflow Q16.16
         bool ownActive = false;
         var projs = sim.Projectiles;
         for (int k = 0; k < projs.Count; k++)
         {
             var pr = projs[k];
             if (pr.OwnerIndex == selfIndex) { ownActive = true; continue; }
-            float dx = MathF.Abs(pr.Position.X - self.Position.X);
+            Fix dx = Fix.Abs(pr.Position.X - self.Position.X);
             if (dx < bestDx) { bestDx = dx; incoming = pr; }
         }
         if (incoming != null)
         {
             o[i++] = 1f;
-            o[i++] = (incoming.Position.X - self.Position.X) / worldWidth;
-            o[i++] = (incoming.Position.Y - self.Position.Y) / worldHeight;
+            o[i++] = (float)(incoming.Position.X - self.Position.X) / worldWidth;
+            o[i++] = (float)(incoming.Position.Y - self.Position.Y) / worldHeight;
             o[i++] = incoming.Dir; // -1 / +1 travel direction
         }
         else { o[i++] = 0f; o[i++] = 0f; o[i++] = 0f; o[i++] = 0f; }

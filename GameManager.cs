@@ -79,11 +79,9 @@ public partial class GameManager : Node2D
         // Build the sim from the players' exported tuning; force start pos/facing to the
         // director's own values (matches the original reset convention: p1 faces right, p2 left).
         var cfg1 = p1.BuildConfig();
-        cfg1.StartPos = new System.Numerics.Vector2(P1StartPos.X, P1StartPos.Y);
-        cfg1.StartFacingRight = true;
+        cfg1.SetStart(P1StartPos.X, P1StartPos.Y, facingRight: true);
         var cfg2 = p2.BuildConfig();
-        cfg2.StartPos = new System.Numerics.Vector2(P2StartPos.X, P2StartPos.Y);
-        cfg2.StartFacingRight = false;
+        cfg2.SetStart(P2StartPos.X, P2StartPos.Y, facingRight: false);
 
         float worldViewWidth = GetViewport().GetVisibleRect().Size.X;
         _sim = new GameSim(cfg1, cfg2, StageMinX, StageMaxX, worldViewWidth);
@@ -184,7 +182,7 @@ public partial class GameManager : Node2D
         var owner = pr.OwnerIndex == 0 ? p1 : p2;
         if (owner.ProjectileScene == null) return; // no visual; the logic projectile still runs
         var node = owner.ProjectileScene.Instantiate<Projectile>();
-        node.Position = new Vector2(pr.Position.X, pr.Position.Y);
+        node.Position = pr.Position.ToGodot();
         AddChild(node);
         node.Init(pr.Dir);
         _projViews[id] = node;
@@ -200,7 +198,7 @@ public partial class GameManager : Node2D
             var pr = list[i];
             _liveIds.Add(pr.Id);
             if (_projViews.TryGetValue(pr.Id, out var node) && IsInstanceValid(node))
-                node.Position = new Vector2(pr.Position.X, pr.Position.Y);
+                node.Position = pr.Position.ToGodot();
         }
 
         _toRemove.Clear();

@@ -27,7 +27,6 @@ _ensure_runtime()
 from MouseKombat.Sim import (  # noqa: E402
     GameSim, PlayerConfig, InputFrame, StateMachineAgent, ZonerAgent, RusherAgent, CharacterId, Observation,
 )
-from System.Numerics import Vector2  # noqa: E402
 
 OBS = 32
 NUM_ACT = 10
@@ -86,8 +85,8 @@ class SelfPlayEnv(gym.Env):
         left_char, right_char = (learner, opp) if self._self == 0 else (opp, learner)
         lx = random.uniform(80.0, 350.0)
         rx = random.uniform(450.0, 720.0)          # random start distance, incl. the real far start
-        c1 = PlayerConfig(); c1.Character = left_char; c1.StartPos = Vector2(lx, 560.0); c1.StartFacingRight = True
-        c2 = PlayerConfig(); c2.Character = right_char; c2.StartPos = Vector2(rx, 560.0); c2.StartFacingRight = False
+        c1 = PlayerConfig(); c1.Character = left_char; c1.SetStart(lx, 560.0, True)
+        c2 = PlayerConfig(); c2.Character = right_char; c2.SetStart(rx, 560.0, False)
         return GameSim(c1, c2, 40.0, 760.0, 800.0)
 
     def reset(self, *, seed=None, options=None):

@@ -95,7 +95,7 @@ public partial class Player : Node2D
     public PlayerConfig BuildConfig() => new PlayerConfig
     {
         Character = Character,
-        StartPos = new System.Numerics.Vector2(Position.X, Position.Y),
+        StartPos = Position.ToSim(),
         StartFacingRight = StartFacingRight,
         MaxHp = MaxHp,
         WalkSpeedPxPerSec = WalkSpeedPxPerSec,
@@ -180,7 +180,7 @@ public partial class Player : Node2D
     public void SyncFromSim()
     {
         if (Sim == null) return;
-        Position = new Vector2(Sim.Position.X, Sim.Position.Y);
+        Position = Sim.Position.ToGodot();
 
         var events = Sim.AnimEvents;
         for (int i = 0; i < events.Count; i++)

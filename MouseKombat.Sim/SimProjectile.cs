@@ -13,9 +13,9 @@ public sealed class SimProjectile
     public readonly int Dir;          // +1 right, -1 left
     public bool Alive = true;
 
-    private readonly float _speed;
-    private readonly float _maxDistance;
-    private float _traveled;
+    private readonly Fix _speed;
+    private readonly Fix _maxDistance;
+    private Fix _traveled;
     private readonly SimRect _hitboxLocal;
     private readonly MoveDef _hit;    // synthetic hit data reused by SimPlayer.ApplyDamage
 
@@ -53,11 +53,11 @@ public sealed class SimProjectile
 
     public void Advance()
     {
-        float dx = Dir * _speed * SimPlayer.Dt;
+        Fix dx = Dir * _speed * SimPlayer.Dt;
         Position += new Vec2(dx, 0);
-        _traveled += MathF.Abs(dx);
+        _traveled += Fix.Abs(dx);
     }
 
-    public bool Expired(float cullMinX, float cullMaxX)
+    public bool Expired(Fix cullMinX, Fix cullMaxX)
         => _traveled >= _maxDistance || Position.X < cullMinX || Position.X > cullMaxX;
 }

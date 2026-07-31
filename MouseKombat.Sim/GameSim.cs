@@ -35,9 +35,12 @@ public sealed class GameSim
     private readonly List<SimProjectile> _projectiles = new();
     public IReadOnlyList<SimProjectile> Projectiles => _projectiles;
 
-    private readonly float _stageMinX, _stageMaxX;
-    private readonly float _cullMinX, _cullMaxX;
+    private readonly Fix _stageMinX, _stageMaxX;
+    private readonly Fix _cullMinX, _cullMaxX;
     private int _nextProjId = 1;
+
+    // knockback smaller than this is treated as fully absorbed (nothing to transfer)
+    private static readonly Fix PushEpsilon = 0.01f;
 
     // index of the player currently holding the other in a throw (-1 = nobody). Only one grab
     // can be live at a time; the victim is Player(1 - _grabAttacker).
@@ -46,6 +49,8 @@ public sealed class GameSim
 
     public bool MatchOver { get; private set; }
 
+    // float params: this is a BOUNDARY constructor (Godot director / RL bridge). The values are
+    // converted to Fix once here and the sim never sees a float again.
     public GameSim(PlayerConfig c1, PlayerConfig c2, float stageMinX, float stageMaxX, float worldViewWidth)
     {
         P1 = new SimPlayer(c1);
@@ -155,8 +160,8 @@ public sealed class GameSim
             return;
         }
 
-        float v1 = SignFromInput(P1) * P1.WalkSpeedPxPerSec * SimPlayer.Dt;
-        float v2 = SignFromInput(P2) * P2.WalkSpeedPxPerSec * SimPlayer.Dt;
+        Fix v1 = SignFromInput(P1) * P1.WalkSpeedPxPerSec * SimPlayer.Dt;
+        Fix v2 = SignFromInput(P2) * P2.WalkSpeedPxPerSec * SimPlayer.Dt;
         if (P1.IsBusy) v1 = 0;
         if (P2.IsBusy) v2 = 0;
 
@@ -164,7 +169,7 @@ public sealed class GameSim
         var box2 = P2.GetWorldHurtbox();
         bool p1IsLeft = box1.Position.X < box2.Position.X;
 
-        float gap = p1IsLeft
+        Fix gap = p1IsLeft
             ? box2.Position.X - (box1.Position.X + box1.Size.X)
             : box1.Position.X - (box2.Position.X + box2.Size.X);
 
@@ -174,25 +179,25 @@ public sealed class GameSim
         bool p1Pushes = p1Toward && !P2.IsDirectionPressed;
         bool p2Pushes = p2Toward && !P1.IsDirectionPressed;
 
-        if (gap <= 0.5f && p1Pushes)
+        if (gap <= Fix.Half && p1Pushes)
         {
-            float half = v1 * 0.5f;
+            Fix half = v1 * Fix.Half;
             P1.DesiredDeltaX = half;
             P2.DesiredDeltaX = half;
             return;
         }
-        if (gap <= 0.5f && p2Pushes)
+        if (gap <= Fix.Half && p2Pushes)
         {
-            float half = v2 * 0.5f;
+            Fix half = v2 * Fix.Half;
             P1.DesiredDeltaX = half;
             P2.DesiredDeltaX = half;
             return;
         }
 
-        float approach = (p1Toward ? MathF.Abs(v1) : 0) + (p2Toward ? MathF.Abs(v2) : 0);
+        Fix approach = (p1Toward ? Fix.Abs(v1) : Fix.Zero) + (p2Toward ? Fix.Abs(v2) : Fix.Zero);
         if (approach > 0 && approach > gap && gap > 0)
         {
-            float scale = gap / approach;
+            Fix scale = gap / approach;
             if (p1Toward) v1 *= scale;
             if (p2Toward) v2 *= scale;
         }
@@ -209,7 +214,7 @@ public sealed class GameSim
     private void ClampToStage(SimPlayer p)
     {
         var pos = p.Position;
-        pos.X = Math.Clamp(pos.X, _stageMinX, _stageMaxX);
+        pos.X = Fix.Clamp(pos.X, _stageMinX, _stageMaxX);
         p.Position = pos;
     }
 
@@ -226,19 +231,19 @@ public sealed class GameSim
     // residual is 0 and the later clamps are no-ops.
     private void ResolveKnockback(SimPlayer defender, SimPlayer attacker)
     {
-        if (!defender.ConsumePendingPush(out float push)) return;
+        if (!defender.ConsumePendingPush(out Fix push)) return;
 
-        float before = defender.Position.X;
+        Fix before = defender.Position.X;
         var dp = defender.Position;
         dp.X += push;
         defender.Position = dp;
         ClampToStage(defender);
 
-        float residual = push - (defender.Position.X - before);
-        if (attacker == null || MathF.Abs(residual) < 0.01f) return;
+        Fix residual = push - (defender.Position.X - before);
+        if (attacker == null || Fix.Abs(residual) < PushEpsilon) return;
 
-        float scale = attacker.CornerPushbackScale;
-        if (scale <= 0f) return;
+        Fix scale = attacker.CornerPushbackScale;
+        if (scale <= Fix.Zero) return;
 
         var ap = attacker.Position;
         ap.X -= residual * scale;   // residual points into the wall => attacker moves the other way

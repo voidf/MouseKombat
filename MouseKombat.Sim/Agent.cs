@@ -24,8 +24,8 @@ public sealed class StateMachineAgent : IAgent
     private int _attackCd;   // frames until the next poke is allowed
     private readonly int _seed;
 
-    private const float PokeRange = 110f;   // within this gap, throw normals
-    private const float BlockRange = 150f;  // block incoming attacks inside this gap
+    private static readonly Fix PokeRange = 110f;   // within this gap, throw normals
+    private static readonly Fix BlockRange = 150f;  // block incoming attacks inside this gap
     private const int PokeCooldown = 18;    // frames between pokes
 
     public StateMachineAgent(int seed = 0) { _seed = seed; }
@@ -47,9 +47,9 @@ public sealed class StateMachineAgent : IAgent
             or PlayerState.Grabbed)
             return InputFrame.Neutral;
 
-        float gap = opp.Position.X - self.Position.X; // >0 => opponent on the right
-        float dist = MathF.Abs(gap);
-        bool oppRight = gap >= 0f;
+        Fix gap = opp.Position.X - self.Position.X; // >0 => opponent on the right
+        Fix dist = Fix.Abs(gap);
+        bool oppRight = gap >= Fix.Zero;
 
         // block: opponent is in an attack's startup/active and we're close -> hold back (away)
         int oppPhase = opp.AttackPhase();
@@ -100,7 +100,7 @@ public sealed class ZonerAgent : IAgent
 {
     private int _t, _throwCd, _seq = -1; // _seq: -1 idle, else 0..3 = fireball motion frame
     private readonly int _seed;
-    private const float KeepDist = 260f;
+    private static readonly Fix KeepDist = 260f;
     private const int ThrowCd = 40;
 
     public ZonerAgent(int seed = 0) { _seed = seed; }
@@ -116,9 +116,9 @@ public sealed class ZonerAgent : IAgent
         if (self.State is not (PlayerState.Idle or PlayerState.Walk or PlayerState.Crouch or PlayerState.CrouchExit))
         { _seq = -1; return InputFrame.Neutral; }
 
-        float gap = opp.Position.X - self.Position.X;
-        float dist = MathF.Abs(gap);
-        bool oppRight = gap >= 0f;
+        Fix gap = opp.Position.X - self.Position.X;
+        Fix dist = Fix.Abs(gap);
+        bool oppRight = gap >= Fix.Zero;
         bool tl = !oppRight, tr = oppRight;   // toward
         bool al = oppRight, ar = !oppRight;   // away
 
@@ -147,7 +147,7 @@ public sealed class RusherAgent : IAgent
 {
     private int _t, _cd;
     private readonly int _seed;
-    private const float Range = 95f;
+    private static readonly Fix Range = 95f;
     private const int Cd = 9;
 
     public RusherAgent(int seed = 0) { _seed = seed; }
@@ -166,9 +166,9 @@ public sealed class RusherAgent : IAgent
             or PlayerState.Grabbed)
             return InputFrame.Neutral;
 
-        float gap = opp.Position.X - self.Position.X;
-        float dist = MathF.Abs(gap);
-        bool oppRight = gap >= 0f;
+        Fix gap = opp.Position.X - self.Position.X;
+        Fix dist = Fix.Abs(gap);
+        bool oppRight = gap >= Fix.Zero;
         bool tl = !oppRight, tr = oppRight; // toward
 
         if (dist > Range)

@@ -11,7 +11,6 @@ from mk_env import _ensure_runtime  # sets up pythonnet + loads the sim
 
 _ensure_runtime()
 from MouseKombat.Sim import GameSim, PlayerConfig, InputFrame, CharacterId, Observation, StateMachineAgent  # noqa: E402
-from System.Numerics import Vector2  # noqa: E402
 
 MODEL = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "ai_rl_model", "ppo_hamster_v0.onnx"))
 sess = ort.InferenceSession(MODEL)
@@ -19,8 +18,8 @@ iname = sess.get_inputs()[0].name
 
 
 def make():
-    c1 = PlayerConfig(); c1.Character = CharacterId.Hamster; c1.StartPos = Vector2(300.0, 560.0); c1.StartFacingRight = True
-    c2 = PlayerConfig(); c2.Character = CharacterId.Kangaroo; c2.StartPos = Vector2(360.0, 560.0); c2.StartFacingRight = False
+    c1 = PlayerConfig(); c1.Character = CharacterId.Hamster; c1.SetStart(300.0, 560.0, True)
+    c2 = PlayerConfig(); c2.Character = CharacterId.Kangaroo; c2.SetStart(360.0, 560.0, False)
     return GameSim(c1, c2, 40.0, 760.0, 800.0)
 
 

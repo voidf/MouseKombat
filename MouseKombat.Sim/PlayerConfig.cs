@@ -10,15 +10,15 @@ public sealed class PlayerConfig
     public bool StartFacingRight = true;
 
     public int MaxHp = 100;
-    public float WalkSpeedPxPerSec = 220f;
-    public float DefDamageMultiplier = 0.1f;
+    public Fix WalkSpeedPxPerSec = 220f;
+    public Fix DefDamageMultiplier = 0.1f;
 
     // Corner pushback: when a hit's knockback shoves the defender into a stage wall, the part the
     // wall refuses to absorb is handed BACK to this attacker (it gets pushed away instead). Without
     // it, a fast-startup normal can loop a cornered opponent forever, since the knockback that would
     // normally reset the spacing goes nowhere. 1 = full transfer, 0 = disabled (old behavior).
     // Read off the ATTACKER's config.
-    public float CornerPushbackScale = 1f;
+    public Fix CornerPushbackScale = 1f;
 
     public int HurtStunFrames = 14;
     public int DefHitStunFrames = 10;
@@ -27,12 +27,12 @@ public sealed class PlayerConfig
     public int DownedFrames = 30;
     public int DownedMinFrames = 12;
     public int WakeupFrames = 24;
-    public float AirResetPop = 350f;
+    public Fix AirResetPop = 350f;
 
-    public float JumpVelocity = 1350f;
-    public float Gravity = 3600f;
-    public float ForwardJumpSpeed = 420f;
-    public float BackJumpSpeed = 380f;
+    public Fix JumpVelocity = 1350f;
+    public Fix Gravity = 3600f;
+    public Fix ForwardJumpSpeed = 420f;
+    public Fix BackJumpSpeed = 380f;
 
     // hurtboxes (local rects, flipped by facing). Defaults mirror Player.cs [Export] defaults
     // so headless/test configs have valid boxes even before a view fills them.
@@ -59,4 +59,13 @@ public sealed class PlayerConfig
     public string KnockdownAnimName = "KNOCKDOWN";
     public string WakeupAnimName = "WAKEUP";
     public string AirHurtAnimName = "AIR_HURT";
+
+    // Float-friendly setter for callers that live outside the fixed-point world: the Godot view
+    // (Player.BuildConfig) and the pythonnet RL bridge, which cannot use Fix's implicit
+    // conversions. Values are converted once, here, and never again.
+    public void SetStart(float x, float y, bool facingRight)
+    {
+        StartPos = Vec2.FromFloat(x, y);
+        StartFacingRight = facingRight;
+    }
 }

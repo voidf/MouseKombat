@@ -32,7 +32,6 @@ _ensure_runtime()
 from MouseKombat.Sim import (  # noqa: E402
     GameSim, PlayerConfig, InputFrame, StateMachineAgent, CharacterId, Observation,
 )
-from System.Numerics import Vector2  # noqa: E402
 
 OBS = 32
 NUM_ACT = 10
@@ -57,12 +56,10 @@ class MouseKombatEnv(gym.Env):
     def _make_sim(self):
         c1 = PlayerConfig()
         c1.Character = getattr(CharacterId, self._agent_char)
-        c1.StartPos = Vector2(300.0, 560.0)
-        c1.StartFacingRight = True
+        c1.SetStart(300.0, 560.0, True)
         c2 = PlayerConfig()
         c2.Character = getattr(CharacterId, self._opp_char)
-        c2.StartPos = Vector2(500.0, 560.0)
-        c2.StartFacingRight = False
+        c2.SetStart(500.0, 560.0, False)
         return GameSim(c1, c2, 40.0, 760.0, 800.0)
 
     def _obs(self):

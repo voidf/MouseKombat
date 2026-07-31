@@ -9,7 +9,10 @@ namespace MouseKombat.Sim;
 // The Godot Player becomes a thin view that feeds InputFrames in and replays AnimEvents out.
 public sealed class SimPlayer
 {
-    public const float Dt = 1f / 60f;   // fixed logic step (was the 60 Hz _PhysicsProcess delta)
+    // fixed logic step (was the 60 Hz _PhysicsProcess delta). Fixed-point: 1/60 is not exactly
+    // representable in Q16.16, so this is 1092/65536 = 0.0166626 — a 0.02% short step, identical
+    // on every machine, which is the property that matters.
+    public static readonly Fix Dt = Fix.One / 60;
 
     private const int BufferWindow = 8;  // frames of input leniency / cancel buffering
     private const int MotionWindow = 16; // frames a motion (236/214) may span
@@ -35,7 +38,7 @@ public sealed class SimPlayer
     public bool InRight { get; private set; }
     public bool InUpHeld { get; private set; }
     public bool InDownHeld { get; private set; }
-    public float DesiredDeltaX { get; set; }
+    public Fix DesiredDeltaX { get; set; }
 
     private int _atkFrame = -1;
     private int _hurtFrame = -1;
@@ -58,9 +61,9 @@ public sealed class SimPlayer
     private SimRect _curHitbox;
     private GuardHeight _curGuard = GuardHeight.High;
 
-    private float _vy = 0f;
-    private float _jumpHVel = 0f;
-    private float _groundY = 0f;
+    private Fix _vy = 0f;
+    private Fix _jumpHVel = 0f;
+    private Fix _groundY = 0f;
 
     private int _hurtStunDuration = 14;     // per-hit stun frames (from move.oH or config fallback)
     private int _defHitStunDuration = 10;   // per-block stun frames (from move.oB or config fallback)
@@ -70,7 +73,7 @@ public sealed class SimPlayer
     // Horizontal knockback this player owes from a hit/block taken THIS frame, in world px.
     // ApplyDamage only records it; GameSim.ResolveKnockback moves us and hands the part the stage
     // wall swallowed back to the attacker (see PlayerConfig.CornerPushbackScale).
-    private float _pendingPushX = 0f;
+    private Fix _pendingPushX = 0f;
 
     // ---- throws ----
     private bool _grabbing = false;          // attacker side: this move's grab connected and is holding
@@ -78,14 +81,14 @@ public sealed class SimPlayer
     private string _grabbedAnim = null;      // victim side: last pose clip pushed by the binder
     private int _throwImmune = 0;            // victim side: frames left where a grab can't connect
 
-    public bool IsAirborne => Position.Y < _groundY - 0.5f;
+    public bool IsAirborne => Position.Y < _groundY - Fix.Half;
 
     public int CurrentAtkDamage => _curDamage;
     public GuardHeight CurrentAtkGuard => _curGuard;
     public MoveDef CurrentMove => _curMove;
     public int AtkFrame => _atkFrame;      // exposed for observation / debug
-    public float Vy => _vy;                 // exposed for the view's juggle clip swap
-    public float GroundY => _groundY;
+    public Fix Vy => _vy;                   // exposed for the view's juggle clip swap
+    public Fix GroundY => _groundY;
     public string CurrentAtkAnim { get; private set; } = ""; // for the view's attack-tail sync
 
     public int StateIndex => (int)State;
@@ -113,14 +116,14 @@ public sealed class SimPlayer
     public bool ThrowImmune => _throwImmune > 0;
 
     public int MaxHp => _cfg.MaxHp;                          // for the view's HP bar
-    public float WalkSpeedPxPerSec => _cfg.WalkSpeedPxPerSec; // for GameSim.ResolveMovement
+    public Fix WalkSpeedPxPerSec => _cfg.WalkSpeedPxPerSec;   // for GameSim.ResolveMovement
     public CharacterId Character => _cfg.Character;           // for observation (asymmetric matchup)
-    public float CornerPushbackScale => _cfg.CornerPushbackScale; // for GameSim.ResolveKnockback
+    public Fix CornerPushbackScale => _cfg.CornerPushbackScale;   // for GameSim.ResolveKnockback
 
     // Hand this frame's owed knockback to the caller (GameSim). Clears it, so it is applied once.
-    public bool ConsumePendingPush(out float pushX)
+    public bool ConsumePendingPush(out Fix pushX)
     {
-        if (_pendingPushX == 0f) { pushX = 0f; return false; }
+        if (_pendingPushX == Fix.Zero) { pushX = Fix.Zero; return false; }
         pushX = _pendingPushX;
         _pendingPushX = 0f;
         return true;

@@ -9,6 +9,9 @@ internal static class Program
 {
     private static int _fail = 0;
 
+    // position asserts: Q16.16 resolution is 1.5e-5 px, so 0.01 is a generous exact-match window
+    private static readonly Fix Eps = 0.01f;
+
     private static void Check(bool cond, string label)
     {
         Console.WriteLine((cond ? "PASS " : "FAIL ") + label);
@@ -17,6 +20,8 @@ internal static class Program
 
     private static int Main()
     {
+        FixTests();
+
         // ---- SimMath.RoundToInt must be banker's rounding (ToEven), matching Godot Mathf.RoundToInt ----
         Check(SimMath.RoundToInt(0.5f) == 0, "RoundToInt(0.5)=0 (ToEven)");
         Check(SimMath.RoundToInt(1.5f) == 2, "RoundToInt(1.5)=2 (ToEven)");
@@ -25,11 +30,14 @@ internal static class Program
         Check(SimMath.RoundToInt(1.4f) == 1, "RoundToInt(1.4)=1");
 
         // ---- blocked-damage parity: Max(1, RoundToInt(dmg * 0.1)) over both move tables ----
-        const float defMul = 0.1f;
+        Fix defMul = 0.1f;
         int Blocked(int dmg) => Math.Max(1, SimMath.RoundToInt(dmg * defMul));
         // spot-check the banker's-sensitive ones
         Check(Blocked(15) == 2, "blocked dmg 15 -> 2 (1.5 ToEven)");
-        Check(Blocked(5) == 1, "blocked dmg 5 -> 1 (0.5 ToEven -> 0 -> clamp 1)");
+        // Q16.16 cannot hold 0.1 exactly (6554/65536 = 0.1000061), so 5 * mult is a hair ABOVE 0.5
+        // and rounds straight to 1 rather than to 0-then-clamped. Same result; no damage value in
+        // either move table is affected by the difference.
+        Check(Blocked(5) == 1, "blocked dmg 5 -> 1");
         Check(Blocked(16) == 2, "blocked dmg 16 -> 2");
         Check(Blocked(3) == 1, "blocked dmg 3 -> 1 (clamp)");
         Check(Blocked(9) == 1, "blocked dmg 9 -> 1");
@@ -71,26 +79,62 @@ internal static class Program
         return _fail == 0 ? 0 : 1;
     }
 
+    // ---- Q16.16 fixed-point contract (see MouseKombat.Sim/Fix.cs) ----
+    // This is the cross-machine determinism contract: the sim uses Fix for every continuous value,
+    // so a change in these semantics silently changes every trained policy, replay, and net match.
+    private static void FixTests()
+    {
+        Check((float)(Fix)6f == 6f, "Fix: 6f round-trips exactly");
+        Check((float)(Fix)(-6f) == -6f, "Fix: -6f round-trips exactly");
+        Check(((Fix)0.5f).Raw == Fix.OneRaw / 2, "Fix: 0.5f = half of OneRaw");
+        Check(((Fix)1).Raw == Fix.OneRaw, "Fix: int 1 = OneRaw");
+        Check((Fix)3 + (Fix)4 == (Fix)7, "Fix: 3 + 4 = 7");
+        Check((Fix)3 * (Fix)4 == (Fix)12, "Fix: 3 * 4 = 12");
+        Check((Fix)12 / (Fix)4 == (Fix)3, "Fix: 12 / 4 = 3");
+        Check(-((Fix)5) == (Fix)(-5), "Fix: unary minus");
+        Check(Fix.Abs((Fix)(-7)) == (Fix)7, "Fix: Abs");
+        Check(Fix.Clamp((Fix)900, (Fix)40, (Fix)760) == (Fix)760, "Fix: Clamp high");
+        Check(Fix.Clamp((Fix)10, (Fix)40, (Fix)760) == (Fix)40, "Fix: Clamp low");
+        Check(Fix.Sign((Fix)(-3)) == -1 && Fix.Sign(Fix.Zero) == 0, "Fix: Sign");
+        Check(((Fix)(-2.5f)).Floor() == -3, "Fix: Floor rounds toward -inf");
+        Check((int)(Fix)(-2.5f) == -2, "Fix: (int) cast truncates toward zero");
+
+        // Dt is 1/60 as close as Q16.16 gets. 60 steps must land within a pixel of one second of
+        // walking at 220 px/s, else the tuning tables would need re-balancing.
+        Fix oneSecond = Fix.Zero;
+        for (int i = 0; i < 60; i++) oneSecond += (Fix)220 * SimPlayer.Dt;
+        Check(Fix.Abs(oneSecond - (Fix)220) < 0.2f,
+            $"Fix: 60 * (220 * Dt) ~= 220px (got {oneSecond:F4})");
+
+        // range validation must fire rather than wrap silently (a wrapped tuning value would show
+        // up as an unexplained desync much later)
+        bool threw = false;
+        try { Fix _ = 40000f; } catch (ArgumentOutOfRangeException) { threw = true; }
+        Check(threw, "Fix: out-of-range float conversion throws");
+        threw = false;
+        try { Fix _ = 40000; } catch (ArgumentOutOfRangeException) { threw = true; }
+        Check(threw, "Fix: out-of-range int conversion throws");
+        threw = false;
+        try { Fix _ = float.NaN; } catch (ArgumentOutOfRangeException) { threw = true; }
+        Check(threw, "Fix: NaN conversion throws");
+    }
+
     private static GameSim MakeSim(float p1x, float p2x)
     {
-        var c1 = new PlayerConfig { Character = CharacterId.Hamster, StartPos = new Vec2(p1x, 560), StartFacingRight = true };
-        var c2 = new PlayerConfig { Character = CharacterId.Kangaroo, StartPos = new Vec2(p2x, 560), StartFacingRight = false };
+        var c1 = new PlayerConfig { Character = CharacterId.Hamster };
+        c1.SetStart(p1x, 560f, facingRight: true);
+        var c2 = new PlayerConfig { Character = CharacterId.Kangaroo };
+        c2.SetStart(p2x, 560f, facingRight: false);
         return new GameSim(c1, c2, 40f, 760f, 800f);
     }
 
     // same stage, but the corner-pushback knobs are overridden (1 = default, 0 = old behavior)
     private static GameSim MakeSimPushback(float p1x, float p2x, float p1Scale, float p2Scale = 1f)
     {
-        var c1 = new PlayerConfig
-        {
-            Character = CharacterId.Hamster, StartPos = new Vec2(p1x, 560), StartFacingRight = true,
-            CornerPushbackScale = p1Scale,
-        };
-        var c2 = new PlayerConfig
-        {
-            Character = CharacterId.Kangaroo, StartPos = new Vec2(p2x, 560), StartFacingRight = false,
-            CornerPushbackScale = p2Scale,
-        };
+        var c1 = new PlayerConfig { Character = CharacterId.Hamster, CornerPushbackScale = p1Scale };
+        c1.SetStart(p1x, 560f, facingRight: true);
+        var c2 = new PlayerConfig { Character = CharacterId.Kangaroo, CornerPushbackScale = p2Scale };
+        c2.SetStart(p2x, 560f, facingRight: false);
         return new GameSim(c1, c2, 40f, 760f, 800f);
     }
 
@@ -165,7 +209,7 @@ internal static class Program
         {
             var sim = MakeSim(300, 360);
             bool leftGround = false;
-            float startY = sim.P1.Position.Y;
+            Fix startY = sim.P1.Position.Y;
             for (int i = 0; i < 90; i++)
             {
                 var f1 = new InputFrame(false, false, i < 2, false, 0); // tap up
@@ -173,7 +217,7 @@ internal static class Program
                 if (sim.P1.IsAirborne) leftGround = true;
             }
             Check(leftGround, "jump: player left the ground");
-            Check(!sim.P1.IsAirborne && System.MathF.Abs(sim.P1.Position.Y - startY) < 0.6f,
+            Check(!sim.P1.IsAirborne && Fix.Abs(sim.P1.Position.Y - startY) < 0.6f,
                 "jump: player landed back on the ground");
         }
 
@@ -271,7 +315,7 @@ internal static class Program
             var sim = MakeSim(300, 360);
             bool sawGrabbed = false, sawGrabFeedback = false, sawJuggle = false;
             int grabbedFrames = 0;
-            float maxLift = 0f;
+            Fix maxLift = 0f;
             int mask = Mask(AttackButton.LP) | Mask(AttackButton.LK);
             RunScenario(sim, 120, mask, onStep: r =>
             {
@@ -280,7 +324,7 @@ internal static class Program
                 {
                     sawGrabbed = true;
                     grabbedFrames++;
-                    maxLift = MathF.Max(maxLift, sim.P1.Position.Y - sim.P2.Position.Y); // >0 = lifted
+                    maxLift = Fix.Max(maxLift, sim.P1.Position.Y - sim.P2.Position.Y); // >0 = lifted
                 }
                 if (sim.P2.State == PlayerState.Juggle) sawJuggle = true;
             });
@@ -349,6 +393,65 @@ internal static class Program
         }
 
         CornerPushbackTests();
+        GoldenChecksumTest();
+    }
+
+    // Hash of everything a rollback savestate / replay has to reproduce. Reads Fix.Raw directly,
+    // so it is an exact integer comparison — no epsilon, no float formatting.
+    private static int MatchChecksum(GameSim sim)
+    {
+        unchecked
+        {
+            int h = 17;
+            for (int idx = 0; idx < 2; idx++)
+            {
+                var p = sim.Player(idx);
+                h = h * 31 + p.Position.X.Raw;
+                h = h * 31 + p.Position.Y.Raw;
+                h = h * 31 + p.Vy.Raw;
+                h = h * 31 + p.Hp;
+                h = h * 31 + (int)p.State;
+                h = h * 31 + p.AtkFrame;
+                h = h * 31 + (p.FacingRight ? 1 : 0);
+            }
+            h = h * 31 + sim.Projectiles.Count;
+            h = h * 31 + sim.GrabAttacker;
+            return h;
+        }
+    }
+
+    // ---- CROSS-MACHINE DETERMINISM CONTRACT ----
+    // A fixed script of inputs run for 600 frames, hashed every frame. The expected value below is
+    // a GOLDEN CONSTANT: it must be identical on Windows/x64, macOS/ARM, and any machine that hosts
+    // the sim for RL — that property is the entire reason the sim is fixed-point instead of float.
+    //
+    // If this test fails, do NOT just paste in the new number. Either
+    //   (a) float math crept back into MouseKombat.Sim (grep for float/double/MathF), or
+    //   (b) tuning data / logic changed on purpose — in which case every stored replay and every
+    //       trained policy is now on the old rules, and the constant should be updated in the SAME
+    //       commit as the balance change so the pairing is auditable.
+    private const int GoldenChecksum = unchecked((int)0x3248B8A2);
+    private static void GoldenChecksumTest()
+    {
+        var sim = MakeSim(300, 460);
+        int rolling = 17;
+        for (int i = 0; i < 600; i++)
+        {
+            // deliberately RNG-free: a fixed, busy pattern that exercises walking, jumping,
+            // crouching, normals, specials and throws
+            int m = 0;
+            if (i % 23 == 0) m |= Mask((AttackButton)(i / 23 % 6));
+            if (i % 97 == 0) m |= Mask(AttackButton.LP) | Mask(AttackButton.LK); // throw attempt
+            var f1 = new InputFrame(i % 31 < 6, i % 17 < 5, i % 53 < 2, i % 41 < 7, m);
+            var f2 = new InputFrame(i % 19 < 4, i % 29 < 8, i % 61 < 2, i % 37 < 5,
+                (i % 13 == 0) ? Mask((AttackButton)(i / 13 % 6)) : 0);
+            sim.Step(f1, f2);
+            if (sim.MatchOver) sim.Reset();
+            unchecked { rolling = rolling * 31 + MatchChecksum(sim); }
+        }
+        Console.WriteLine($"  [golden] 600-frame rolling checksum = 0x{rolling:X8}");
+        Check(rolling == GoldenChecksum,
+            $"golden checksum matches (expected 0x{GoldenChecksum:X8}, got 0x{rolling:X8})");
     }
 
     // ---- corner pushback: knockback a stage wall can't absorb is transferred to the ATTACKER ----
@@ -362,9 +465,9 @@ internal static class Program
             var sim = MakeSim(630, 760);
             RunScenario(sim, 12, Mask(AttackButton.LP));
             Check(sim.P2.Hp == 97, $"corner: 5LP connected at the wall (P2 Hp {sim.P2.Hp})");
-            Check(MathF.Abs(sim.P2.Position.X - 760f) < 0.01f,
+            Check(Fix.Abs(sim.P2.Position.X - 760f) < Eps,
                 $"corner: cornered defender stayed at the wall (got {sim.P2.Position.X:F2})");
-            Check(MathF.Abs(sim.P1.Position.X - 624f) < 0.01f,
+            Check(Fix.Abs(sim.P1.Position.X - 624f) < Eps,
                 $"corner: attacker pushed back the full 6px 630 -> 624 (got {sim.P1.Position.X:F2})");
         }
 
@@ -372,9 +475,9 @@ internal static class Program
         {
             var sim = MakeSim(630, 757);
             RunScenario(sim, 12, Mask(AttackButton.LP));
-            Check(MathF.Abs(sim.P2.Position.X - 760f) < 0.01f,
+            Check(Fix.Abs(sim.P2.Position.X - 760f) < Eps,
                 $"corner: defender used its remaining 3px (got {sim.P2.Position.X:F2})");
-            Check(MathF.Abs(sim.P1.Position.X - 627f) < 0.01f,
+            Check(Fix.Abs(sim.P1.Position.X - 627f) < Eps,
                 $"corner: attacker took only the leftover 3px 630 -> 627 (got {sim.P1.Position.X:F2})");
         }
 
@@ -382,9 +485,9 @@ internal static class Program
         {
             var sim = MakeSim(300, 360);
             RunScenario(sim, 12, Mask(AttackButton.LP));
-            Check(MathF.Abs(sim.P1.Position.X - 300f) < 0.01f,
+            Check(Fix.Abs(sim.P1.Position.X - 300f) < Eps,
                 $"mid-stage: attacker does NOT move (got {sim.P1.Position.X:F2})");
-            Check(MathF.Abs(sim.P2.Position.X - 366f) < 0.01f,
+            Check(Fix.Abs(sim.P2.Position.X - 366f) < Eps,
                 $"mid-stage: defender takes the whole 6px 360 -> 366 (got {sim.P2.Position.X:F2})");
         }
 
@@ -393,7 +496,7 @@ internal static class Program
             var sim = MakeSimPushback(630, 760, p1Scale: 0f);
             RunScenario(sim, 12, Mask(AttackButton.LP));
             Check(sim.P2.Hp == 97, "corner scale 0: hit still lands");
-            Check(MathF.Abs(sim.P1.Position.X - 630f) < 0.01f,
+            Check(Fix.Abs(sim.P1.Position.X - 630f) < Eps,
                 $"corner scale 0: attacker stays put (got {sim.P1.Position.X:F2})");
         }
 
@@ -401,7 +504,7 @@ internal static class Program
         // LEFT wall holding back. 5HK carries a MotionTimeline, so assert the RELATIVE outcome:
         // with the transfer on, the attacker ends up further from the wall than with it off.
         {
-            float EndAttackerX(float scale)
+            Fix EndAttackerX(float scale)
             {
                 var sim = MakeSimPushback(40, 200, p1Scale: 1f, p2Scale: scale);
                 for (int i = 0; i < 40; i++)
@@ -412,12 +515,12 @@ internal static class Program
                 }
                 Check(sim.P1.Hp < 100 && sim.P1.Hp >= 98,
                     $"corner block: P1 chip-blocked 5HK (Hp {sim.P1.Hp})");
-                Check(MathF.Abs(sim.P1.Position.X - 40f) < 0.01f,
+                Check(Fix.Abs(sim.P1.Position.X - 40f) < Eps,
                     $"corner block: cornered blocker stayed at the wall (got {sim.P1.Position.X:F2})");
                 return sim.P2.Position.X;
             }
-            float on = EndAttackerX(1f);
-            float off = EndAttackerX(0f);
+            Fix on = EndAttackerX(1f);
+            Fix off = EndAttackerX(0f);
             Check(on - off > 11.9f,
                 $"corner block: attacker pushed ~12px further off the wall (on {on:F2} vs off {off:F2})");
         }

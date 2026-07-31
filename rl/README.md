@@ -8,6 +8,16 @@ by hosting the `MouseKombat.Sim` .NET library in-process via pythonnet (no Godot
 - Build the sim: `dotnet build MouseKombat.Sim/MouseKombat.Sim.csproj -c Release` (or run `rl/build_sim.bat`).
 
 ## Contract (locked)
+- **The sim is fixed-point (Q16.16), not float.** Every continuous value inside `MouseKombat.Sim`
+  is a `Fix` (see `MouseKombat.Sim/Fix.cs`), so results are bit-identical on Windows/x64, macOS/ARM
+  and every training box — the property rollback netcode and replays depend on. Consequences here:
+  - Build a start position with `cfg.SetStart(x, y, facing_right)`. `cfg.StartPos = Vector2(...)`
+    no longer type-checks (`System.Numerics.Vector2` is gone from the sim).
+  - `Observation.Get/Fill` still hands back plain floats — conversion happens at that boundary only.
+  - Numbers shifted by <1e-4 vs the float sim, so **policies trained before the conversion are on
+    marginally different physics**; warm-start and retrain rather than trusting old win rates.
+  - `MouseKombat.Sim.Tests` carries a golden 600-frame checksum. If it fails, the sim's behavior
+    changed — every stored replay and trained policy is on the old rules.
 - Observation: `Observation.Get(sim, playerIndex)` → 32 floats (reserved tail for 斗气/必杀/countdown).
 - Action: MultiBinary(10) = [L,R,U,D, LP,MP,HP,LK,MK,HK]. Pressed = value/logit > 0. Dirs are held;
   buttons are EDGE-detected into the just-pressed mask (a held button = one press). Packed into `InputFrame`.

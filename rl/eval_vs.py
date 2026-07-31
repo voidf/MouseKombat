@@ -13,7 +13,6 @@ _ensure_runtime()
 from MouseKombat.Sim import (  # noqa: E402
     GameSim, PlayerConfig, InputFrame, StateMachineAgent, ZonerAgent, RusherAgent, CharacterId, Observation,
 )
-from System.Numerics import Vector2  # noqa: E402
 
 _SCRIPTED = {"statemachine": StateMachineAgent, "zoner": ZonerAgent, "rusher": RusherAgent}
 
@@ -54,8 +53,8 @@ def make():
     # real matchup by default: P1 Hamster (left) vs P2 Kangaroo (right). Override via MK_P1CHAR/MK_P2CHAR.
     p1c = getattr(CharacterId, os.environ.get("MK_P1CHAR", "Hamster"))
     p2c = getattr(CharacterId, os.environ.get("MK_P2CHAR", "Kangaroo"))
-    c1 = PlayerConfig(); c1.Character = p1c; c1.StartPos = Vector2(200.0, 560.0); c1.StartFacingRight = True
-    c2 = PlayerConfig(); c2.Character = p2c; c2.StartPos = Vector2(600.0, 560.0); c2.StartFacingRight = False
+    c1 = PlayerConfig(); c1.Character = p1c; c1.SetStart(200.0, 560.0, True)
+    c2 = PlayerConfig(); c2.Character = p2c; c2.SetStart(600.0, 560.0, False)
     return GameSim(c1, c2, 40.0, 760.0, 800.0)
 
 

@@ -5,20 +5,20 @@ namespace MouseKombat.Sim;
 
 // ---- combat move data + recognition (ported from the Godot Moves.cs, Godot-free) ----
 // Type swaps vs the original: Godot.Vector2 -> Vec2 (System.Numerics), Rect2 -> SimRect,
-// Mathf -> Math/MathF, GD.Print removed. The MoveSets.BuildCs/BuildDs authoring tables
+// Mathf -> Fix helpers, GD.Print removed. The MoveSets.BuildCs/BuildDs authoring tables
 // below are kept in the SAME shape maintainers edit today.
 
 // Spawned projectile config — reused for ground/air fireballs by varying the values.
 public struct ProjectileSpec
 {
-    public float Speed;        // uniform horizontal px/s
+    public Fix Speed;          // uniform horizontal px/s
     public Vec2 Offset;        // spawn offset from owner (x measured forward, flipped by facing)
     public int Damage;
     public GuardHeight Guard;  // hit height (High/Mid/Low) — reused for high/low fireballs
-    public float MaxDistance;  // travel before self-destruct
+    public Fix MaxDistance;    // travel before self-destruct
     public SimRect Hitbox;     // local hit rect, flipped by travel dir (was a Projectile.tscn export)
     public bool CanAirJuggle;  // default false → projectiles air-reset instead of juggling
-    public float Knockback;    // horizontal knockback on hit (px)
+    public Fix Knockback;      // horizontal knockback on hit (px)
     public int oH;             // stun frames on hit (0 → use config default)
     public int oB;             // stun frames on block (0 → use config default)
 }
@@ -104,8 +104,8 @@ public sealed class MoveDef
     // launch / juggle: ground hit by a launcher -> juggle state. Air hits juggle too
     // unless the move is a light normal (-> air reset). LaunchUp/Back set the trajectory.
     public bool Launches = false;
-    public float LaunchUp = 1250f;   // initial upward speed (px/s) when this move launches/juggles
-    public float LaunchBack = 120f;  // horizontal knockback (px/s) away from attacker
+    public Fix LaunchUp = 1250f;     // initial upward speed (px/s) when this move launches/juggles
+    public Fix LaunchBack = 120f;    // horizontal knockback (px/s) away from attacker
 
     public bool IsLight => Button == AttackButton.LP || Button == AttackButton.LK;
 
@@ -117,8 +117,8 @@ public sealed class MoveDef
 
     // horizontal knockback applied to defender on ground hit / block (px).
     // airborne targets use velocity-driven knockback (LaunchBack) instead.
-    public float Knockback = 0f;
-    public float KnockbackOnBlock = 0f;
+    public Fix Knockback = 0f;
+    public Fix KnockbackOnBlock = 0f;
 
     // when hitting an airborne opponent: true = can trigger juggle state,
     // false = always air-reset. Light normals (LP/LK) always air-reset regardless.
