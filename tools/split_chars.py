@@ -52,7 +52,11 @@ DROP_ROOT_PROPS = ("ActionLeft", "ActionRight", "ActionUp", "ActionDown", "Input
 
 # Slot markers left behind in MFEntry for GameManager to instantiate into. Positions match the
 # GameManager P1StartPos / P2StartPos exports so the editor view still looks right.
-SLOTS = [("P1Slot", "Vector2(120, 560)"), ("P2Slot", "Vector2(650, 560)")]
+#
+# ORDER MATTERS: child order is draw order, and GameManager moves each fighter to its marker's
+# index. P2 is listed first so P1 draws ON TOP of P2 when they overlap, which is how the original
+# scene had it (Player3, Player2, Player1 — Player1 last, so topmost).
+SLOTS = [("P2Slot", "Vector2(650, 560)"), ("P1Slot", "Vector2(120, 560)")]
 
 REF_RE = re.compile(r'(ExtResource|SubResource)\("([^"]+)"\)')
 
@@ -184,33 +188,40 @@ def rewire_director(header, body):
 
 def build_entry(sections, removed_names, ext_order, sub_order, ext_by_id, sub_by_id):
     """MFEntry with the character branches replaced by empty slot markers, resources pruned."""
-    kept_nodes = []
+    slot_blocks = [
+        f'[node name="{slot}" type="Node2D" parent="."]\nposition = {pos}\n'
+        for slot, pos in SLOTS
+    ]
+
+    # Walk in document order and drop the branches, splicing the slot markers in AT THE POSITION OF
+    # THE FIRST REMOVED BRANCH. Child order is DRAW order in Godot, and GameManager moves each
+    # fighter to its marker's index, so putting the markers anywhere else silently relayers the
+    # scene: parking them right after the root pushed the background TextureRect down to index 2,
+    # the fighters were moved to index 0/1, and they rendered BEHIND the opaque background.
+    items = []          # (header, body) in output order
+    slots_done = False
     for n in (s for s in sections if s.kind == "node"):
         name = n.attrs.get("name", "")
         parent = n.attrs.get("parent")
-        if name in removed_names and parent == ".":
+        root_level_removed = name in removed_names and parent == "."
+        if root_level_removed or (parent or "").split("/")[0] in removed_names:
+            if root_level_removed and not slots_done:
+                for blk in slot_blocks:
+                    items.append((blk.rstrip("\n"), ""))
+                slots_done = True
             continue
-        if (parent or "").split("/")[0] in removed_names:
-            continue
-        kept_nodes.append(n)
 
-    slot_blocks = []
-    for slot, pos in SLOTS:
-        slot_blocks.append(
-            f'[node name="{slot}" type="Node2D" parent="."]\n'
-            f"position = {pos}\n"
-        )
-
-    # rendered node text, with the director re-pointed at the slots
-    rendered = []
-    for n in kept_nodes:
         header, body = n.header, "".join(n.body)
-        if n.attrs.get("parent") is None:  # the scene root = the match director
+        if parent is None:  # the scene root = the match director
             header, body = rewire_director(header, body)
-        rendered.append((header, body))
+        items.append((header, body))
+
+    if not slots_done:   # nothing was removed; keep the markers right after the root
+        for blk in reversed(slot_blocks):
+            items.insert(1, (blk.rstrip("\n"), ""))
 
     seed = set()
-    for header, body in rendered:
+    for header, body in items:
         seed |= set(m.group(2) for m in REF_RE.finditer(header + "\n" + body))
     needed = close_refs(seed, {**ext_by_id, **sub_by_id})
 
@@ -224,16 +235,11 @@ def build_entry(sections, removed_names, ext_order, sub_order, ext_by_id, sub_by
         if rid in needed:
             out.append(sub_by_id[rid].text.rstrip("\n"))
             out.append("")
-    for i, (header, body) in enumerate(rendered):
+    for header, body in items:
         out.append(header)
-        out.append(body.rstrip("\n"))
+        if body.strip():
+            out.append(body.rstrip("\n"))
         out.append("")
-        if i == 0:
-            # The scene ROOT must be the first node section in a .tscn — everything else declares
-            # parent="." relative to it — so the slots go immediately after it, not before.
-            for blk in slot_blocks:
-                out.append(blk.rstrip("\n"))
-                out.append("")
     return "\n".join(out).rstrip("\n") + "\n"
 
 
@@ -306,6 +312,29 @@ def main():
     outputs["MFEntry.tscn"] = entry_text
     print(f"{'MFEntry.tscn':<24} {entry_text.count('[node')} node(s), "
           f"{entry_text.count('[ext_resource')} ext, {entry_text.count('[sub_resource')} sub")
+
+    # Child order is DRAW order, and GameManager moves each fighter to its marker's index, so the
+    # markers must occupy the SAME BLOCK the branches did. An earlier version parked them right
+    # after the root instead, which pushed the background TextureRect from index 0 to 2; the
+    # fighters were then moved to index 0/1 and rendered behind an opaque background.
+    #
+    # Three branches collapse into two markers, so this is not an exact index match: the block has
+    # to START where the branches started and be contiguous. That is what guarantees nothing which
+    # used to sit behind the fighters is now in front of them, or vice versa.
+    def root_children(text):
+        return re.findall(r'^\[node name="([^"]+)"[^\]]*parent="\."', text, flags=re.M)
+
+    before = root_children("".join(s.header + "\n" for s in sections if s.kind == "node"))
+    after = root_children(entry_text)
+    branch_at = sorted(before.index(b) for b, _, _, _ in BRANCHES if b in before)
+    marker_at = sorted(after.index(m) for m, _ in SLOTS if m in after)
+    expected = list(range(branch_at[0], branch_at[0] + len(SLOTS)))
+    if marker_at != expected:
+        print(f"\nORDER CHECK FAILED: branches held children {branch_at}, markers landed at "
+              f"{marker_at} (expected {expected}); draw order would change.")
+        return 1
+    print(f"order OK: markers hold children {marker_at} of the block the branches had {branch_at}; "
+          f"{SLOTS[-1][0]} is last so P1 draws on top")
 
     errs = []
     for name, text in outputs.items():

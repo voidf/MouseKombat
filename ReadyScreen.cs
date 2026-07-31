@@ -386,8 +386,10 @@ public partial class ReadyScreen : Control
     private void BuildMenuUi()
     {
         _menuRoot = new Control { Visible = false, MouseFilter = MouseFilterEnum.Ignore };
-        _menuRoot.SetAnchorsPreset(LayoutPreset.FullRect);
         AddChild(_menuRoot);
+        // AddChild first: a preset applied before the node is in the tree is computed against a
+        // nonexistent parent rect (see CharSelect.BuildUi).
+        _menuRoot.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
 
         var bg = new ColorRect { Color = new Color(0, 0, 0, 0.82f), Position = new Vector2(250, 165), Size = new Vector2(300, 270) };
         _menuRoot.AddChild(bg);

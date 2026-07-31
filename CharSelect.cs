@@ -52,6 +52,8 @@ public partial class CharSelect : Control
     private int _hDir, _vDir;       // direction held last frame, for edge detection
     private int _hHold, _vHold;     // frames the current direction has been held
 
+    // OPAQUE, not a dim: this panel must fully hide the lobby behind it, otherwise P1's already
+    // chosen portrait shows through while P2 is picking.
     private static readonly Color Backdrop = new Color(0.05f, 0.055f, 0.07f);
     private static readonly Color CellFree = new Color(0.13f, 0.14f, 0.18f);
     private static readonly Color CellPicked = new Color(0.22f, 0.2f, 0.12f);
@@ -59,6 +61,10 @@ public partial class CharSelect : Control
 
     public override void _Ready()
     {
+        // Full-rect BEFORE building, and via SetAnchorsAndOffsetsPreset rather than
+        // SetAnchorsPreset: this node is created in code, so it starts with a zero rect, and only
+        // the "AndOffsets" variant writes the offsets that actually give it the parent's size.
+        SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         BuildUi();
         Visible = false;
     }
@@ -142,21 +148,27 @@ public partial class CharSelect : Control
 
     private void BuildUi()
     {
-        SetAnchorsPreset(LayoutPreset.FullRect);
         MouseFilter = MouseFilterEnum.Ignore;
 
-        // OPAQUE, not a dim: this panel must fully hide the lobby behind it, otherwise P1's already
-        // chosen portrait shows through while P2 is picking.
+        // Layout rule used throughout: create -> AddChild -> SetAnchorsAndOffsetsPreset. Applying a
+        // preset BEFORE the node is in the tree computes it against a nonexistent parent rect, which
+        // is what left the whole panel collapsed in the top-left corner.
         var backdrop = new ColorRect { Color = Backdrop, MouseFilter = MouseFilterEnum.Ignore };
-        backdrop.SetAnchorsPreset(LayoutPreset.FullRect);
         AddChild(backdrop);
+        backdrop.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+
+        // MarginContainer supplies the screen padding, so no hand-written offsets are involved.
+        var frame = new MarginContainer { MouseFilter = MouseFilterEnum.Ignore };
+        AddChild(frame);
+        frame.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+        frame.AddThemeConstantOverride("margin_left", 24);
+        frame.AddThemeConstantOverride("margin_right", 24);
+        frame.AddThemeConstantOverride("margin_top", 40);
+        frame.AddThemeConstantOverride("margin_bottom", 28);
 
         var column = new VBoxContainer { MouseFilter = MouseFilterEnum.Ignore };
-        column.SetAnchorsPreset(LayoutPreset.FullRect);
-        column.OffsetLeft = 24; column.OffsetRight = -24;
-        column.OffsetTop = 48; column.OffsetBottom = -32;
         column.AddThemeConstantOverride("separation", 20);
-        AddChild(column);
+        frame.AddChild(column);
 
         _title = new Label { HorizontalAlignment = HorizontalAlignment.Center };
         _title.AddThemeFontSizeOverride("font_size", 30);
@@ -184,10 +196,10 @@ public partial class CharSelect : Control
             // Margin+VBox inside the Panel: the containers own the layout, so the portrait cannot
             // escape its cell no matter what the source texture's size is.
             var pad = new MarginContainer { MouseFilter = MouseFilterEnum.Ignore };
-            pad.SetAnchorsPreset(LayoutPreset.FullRect);
+            cell.AddChild(pad);
+            pad.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
             foreach (string side in new[] { "margin_left", "margin_right", "margin_top", "margin_bottom" })
                 pad.AddThemeConstantOverride(side, 8);
-            cell.AddChild(pad);
 
             var box = new VBoxContainer { MouseFilter = MouseFilterEnum.Ignore };
             box.AddThemeConstantOverride("separation", 4);
