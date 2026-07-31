@@ -2,10 +2,10 @@ using Godot;
 using MouseKombat.Sim;
 
 // Thin Godot VIEW over a SimPlayer. It: (1) exposes [Export] tuning that becomes the sim's
-// PlayerConfig, (2) turns its IInputSource into an InputFrame the sim consumes, (3) replays
-// the sim's per-frame AnimCommands onto the AnimatedSprite2D, and (4) does presentation-only
-// animation sync (looping locomotion, attack tail, juggle clip swap) + debug draw, reading
-// sim state and never writing logic. All combat logic lives in MouseKombat.Sim.SimPlayer.
+// PlayerConfig, (2) turns its IInputSource into an InputFrame the sim consumes, (3) drives the
+// AnimatedSprite2D one sprite frame per LOGIC frame (see TickAnimation — Godot never plays the
+// clip itself, so what's on screen is a pure function of sim state), and (4) debug-draws the
+// boxes. It reads sim state and never writes logic; all combat logic lives in SimPlayer.
 public partial class Player : Node2D
 {
     [Export] public AnimatedSprite2D anim;
@@ -88,8 +88,6 @@ public partial class Player : Node2D
 
     [Export] public bool DebugDrawBoxes = true;
 
-    private bool _walkPlayingBack = false; // tracks WALK reverse playback so we don't retrigger each frame
-
     // Build the sim config from the exported tuning. GameManager overrides StartPos/facing
     // with its own P1/P2 start values to match the original reset convention.
     public PlayerConfig BuildConfig() => new PlayerConfig
@@ -138,7 +136,10 @@ public partial class Player : Node2D
     public void Bind(SimPlayer sim)
     {
         Sim = sim;
-        SyncFromSim(); // apply initial position + drain the ctor's IDLE command
+        // Godot must never advance the clip itself — TickAnimation writes the frame explicitly.
+        anim?.Stop();
+        SyncFromSim();   // initial position + the ctor's IDLE command
+        TickAnimation(); // show frame 0 immediately rather than a blank first tick
     }
 
     // Poll this view's device into one InputFrame for the sim. No poll while Dead (matches the
@@ -175,68 +176,176 @@ public partial class Player : Node2D
         return m;
     }
 
-    // Push sim state into the view: node position + replay the frame's animation commands.
+    // Push sim state into the view: node position + this frame's animation commands.
     // Called by GameManager right after each sim.Step (and after a round reset).
     public void SyncFromSim()
     {
         if (Sim == null) return;
         Position = Sim.Position.ToGodot();
 
+        // The sim's AnimCommands decide WHICH clip; TickAnimation decides which FRAME of it.
+        // Two of these choices are not recoverable from public sim state — the standing-vs-crouching
+        // block clip, and a throw victim's pose (which comes from the ATTACKER's bind timeline) —
+        // so the event stream stays the authority on clip selection.
         var events = Sim.AnimEvents;
         for (int i = 0; i < events.Count; i++)
         {
             var c = events[i];
             switch (c.Kind)
             {
-                case AnimKind.Play: PlayAnimSafe(c.Name); break;
-                case AnimKind.PlayRestart: PlayAnimSafe(c.Name, true); break;
-                case AnimKind.PlayBackwards: PlayAnimBackwardsSafe(c.Name); break;
-                case AnimKind.Stop: anim?.Stop(); break;
+                case AnimKind.Play: SetClip(c.Name, restart: false, reverse: false); break;
+                case AnimKind.PlayRestart: SetClip(c.Name, restart: true, reverse: false); break;
+                case AnimKind.PlayBackwards: SetClip(c.Name, restart: true, reverse: true); break;
+                case AnimKind.Stop: _frozen = true; break;
             }
         }
         events.Clear();
     }
 
+    // ================= animation: one sprite frame per LOGIC frame =================
+    // AnimatedSprite2D normally advances itself on the RENDER clock, while the sim advances on the
+    // physics tick. Two independent clocks means the sprite shown for a given AtkFrame varies with
+    // framerate and stutter, and after a rollback re-simulation it would be wrong outright. So we
+    // never let Godot play the clip: each logic tick we compute the exact sprite frame and write it.
+    //
+    // The per-clip timeline is built ONCE from the SpriteFrames data (per-animation fps + per-frame
+    // duration), converted into "how many logic frames does sprite frame i occupy". That honors the
+    // art as authored: attack clips at speed 60 advance 1:1 with frame data, while IDLE at speed 10
+    // holds each frame for 6 logic frames, and Kangaroo's 32 fps AtkU stretches over ~9.4.
+    //
+    // Rollback (期3) then only needs these three fields saved alongside the sim state: the clip
+    // name, the logic frame within it, and the reverse flag.
+    private sealed class ClipTimeline
+    {
+        public int[] FrameAt;   // index = logic frames since the clip started -> sprite frame
+        public bool Loop;
+        public int LogicLength => FrameAt.Length;
+    }
+
+    private readonly System.Collections.Generic.Dictionary<string, ClipTimeline> _timelines = new();
+    private string _clip = "";
+    private int _clipFrame;      // logic frames elapsed in _clip
+    private bool _clipReverse;
+    private bool _frozen;        // AnimKind.Stop (death): hold the current sprite frame
+
+    private ClipTimeline Timeline(string clip)
+    {
+        if (string.IsNullOrEmpty(clip)) return null;
+        if (_timelines.TryGetValue(clip, out var cached)) return cached;
+
+        ClipTimeline built = null;
+        var sf = anim?.SpriteFrames;
+        if (sf != null && sf.HasAnimation(clip))
+        {
+            int n = sf.GetFrameCount(clip);
+            if (n > 0)
+            {
+                double fps = sf.GetAnimationSpeed(clip);
+                if (fps <= 0.0) fps = LogicFps;                 // 0 fps = a single held pose
+                var map = new System.Collections.Generic.List<int>(n * 4);
+                for (int i = 0; i < n; i++)
+                {
+                    // GetFrameDuration is a multiplier on 1/fps, so seconds = duration / fps.
+                    double logicFrames = LogicFps * sf.GetFrameDuration(clip, i) / fps;
+                    int hold = Mathf.Max(1, Mathf.RoundToInt((float)logicFrames));
+                    for (int k = 0; k < hold; k++) map.Add(i);
+                }
+                built = new ClipTimeline { FrameAt = map.ToArray(), Loop = sf.GetAnimationLoop(clip) };
+            }
+        }
+        _timelines[clip] = built; // cache misses too: a missing clip must not re-probe every frame
+        return built;
+    }
+
+    private static float LogicFps => Engine.PhysicsTicksPerSecond;
+
+    // Switch the displayed clip. A missing clip is ignored (keeps the current pose), matching the
+    // old PlayAnimSafe behavior — that is what lets a character ship with partial art.
+    private void SetClip(string clip, bool restart, bool reverse)
+    {
+        if (Timeline(clip) == null) return;
+        if (!restart && _clip == clip && _clipReverse == reverse) return;
+        _clip = clip;
+        _clipFrame = 0;
+        _clipReverse = reverse;
+        _frozen = false;
+    }
+
+    // Advance the animation by exactly one logic frame. Called every physics tick by GameManager —
+    // including while the match is paused on a win, so the fighters keep breathing.
+    public void TickAnimation()
+    {
+        if (Sim == null || anim == null) return;
+
+        anim.FlipH = ArtFacesRight ? !Sim.FacingRight : Sim.FacingRight;
+
+        if (!_frozen) ReconcileSteadyStateClip();
+
+        var t = Timeline(_clip);
+        if (t == null) return;
+
+        if (!_frozen)
+        {
+            int i = _clipFrame;
+            if (t.Loop) i %= t.LogicLength;
+            else if (i >= t.LogicLength) i = t.LogicLength - 1;   // one-shot: hold the last frame
+
+            int sprite = _clipReverse ? t.FrameAt[t.LogicLength - 1 - i] : t.FrameAt[i];
+            if (anim.Animation != _clip) anim.Animation = _clip;
+            anim.SetFrameAndProgress(sprite, 0f);
+
+            _clipFrame++;
+            // keep a looping clip's counter bounded: it is part of the view state a rollback has to
+            // save/restore, and an unbounded counter would drift toward int overflow while idling
+            if (t.Loop && _clipFrame >= t.LogicLength) _clipFrame -= t.LogicLength;
+        }
+    }
+
+    // Clips the sim does NOT emit an event for, because they are steady-state rather than a
+    // transition: looping locomotion, the settle after a transition clip, and the juggle rise/fall
+    // swap. Evaluated from logic state on the logic tick, so it stays frame-exact.
+    private void ReconcileSteadyStateClip()
+    {
+        switch (Sim.State)
+        {
+            case PlayerState.Idle:
+                // Attack tail: the logic move is over but its clip may be longer than the move.
+                // Let it run to its authored end, then fall back to IDLE.
+                if (!string.IsNullOrEmpty(Sim.CurrentAtkAnim) && _clip == Sim.CurrentAtkAnim)
+                {
+                    var atk = Timeline(_clip);
+                    if (atk != null && _clipFrame < atk.LogicLength) return;
+                }
+                SetClip(IdleAnimName, restart: false, reverse: false);
+                break;
+
+            case PlayerState.Walk:
+                // backward = moving away from the opponent (same test as the block input)
+                SetClip(WalkAnimName, restart: false,
+                    reverse: ReverseWalkBackward && Sim.IsDefendingInput);
+                break;
+
+            case PlayerState.Crouch:
+                // ENTER_CROUCH plays once, then settle on the held CROUCH pose
+                if (_clip == EnterCrouchAnimName)
+                {
+                    var ec = Timeline(_clip);
+                    if (ec != null && _clipFrame < ec.LogicLength) return;
+                }
+                SetClip(CrouchIdleAnimName, restart: false, reverse: false);
+                break;
+
+            case PlayerState.Juggle:
+                // rising -> LAUNCH; once gravity wins -> FALL
+                SetClip(Sim.Vy < 0f ? LaunchRiseAnimName : FallAnimName,
+                    restart: false, reverse: false);
+                break;
+        }
+    }
+
     public override void _Process(double delta)
     {
         if (Sim == null) return;
-
-        // presentation only — observes logic State, never writes it
-        anim.FlipH = ArtFacesRight ? !Sim.FacingRight : Sim.FacingRight;
-
-        // keep the looping locomotion clip in sync with State (combat/jump/crouch clips
-        // are one-shots fired by the logic tick at their transition, replayed in SyncFromSim)
-        if (Sim.State == PlayerState.Idle)
-        {
-            // attack tail: logic over but the (longer) attack clip may still be playing —
-            // let it finish; switch to IDLE only once it stops.
-            bool atkTailPlaying = anim.IsPlaying() && anim.Animation == Sim.CurrentAtkAnim && !string.IsNullOrEmpty(Sim.CurrentAtkAnim);
-            if (!atkTailPlaying && anim.Animation != IdleAnimName) PlayAnimSafe(IdleAnimName);
-        }
-        else if (Sim.State == PlayerState.Walk)
-        {
-            // backward = moving away from the opponent (same test as block input).
-            bool back = ReverseWalkBackward && Sim.IsDefendingInput;
-            if (anim.Animation != WalkAnimName || _walkPlayingBack != back)
-            {
-                if (back) PlayAnimBackwardsSafe(WalkAnimName);
-                else PlayAnimSafe(WalkAnimName);
-                _walkPlayingBack = back;
-            }
-        }
-        else if (Sim.State == PlayerState.Crouch)
-        {
-            // ENTER_CROUCH transition plays once, then settle on the held CROUCH pose.
-            bool entering = anim.IsPlaying() && anim.Animation == EnterCrouchAnimName;
-            if (!entering && anim.Animation != CrouchIdleAnimName) PlayAnimSafe(CrouchIdleAnimName);
-        }
-        else if (Sim.State == PlayerState.Juggle)
-        {
-            // rising -> LAUNCH clip; once gravity pulls down -> FALL clip
-            string want = Sim.Vy < 0f ? LaunchRiseAnimName : FallAnimName;
-            if (anim.Animation != want) PlayAnimSafe(want);
-        }
-
         if (DebugDrawBoxes) QueueRedraw();
     }
 
@@ -272,34 +381,5 @@ public partial class Player : Node2D
         if (!Sim.FacingRight) box.Position = new Vector2(-box.Position.X - box.Size.X, box.Position.Y);
         DrawRect(box, new Color(c.R, c.G, c.B, 0.18f), filled: true);
         DrawRect(box, new Color(c.R, c.G, c.B, 0.9f), filled: false, width: 2f);
-    }
-
-    private void PlayAnimSafe(string name, bool forceRestart = false)
-    {
-        if (anim?.SpriteFrames == null) return;
-        if (string.IsNullOrEmpty(name)) return;
-        if (!anim.SpriteFrames.HasAnimation(name)) return;
-        // 如果强制重开且当前已经在播放同一动画，先 Stop 以清除 Godot 的播放状态缓存
-        if (forceRestart && anim.Animation == name)
-        {
-            anim.Stop();
-        }
-
-        anim.Play(name);
-
-        // 确保帧数和计时进度彻底归零（针对 Godot 4 最稳妥的双重保险）
-        if (forceRestart)
-        {
-            anim.Frame = 0;
-            anim.FrameProgress = 0f;
-        }
-    }
-
-    private void PlayAnimBackwardsSafe(string name)
-    {
-        if (anim?.SpriteFrames == null) return;
-        if (string.IsNullOrEmpty(name)) return;
-        if (!anim.SpriteFrames.HasAnimation(name)) return;
-        anim.PlayBackwards(name);
     }
 }

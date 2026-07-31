@@ -130,15 +130,23 @@ public partial class GameManager : Node2D
     {
         if (_phase != Phase.Fighting)
         {
+            // The sim is paused, but the ANIMATION clock is the physics tick now (see
+            // Player.TickAnimation), so it still has to be ticked or the fighters freeze
+            // mid-pose during the win sequence.
+            p1.TickAnimation();
+            p2.TickAnimation();
             UpdateHpBars();
             return;
         }
 
         var res = _sim.Step(FrameFor(p1, 0), FrameFor(p2, 1));
 
-        // push logic -> views (position + animation commands)
+        // push logic -> views (position + this frame's animation commands), then advance the
+        // animation by exactly one logic frame
         p1.SyncFromSim();
         p2.SyncFromSim();
+        p1.TickAnimation();
+        p2.TickAnimation();
 
         foreach (int id in res.SpawnedProjectileIds) SpawnProjectileView(id);
         SyncProjectileViews();
@@ -385,6 +393,8 @@ public partial class GameManager : Node2D
         p2.Agent?.Reset();
         p1.SyncFromSim();
         p2.SyncFromSim();
+        p1.TickAnimation();
+        p2.TickAnimation();
 
         UpdateHpBars();
         _phase = Phase.Fighting;
