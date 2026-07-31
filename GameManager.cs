@@ -54,6 +54,13 @@ public partial class GameManager : Node2D
     private Vector2 _l1Home, _l2Home;   // fly-in destinations, captured before the labels are hidden
     private Tween _line1Tween, _line2Tween;
 
+    // The victory presentation has TWO independent timelines: the splash animation and the text
+    // fly-in/dwell/fade. The next round may only start once BOTH are done. Resetting on the
+    // animation alone cut the text off mid-show — the hamster splash is 33 frames at 60 fps (0.55 s)
+    // while the text needs 0.4 + 1.0 + 0.12 = 1.52 s, so the text was wiped ~0.15 s after arriving,
+    // which reads as "the splash is covering the text".
+    private bool _winAnimDone, _winTextDone;
+
     [Export] public Vector2 P1StartPos = new Vector2(120, 560);
     [Export] public Vector2 P2StartPos = new Vector2(650, 560);
 
@@ -469,9 +476,13 @@ public partial class GameManager : Node2D
         PlayWinTextFlyIn(WinTextLine1, _l1Home, fromLeft: true, ref _line1Tween);
         PlayWinTextFlyIn(WinTextLine2, _l2Home, fromLeft: false, ref _line2Tween);
 
-        // No splash to wait on (missing node or missing art) => go straight to the next round rather
-        // than hanging in Phase.Win forever.
-        if (!playing) ResetMatch();
+        // A missing splash node / missing art counts as "already finished", so the text still gets
+        // its full run and the match cannot hang in Phase.Win forever.
+        _winAnimDone = !playing;
+        _winTextDone = false;
+        var textTimer = GetTree().CreateTimer(WinTextFlyInSec + WinTextDwellSec + WinTextFadeOutSec);
+        textTimer.Timeout += () => { _winTextDone = true; TryFinishWin(); };
+        TryFinishWin();
     }
 
     private void PlayWinTextFlyIn(Label l, Vector2 home, bool fromLeft, ref Tween slot)
@@ -499,7 +510,15 @@ public partial class GameManager : Node2D
 
     private void OnWinAnimFinished()
     {
+        _winAnimDone = true;
+        TryFinishWin();
+    }
+
+    // Start the next round only once the splash AND the victory text have both finished.
+    private void TryFinishWin()
+    {
         if (_phase != Phase.Win) return;
+        if (!_winAnimDone || !_winTextDone) return;
         ResetMatch();
     }
 
