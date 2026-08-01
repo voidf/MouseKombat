@@ -32,8 +32,9 @@ by hosting the `MouseKombat.Sim` .NET library in-process via pythonnet (no Godot
 - `eval_vs.py <p1> <p2> [games]` — head-to-head win counts (spec = `statemachine` or a `.zip`), sides alternated.
 - `export_onnx.py <ckpt> <out>` — export a checkpoint to `ai_rl_model/<out>.onnx` (validated vs SB3).
 - `verify_reset.py` — regression check for the cross-round agent-reset bug.
-- Per character: `set MK_CHAR=Kangaroo` (default Hamster) for selfplay/eval. Roster is
-  Hamster / Kangaroo / **Squirrel**.
+- Roster is Hamster / Kangaroo / **Squirrel**. `selfplay.py` draws both sides from the whole roster
+  per episode, so it has no per-character switch (an older `MK_CHAR` note here was wrong — the
+  script never read that variable). `eval_vs.py` does take `MK_P1CHAR` / `MK_P2CHAR`.
 
 ## Roster & mirror matches (changed)
 - Three characters now. `selfplay.py` draws the learner's character AND the opponent's
@@ -47,7 +48,19 @@ by hosting the `MouseKombat.Sim` .NET library in-process via pythonnet (no Godot
   slots and never played a mirror. **Warm-start from the newest two-character checkpoint and
   retrain** rather than trusting old win rates:
   `selfplay.bat 2000000 checkpoints\ppo_selfplay_v7.zip ppo_selfplay_v8`
-  (keep v7 in `checkpoints/pool/` as the anchor — see the recipe note above).
+  `selfplay.py` copies the init checkpoint into the pool itself as `snap_000000000_anchor.zip`, so
+  no manual anchoring is needed.
+
+## Pool hygiene (read before a fresh campaign)
+Opponents are sampled from the **20 highest-numbered** files in `checkpoints/pool/`. Snapshots are
+named `snap_<timesteps>.zip`, so a pool inherited from a LONGER previous run silently excludes the
+new run's own snapshots from the sampling window — self-play degenerates into training against a
+fixed set of stale models, and the names can collide besides. Move the old pool aside first:
+
+    move rl\checkpoints\pool rl\checkpoints\pool_archive_<why>
+
+The pool that shipped with the pre-fixed-point work tops out at ~995M steps for exactly this reason;
+it is also from the float sim and has never seen Squirrel or a mirror match.
 
 ## Results so far
 - `train.py` 150k → `ppo_hamster_v0`: beats state-machine 40/0, but weak (crouch/poke).
