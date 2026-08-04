@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using MouseKombat.Sim;
+using MouseKombat.Net;
 
 // Lightweight parity checks for the Godot-free sim math + move data.
 // Run: dotnet run --project ..\MouseKombat.Sim.Tests
@@ -76,6 +77,8 @@ internal static class Program
         MoveTableTests();
         GameSimTests();
         ReplayTests();
+        NetCodecTests();
+        RoomStateTests();
 
         Console.WriteLine(_fail == 0 ? "\nALL PASS" : $"\n{_fail} FAILURE(S)");
         return _fail == 0 ? 0 : 1;
@@ -464,6 +467,246 @@ internal static class Program
         AnimCommandTests();
         SaveStateTests();
         GoldenChecksumTest();
+    }
+
+
+    // ---- WIRE FRAMING ----
+    // TCP is a byte stream: a read can return half a message, three messages, or one message split
+    // across four reads. These assertions are about that reassembly, because it is the part that
+    // works fine on loopback and then breaks against a real network.
+    private static void NetCodecTests()
+    {
+        var hello = new Hello { Protocol = NetVersion.Protocol, GameVersion = "0.0.7", Name = "袋鼠玩家" };
+        byte[] frame = NetCodec.Encode(MsgType.Hello, hello);
+
+        // whole frame in one feed
+        {
+            var r = new FrameReader();
+            r.Feed(frame);
+            Check(r.TryRead(out var f) && f.Type == MsgType.Hello, "net: reads a whole frame");
+            var back = f.As<Hello>();
+            Check(back.Protocol == hello.Protocol && back.GameVersion == "0.0.7" && back.Name == "袋鼠玩家",
+                "net: message round-trips through MessagePack");
+            Check(!r.TryRead(out _), "net: no second frame where there is none");
+        }
+
+        // fed ONE BYTE AT A TIME: the frame must appear only on the last byte, not before
+        {
+            var r = new FrameReader();
+            int emitted = 0, emittedAt = -1;
+            for (int i = 0; i < frame.Length; i++)
+            {
+                r.Feed(new ReadOnlySpan<byte>(frame, i, 1));
+                while (r.TryRead(out _)) { emitted++; emittedAt = i; }
+            }
+            Check(emitted == 1 && emittedAt == frame.Length - 1,
+                $"net: byte-at-a-time delivery yields one frame, on the final byte (got {emitted} at {emittedAt})");
+        }
+
+        // three frames in one feed, then a partial fourth
+        {
+            var r = new FrameReader();
+            var buf = new List<byte>();
+            buf.AddRange(frame); buf.AddRange(frame); buf.AddRange(frame);
+            buf.AddRange(new ArraySegment<byte>(frame, 0, frame.Length / 2));
+            r.Feed(buf.ToArray());
+            int n = 0;
+            while (r.TryRead(out _)) n++;
+            Check(n == 3, $"net: three whole frames plus a partial yields exactly three (got {n})");
+            r.Feed(new ReadOnlySpan<byte>(frame, frame.Length / 2, frame.Length - frame.Length / 2));
+            Check(r.TryRead(out _), "net: the partial frame completes on the next feed");
+        }
+
+        // a bogus length must kill the stream instead of being believed: a length-prefixed stream
+        // cannot be resynchronised, and reserving an attacker-chosen size is an instant OOM
+        {
+            var r = new FrameReader();
+            r.Feed(new byte[] { 0xFF, 0xFF, 0xFF, 0x7F, 1 });
+            Check(!r.TryRead(out _) && r.Failed, "net: an oversized length fails the stream");
+            Check(r.Error != null && r.Error.Contains("out of range"), "net: the failure says why");
+        }
+        {
+            var r = new FrameReader();
+            r.Feed(new byte[] { 0, 0, 0, 0, 0 });
+            Check(!r.TryRead(out _) && r.Failed, "net: a zero length fails the stream");
+        }
+
+        // every message type must survive a round trip, so a forgotten [MessagePackObject] or a
+        // reordered [Key] is caught here rather than against a live peer
+        {
+            var snap = new RoomSnapshot
+            {
+                Players = new[] { new PlayerInfo { PlayerId = 1, Name = "host", IsHost = true, Seat = 0 } },
+                Seats = new[] { new SeatInfo { OccupantPlayerId = 1, Character = 2 },
+                                new SeatInfo { IsAi = true, Character = 1, AiModel = "x.onnx" } },
+                RoomId = "123456", MaxPlayers = 4, MatchRunning = true,
+            };
+            var st = RoundTrip<RoomSnapshot>(MsgType.RoomState, snap);
+            Check(st.Players.Length == 1 && st.Players[0].Name == "host" && st.Players[0].Seat == 0,
+                "net: RoomSnapshot players round-trip");
+            Check(st.Seats[1].IsAi && st.Seats[1].AiModel == "x.onnx" && st.Seats[1].Character == 1,
+                "net: RoomSnapshot AI seat round-trips");
+            Check(st.RoomId == "123456" && st.MaxPlayers == 4 && st.MatchRunning,
+                "net: RoomSnapshot room fields round-trip");
+
+            var sm = RoundTrip<StartMatch>(MsgType.StartMatch,
+                new StartMatch { Room = snap, P2StartX = 651f, Seat0Endpoint = "127.0.0.1:5835" });
+            Check(sm.P2StartX == 651f && sm.Seat0Endpoint == "127.0.0.1:5835" && sm.Room.Seats.Length == 2,
+                "net: StartMatch round-trips");
+
+            var me = RoundTrip<MatchEnded>(MsgType.MatchEnded,
+                new MatchEnded { WinnerSeat = 1, DroppedPlayerIds = new[] { 3, 5 } });
+            Check(me.WinnerSeat == 1 && me.DroppedPlayerIds.Length == 2, "net: MatchEnded round-trips");
+
+            var rj = RoundTrip<Rejected>(MsgType.Rejected,
+                new Rejected { Reason = "版本不一致", HostProtocol = 1, HostGameVersion = "0.0.7" });
+            Check(rj.Reason == "版本不一致" && rj.HostGameVersion == "0.0.7", "net: Rejected round-trips");
+        }
+    }
+
+    // Encode then decode through the real framing path, so the header offset is exercised too.
+    private static T RoundTrip<T>(MsgType type, T payload)
+    {
+        var r = new FrameReader();
+        r.Feed(NetCodec.Encode(type, payload));
+        r.TryRead(out var f);
+        return f.As<T>();
+    }
+
+    // ---- ROOM RULES ----
+    // Half of these assert a REFUSAL. The authoritative host has to say no to a claim on a taken seat,
+    // to releasing someone else's seat, and to a non-host adding an AI — and "it did not crash" is not
+    // the same as "it refused".
+    private static void RoomStateTests()
+    {
+        // first claim wins; one seat per player; only your own seat is yours to release
+        {
+            var r = new RoomState();
+            r.AddPlayer("host", isHost: true);
+            var a = r.AddPlayer("a", false);
+            var b = r.AddPlayer("b", false);
+
+            Check(r.ClaimSeat(a.PlayerId, 0), "room: first claim on a free seat wins");
+            Check(!r.ClaimSeat(b.PlayerId, 0), "room: a claim on a taken seat is refused");
+            Check(r.Seat(0).OccupantPlayerId == a.PlayerId, "room: the taken seat still belongs to A");
+
+            Check(r.ClaimSeat(a.PlayerId, 1), "room: taking a second seat is allowed");
+            Check(!r.Seat(0).Occupied && r.Seat(1).OccupantPlayerId == a.PlayerId,
+                "room: one seat per player — the first is released automatically");
+
+            Check(!r.ReleaseSeat(b.PlayerId), "room: releasing when you hold no seat is refused");
+            Check(r.Seat(1).OccupantPlayerId == a.PlayerId, "room: B could not release A's seat");
+            Check(r.ReleaseSeat(a.PlayerId) && !r.Seat(1).Occupied, "room: a player releases its own seat");
+
+            // spectators are not an error, and there is no cap on LAN
+            bool allAdded = true;
+            for (int i = 0; i < 20; i++) if (r.AddPlayer($"s{i}", false) == null) allAdded = false;
+            Check(allAdded && r.Players.Count == 23,
+                $"room: unlimited spectators on LAN (got {r.Players.Count})");
+        }
+
+        // character picks belong to the seat holder
+        {
+            var r = new RoomState();
+            var host = r.AddPlayer("host", true);
+            var a = r.AddPlayer("a", false);
+            Check(!r.PickCharacter(a.PlayerId, 1), "room: picking a character without a seat is refused");
+            r.ClaimSeat(a.PlayerId, 0);
+            Check(r.PickCharacter(a.PlayerId, 2) && r.Seat(0).Character == 2, "room: the seat holder picks");
+            Check(!r.PickCharacter(host.PlayerId, 0), "room: a non-holder cannot pick for that seat");
+            Check(r.Seat(0).Character == 2, "room: the refused pick changed nothing");
+        }
+
+        // AI seats are host-only, and the host may fill either seat regardless of its own
+        {
+            var r = new RoomState();
+            var host = r.AddPlayer("host", true);
+            var a = r.AddPlayer("a", false);
+            Check(!r.AddAi(a.PlayerId, 0, 1, ""), "room: a non-host cannot add an AI");
+            Check(!r.Seat(0).Occupied, "room: the refused AI did not occupy a seat");
+
+            Check(r.ClaimSeat(host.PlayerId, 0), "room: the host takes a seat itself");
+            Check(r.AddAi(host.PlayerId, 1, 1, "v8.onnx"), "room: the host fills the OTHER seat with an AI");
+            Check(r.Seat(1).IsAi && r.Seat(1).AiModel == "v8.onnx", "room: the AI seat records its model");
+            Check(!r.AddAi(host.PlayerId, 1, 0, ""), "room: an AI cannot displace an occupied seat");
+            Check(!r.ClaimSeat(a.PlayerId, 1), "room: a human cannot claim the AI's seat");
+        }
+
+        // starting requires BOTH seats occupied AND both characters chosen
+        {
+            var r = new RoomState();
+            var host = r.AddPlayer("host", true);
+            var a = r.AddPlayer("a", false);
+            Check(!r.CanStart, "room: an empty room cannot start");
+            r.ClaimSeat(host.PlayerId, 0);
+            r.ClaimSeat(a.PlayerId, 1);
+            Check(!r.CanStart, "room: two seated players with no characters cannot start");
+            r.PickCharacter(host.PlayerId, 0);
+            Check(!r.CanStart, "room: one character chosen is not enough");
+            r.PickCharacter(a.PlayerId, 0);
+            Check(r.CanStart, "room: both seated and both chosen — ready (the same character is allowed)");
+            Check(r.BeginMatch() && r.MatchRunning, "room: the match begins");
+            Check(!r.ClaimSeat(a.PlayerId, 0) && !r.ReleaseSeat(a.PlayerId) && !r.PickCharacter(a.PlayerId, 1),
+                "room: seat changes are refused while a match runs");
+        }
+
+        // a mid-match drop keeps the seat until the match ends, THEN kicks
+        {
+            var r = new RoomState();
+            var host = r.AddPlayer("host", true);
+            var a = r.AddPlayer("a", false);
+            r.ClaimSeat(host.PlayerId, 0); r.PickCharacter(host.PlayerId, 0);
+            r.ClaimSeat(a.PlayerId, 1); r.PickCharacter(a.PlayerId, 1);
+            r.BeginMatch();
+
+            r.MarkDisconnected(a.PlayerId);
+            Check(r.Seat(1).OccupantPlayerId == a.PlayerId,
+                "room: a mid-match drop does NOT free the seat (the other side is still simulating it)");
+            Check(r.Find(a.PlayerId) != null && !r.Find(a.PlayerId).Connected,
+                "room: the dropped player is still present, marked disconnected");
+
+            var dropped = r.EndMatch();
+            Check(dropped.Length == 1 && dropped[0] == a.PlayerId, "room: the drop is kicked at match end");
+            Check(r.Find(a.PlayerId) == null, "room: and is gone from the room");
+            Check(!r.Seat(0).Occupied && !r.Seat(1).Occupied, "room: every seat is cleared for the re-pick");
+            Check(r.Find(host.PlayerId).Seat == -1, "room: the surviving player is back to spectator");
+        }
+
+        // lobby capacity counts HUMANS; an AI seat is driven by the host and consumes no slot
+        {
+            var r = new RoomState { MaxPlayers = 2, RoomId = "654321" };
+            var host = r.AddPlayer("host", true);
+            var a = r.AddPlayer("a", false);
+            Check(r.AddPlayer("c", false) == null, "room: MaxPlayers refuses the third human");
+            r.RemovePlayer(a.PlayerId);
+            Check(r.AddAi(host.PlayerId, 1, 0, ""), "room: an AI still fits at capacity");
+            Check(r.AddPlayer("d", false) != null, "room: and the freed human slot is reusable");
+        }
+
+        // names are display text, never identity
+        {
+            Check(RoomState.SanitizeName("  ho\nst  ") == "host", "room: name sanitizing strips controls");
+            Check(RoomState.SanitizeName("") == "玩家", "room: an empty name falls back rather than being empty");
+            Check(System.Text.Encoding.UTF8.GetByteCount(RoomState.SanitizeName("袋鼠玩家袋鼠玩家")) <= 18,
+                "room: names respect the 18-byte budget");
+
+            var r = new RoomState();
+            var p1 = r.AddPlayer("same", true);
+            var p2 = r.AddPlayer("same", false);
+            Check(p1.PlayerId != p2.PlayerId, "room: identical names still get distinct ids");
+        }
+
+        // the snapshot is a copy, not a window into live state
+        {
+            var r = new RoomState();
+            var host = r.AddPlayer("host", true);
+            r.ClaimSeat(host.PlayerId, 0);
+            var snap = r.Snapshot();
+            r.ReleaseSeat(host.PlayerId);
+            Check(snap.Seats[0].OccupantPlayerId == host.PlayerId,
+                "room: a taken snapshot is unaffected by later changes");
+            Check(!r.Seat(0).Occupied, "room: while the live room did change");
+        }
     }
 
     // ---- REPLAY: record -> encode -> decode -> replay must reproduce the match exactly ----

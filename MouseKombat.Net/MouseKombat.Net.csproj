@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework Condition=" '$(GodotTargetPlatform)' == 'android' ">net9.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <!-- Networking + wire protocol. NO Godot dependency on purpose: sockets need none, so the room
+         state machine and both ends of the transport are testable headlessly over loopback. That is
+         the only way this layer gets verified at all, since the Godot side cannot be run here. -->
+    <RootNamespace>MouseKombat.Net</RootNamespace>
+    <AssemblyName>MouseKombat.Net</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Shares CharacterId and the InputFrame shape with the sim; adds no third-party dependency to
+         it (the sim must stay loadable bare by the pythonnet RL bridge). -->
+    <ProjectReference Include="..\MouseKombat.Sim\MouseKombat.Sim.csproj" />
+    <!-- Pinned exactly: the wire format is mirrored by hand in the Python lobby server
+         (server/PROTOCOL is Net/PROTOCOL.md), so a serializer upgrade must be a deliberate,
+         reviewed change on both sides rather than something a restore does quietly. -->
+    <PackageReference Include="MessagePack" Version="[3.1.8]" />
+  </ItemGroup>
+</Project>

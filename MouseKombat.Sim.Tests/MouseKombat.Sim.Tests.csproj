@@ -9,5 +9,8 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\MouseKombat.Sim\MouseKombat.Sim.csproj" />
+    <!-- Also the runner for the network layer: framing, room rules and (next) a loopback
+         host/client handshake. One console runner keeps "one command runs everything" true. -->
+    <ProjectReference Include="..\MouseKombat.Net\MouseKombat.Net.csproj" />
   </ItemGroup>
 </Project>

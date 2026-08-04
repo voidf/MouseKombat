@@ -5,11 +5,14 @@
     <EnableDynamicLoading>true</EnableDynamicLoading>
     <!-- These live inside the repo but are their OWN projects; keep Godot's .cs glob out of them
          (otherwise their sources compile into the game assembly too -> duplicate types). -->
-    <DefaultItemExcludes>$(DefaultItemExcludes);MouseKombat.Sim/**;MouseKombat.Sim.Tests/**</DefaultItemExcludes>
+    <DefaultItemExcludes>$(DefaultItemExcludes);MouseKombat.Sim/**;MouseKombat.Sim.Tests/**;MouseKombat.Net/**</DefaultItemExcludes>
   </PropertyGroup>
   <ItemGroup>
     <!-- Pure combat-logic library (no Godot dep), shared with the RL trainer. -->
     <ProjectReference Include="MouseKombat.Sim\MouseKombat.Sim.csproj" />
+    <!-- Wire protocol + room state + transports. Godot-free so it can be tested headlessly over
+         loopback; see MouseKombat.Net/PROTOCOL.md. -->
+    <ProjectReference Include="MouseKombat.Net\MouseKombat.Net.csproj" />
     <!-- In-game inference for trained RL policies (.onnx in ai_rl_model). -->
     <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.20.1" />
     <!-- Rollback netcode (MIT). PINNED with [brackets] = exact version, never floating: Backdash has
