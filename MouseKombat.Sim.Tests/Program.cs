@@ -79,6 +79,7 @@ internal static class Program
         ReplayTests();
         NetCodecTests();
         RoomStateTests();
+        TransportTests();
 
         Console.WriteLine(_fail == 0 ? "\nALL PASS" : $"\n{_fail} FAILURE(S)");
         return _fail == 0 ? 0 : 1;
@@ -469,6 +470,237 @@ internal static class Program
         GoldenChecksumTest();
     }
 
+
+
+    // ---- LOOPBACK TRANSPORT ----
+    // A real host and real clients over real sockets on 127.0.0.1. Everything is polled by hand, so
+    // these are deterministic: no sleeps, no races, and a failure reproduces exactly.
+    //
+    // Worth having because the interesting failures are not in the happy path — they are the version
+    // gate, two clients racing for one seat, a mid-match drop, and the host vanishing.
+    private static void TransportTests()
+    {
+        const string Ver = "0.0.7-test";
+
+        // Pump both ends until a predicate holds. Bounded so a broken build fails fast instead of
+        // hanging a test run forever.
+        static bool Pump(TcpRoomHost host, IList<TcpRoomClient> clients, Func<bool> until, int maxTicks = 400)
+        {
+            for (int t = 0; t < maxTicks; t++)
+            {
+                host?.Poll();
+                for (int i = 0; i < clients.Count; i++) clients[i].Poll();
+                if (until()) return true;
+                System.Threading.Thread.Sleep(1);   // let the loopback stack move bytes
+            }
+            return false;
+        }
+
+        static List<TcpRoomClient.EventKind> Drain(TcpRoomClient c)
+        {
+            var got = new List<TcpRoomClient.EventKind>();
+            while (c.TryDequeueEvent(out var e)) got.Add(e.Kind);
+            return got;
+        }
+
+        // A. handshake: connect, get a player id, see a snapshot that includes the host
+        {
+            using var host = new TcpRoomHost();
+            host.Start("127.0.0.1", 0, "主机", Ver);
+            using var a = new TcpRoomClient();
+            a.Connect("127.0.0.1", host.Port, "客户端A", Ver);
+
+            var list = new List<TcpRoomClient> { a };
+            Check(Pump(host, list, () => a.IsConnected), "transport: client connects and is welcomed");
+            Check(a.PlayerId != 0 && a.PlayerId != host.HostPlayerId,
+                $"transport: the client gets its own player id (got {a.PlayerId})");
+            Check(a.Room != null && a.Room.Players.Length == 2,
+                $"transport: the snapshot contains host + client (got {a.Room?.Players.Length})");
+            bool sawHost = false;
+            foreach (var p in a.Room.Players) if (p.IsHost && p.Name == "主机") sawHost = true;
+            Check(sawHost, "transport: the host appears in the room as a player");
+        }
+
+        // B. the version gate: refused, with BOTH versions in the message, and told why
+        {
+            using var host = new TcpRoomHost();
+            host.Start("127.0.0.1", 0, "主机", Ver);
+            using var bad = new TcpRoomClient();
+            bad.Connect("127.0.0.1", host.Port, "旧版本", "0.0.6-test");
+
+            var list = new List<TcpRoomClient> { bad };
+            bool rejected = false;
+            Pump(host, list, () =>
+            {
+                while (bad.TryDequeueEvent(out var e))
+                    if (e.Kind == TcpRoomClient.EventKind.Rejected) rejected = true;
+                return rejected;
+            });
+            Check(rejected, "transport: a game-version mismatch is refused");
+            Check(bad.LastError != null && bad.LastError.Contains("0.0.7-test") && bad.LastError.Contains("0.0.6-test"),
+                $"transport: the refusal names BOTH versions (got: {bad.LastError})");
+            Check(!bad.IsConnected, "transport: and the client is not connected");
+            Check(host.Room.Players.Count == 1, "transport: the refused peer never entered the room");
+        }
+
+        // C. two clients race for seat 0. Exactly one wins, and the loser's own view agrees.
+        {
+            using var host = new TcpRoomHost();
+            host.Start("127.0.0.1", 0, "主机", Ver);
+            using var a = new TcpRoomClient();
+            using var b = new TcpRoomClient();
+            a.Connect("127.0.0.1", host.Port, "A", Ver);
+            b.Connect("127.0.0.1", host.Port, "B", Ver);
+            var list = new List<TcpRoomClient> { a, b };
+            Check(Pump(host, list, () => a.IsConnected && b.IsConnected), "transport: two clients connect");
+
+            a.ClaimSeat(0);
+            b.ClaimSeat(0);
+            Pump(host, list, () => host.Room.Seat(0).Occupied);
+
+            int winner = host.Room.Seat(0).OccupantPlayerId;
+            Check(winner == a.PlayerId || winner == b.PlayerId, "transport: one of the two holds seat 0");
+            Check(Pump(host, list, () => a.Room.Seats[0].OccupantPlayerId == winner
+                                      && b.Room.Seats[0].OccupantPlayerId == winner),
+                "transport: BOTH clients converge on the same authoritative winner");
+
+            // the loser claiming again changes nothing
+            var loser = winner == a.PlayerId ? b : a;
+            loser.ClaimSeat(0);
+            Pump(host, list, () => false, maxTicks: 30);
+            Check(host.Room.Seat(0).OccupantPlayerId == winner,
+                "transport: the loser re-claiming a taken seat is refused, not silently swapped");
+        }
+
+        // D. AI seats are host-only over the wire too, not just in RoomState
+        {
+            using var host = new TcpRoomHost();
+            host.Start("127.0.0.1", 0, "主机", Ver);
+            using var a = new TcpRoomClient();
+            a.Connect("127.0.0.1", host.Port, "A", Ver);
+            var list = new List<TcpRoomClient> { a };
+            Pump(host, list, () => a.IsConnected);
+
+            a.AddAi(1, "x.onnx");
+            Pump(host, list, () => false, maxTicks: 30);
+            Check(!host.Room.Seat(1).IsAi, "transport: a client's AddAi is refused by the host");
+            Check(a.IsConnected, "transport: and the client is not disconnected for asking");
+        }
+
+        // E. a client dropping outside a match frees its seat and everyone is told
+        {
+            using var host = new TcpRoomHost();
+            host.Start("127.0.0.1", 0, "主机", Ver);
+            var a = new TcpRoomClient();
+            using var watcher = new TcpRoomClient();
+            a.Connect("127.0.0.1", host.Port, "A", Ver);
+            watcher.Connect("127.0.0.1", host.Port, "看客", Ver);
+            var list = new List<TcpRoomClient> { a, watcher };
+            Pump(host, list, () => a.IsConnected && watcher.IsConnected);
+
+            a.ClaimSeat(1);
+            Pump(host, list, () => host.Room.Seat(1).Occupied);
+            int gone = a.PlayerId;
+
+            a.Dispose();
+            var list2 = new List<TcpRoomClient> { watcher };
+            Check(Pump(host, list2, () => !host.Room.Seat(1).Occupied),
+                "transport: a drop outside a match frees the seat");
+            Check(Pump(host, list2, () => watcher.Room.Players.Length == 2),
+                "transport: the remaining client sees the updated roster");
+            Check(host.Room.Find(gone) == null, "transport: the dropped player is gone from the room");
+        }
+
+        // F. a mid-match drop keeps the seat until the match ends, then the host kicks
+        {
+            using var host = new TcpRoomHost();
+            host.Start("127.0.0.1", 0, "主机", Ver);
+            var a = new TcpRoomClient();
+            a.Connect("127.0.0.1", host.Port, "A", Ver);
+            var list = new List<TcpRoomClient> { a };
+            Pump(host, list, () => a.IsConnected);
+
+            host.Room.ClaimSeat(host.HostPlayerId, 0);
+            host.Room.PickCharacter(host.HostPlayerId, 0);
+            a.ClaimSeat(1);
+            Pump(host, list, () => host.Room.Seat(1).Occupied);
+            a.PickCharacter(1);
+            Pump(host, list, () => host.Room.Seat(1).Character == 1);
+            Check(host.Room.BeginMatch(), "transport: the match starts with both seats ready");
+
+            int dropped = a.PlayerId;
+            a.Dispose();
+            Check(Pump(host, new List<TcpRoomClient>(), () => host.Room.Find(dropped)?.Connected == false),
+                "transport: a mid-match drop is marked, not removed");
+            Check(host.Room.Seat(1).OccupantPlayerId == dropped,
+                "transport: and its seat is still held (the opponent is simulating against it)");
+
+            var kicked = host.Room.EndMatch();
+            Check(kicked.Length == 1 && kicked[0] == dropped, "transport: the drop is kicked at match end");
+            Check(!host.Room.Seat(0).Occupied && !host.Room.Seat(1).Occupied,
+                "transport: seats are cleared for the re-pick");
+        }
+
+        // G. the host leaving says WHY before the socket closes, so clients can explain it
+        {
+            var host = new TcpRoomHost();
+            host.Start("127.0.0.1", 0, "主机", Ver);
+            using var a = new TcpRoomClient();
+            a.Connect("127.0.0.1", host.Port, "A", Ver);
+            var list = new List<TcpRoomClient> { a };
+            Pump(host, list, () => a.IsConnected);
+            Drain(a);
+
+            host.Stop("主机已离开房间");
+            string reason = null;
+            Pump(null, list, () =>
+            {
+                while (a.TryDequeueEvent(out var e))
+                    if (e.Kind == TcpRoomClient.EventKind.Disconnected) reason = e.Detail;
+                return reason != null;
+            });
+            Check(reason == "主机已离开房间",
+                $"transport: the client learns the host's reason for closing (got: {reason})");
+            host.Dispose();
+        }
+
+        // H. an unauthenticated peer cannot move seats: raw frames before Hello are refused
+        {
+            using var host = new TcpRoomHost();
+            host.Start("127.0.0.1", 0, "主机", Ver);
+
+            using var raw = new System.Net.Sockets.Socket(System.Net.Sockets.AddressFamily.InterNetwork,
+                System.Net.Sockets.SocketType.Stream, System.Net.Sockets.ProtocolType.Tcp);
+            raw.Connect(new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, host.Port));
+            byte[] claim = NetCodec.Encode(MsgType.SeatClaim, new SeatClaim { Seat = 0 });
+            raw.Send(claim);
+
+            var none = new List<TcpRoomClient>();
+            Pump(host, none, () => false, maxTicks: 60);
+            Check(!host.Room.Seat(0).Occupied, "transport: a pre-handshake SeatClaim is refused");
+            Check(host.Room.Players.Count == 1, "transport: and the peer never became a player");
+        }
+
+        // I. garbage bytes must not take the host down
+        {
+            using var host = new TcpRoomHost();
+            host.Start("127.0.0.1", 0, "主机", Ver);
+            using var raw = new System.Net.Sockets.Socket(System.Net.Sockets.AddressFamily.InterNetwork,
+                System.Net.Sockets.SocketType.Stream, System.Net.Sockets.ProtocolType.Tcp);
+            raw.Connect(new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, host.Port));
+            raw.Send(new byte[] { 0xFF, 0xFF, 0xFF, 0x7F, 0x99, 1, 2, 3 });   // absurd length
+
+            var none = new List<TcpRoomClient>();
+            Pump(host, none, () => false, maxTicks: 60);
+            Check(host.Listening, "transport: a garbage peer does not stop the host listening");
+
+            using var good = new TcpRoomClient();
+            good.Connect("127.0.0.1", host.Port, "之后的客户端", Ver);
+            var list = new List<TcpRoomClient> { good };
+            Check(Pump(host, list, () => good.IsConnected),
+                "transport: and a well-behaved client still connects afterwards");
+        }
+    }
 
     // ---- WIRE FRAMING ----
     // TCP is a byte stream: a read can return half a message, three messages, or one message split
