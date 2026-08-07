@@ -1,0 +1,155 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://NetSeatScreen.cs" id="1_ns"]
+
+[node name="NetSeat" type="Control" node_paths=PackedStringArray("PlayerList", "RoomIdLabel", "TitleLabel", "HintLabel", "StartButton")]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("1_ns")
+PlayerList = NodePath("Roster/List")
+RoomIdLabel = NodePath("RoomId")
+TitleLabel = NodePath("Title")
+HintLabel = NodePath("Hint")
+StartButton = NodePath("StartButton")
+
+[node name="BG" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+color = Color(0.08, 0.085, 0.11, 1)
+
+[node name="Title" type="Label" parent="."]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_top = 14.0
+offset_bottom = 46.0
+theme_override_font_sizes/font_size = 20
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="RoomId" type="Label" parent="."]
+visible = false
+layout_mode = 1
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -190.0
+offset_top = 14.0
+offset_right = -20.0
+offset_bottom = 40.0
+theme_override_colors/font_color = Color(1, 0.88, 0.5, 1)
+theme_override_font_sizes/font_size = 16
+horizontal_alignment = 2
+vertical_alignment = 1
+
+[node name="Roster" type="PanelContainer" parent="."]
+layout_mode = 1
+anchors_preset = 0
+offset_left = 16.0
+offset_top = 54.0
+offset_right = 216.0
+offset_bottom = 250.0
+
+[node name="List" type="VBoxContainer" parent="Roster"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="Seats" type="HBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -240.0
+offset_top = -80.0
+offset_right = 240.0
+offset_bottom = 160.0
+theme_override_constants/separation = 40
+alignment = 1
+
+[node name="P1" type="VBoxContainer" parent="Seats"]
+custom_minimum_size = Vector2(200, 0)
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="Name" type="Label" parent="Seats/P1"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 22
+text = "P1"
+horizontal_alignment = 1
+
+[node name="Portrait" type="TextureRect" parent="Seats/P1"]
+custom_minimum_size = Vector2(200, 160)
+layout_mode = 2
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Status" type="Label" parent="Seats/P1"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.75, 0.8, 0.9, 1)
+theme_override_font_sizes/font_size = 16
+text = "空位"
+horizontal_alignment = 1
+
+[node name="P2" type="VBoxContainer" parent="Seats"]
+custom_minimum_size = Vector2(200, 0)
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="Name" type="Label" parent="Seats/P2"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 22
+text = "P2"
+horizontal_alignment = 1
+
+[node name="Portrait" type="TextureRect" parent="Seats/P2"]
+custom_minimum_size = Vector2(200, 160)
+layout_mode = 2
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Status" type="Label" parent="Seats/P2"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.75, 0.8, 0.9, 1)
+theme_override_font_sizes/font_size = 16
+text = "空位"
+horizontal_alignment = 1
+
+[node name="Hint" type="Label" parent="."]
+layout_mode = 1
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 40.0
+offset_top = -96.0
+offset_right = -40.0
+offset_bottom = -56.0
+theme_override_colors/font_color = Color(0.72, 0.76, 0.85, 1)
+theme_override_font_sizes/font_size = 14
+autowrap_mode = 2
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="StartButton" type="Button" parent="."]
+visible = false
+custom_minimum_size = Vector2(180, 40)
+layout_mode = 1
+anchors_preset = 7
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -90.0
+offset_top = -50.0
+offset_right = 90.0
+offset_bottom = -10.0
+theme_override_font_sizes/font_size = 18
+text = "开始对战"
+
+[connection signal="pressed" from="StartButton" to="." method="OnStartPressed"]

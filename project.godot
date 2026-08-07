@@ -25,6 +25,7 @@ config/icon="uid://betfal31o5rh8"
 
 AspectLock="*res://AspectLock.cs"
 AppSettings="*res://AppSettings.cs"
+NetSession="*res://NetSession.cs"
 
 [display]
 
