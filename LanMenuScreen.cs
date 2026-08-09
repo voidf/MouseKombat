@@ -43,7 +43,7 @@ public partial class LanMenuScreen : Control
             NameField.MaxLength = NameMaxBytes;
             NameField.TextChanged += OnNameChanged;
         }
-        if (HostField != null) HostField.Text = "0.0.0.0";
+        if (HostField != null) HostField.Text = "127.0.0.1";
         if (PortField != null) PortField.Text = DefaultPort.ToString();
         SetStatus("");
 
