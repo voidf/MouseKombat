@@ -150,6 +150,9 @@ public sealed class GamepadSource : InputSourceBase
     public override string Id { get; }
     public override string CancelLabel => "B";
 
+    // The OS device index — the key of the cross-window PadLock mutex.
+    public int Device => _dev;
+
     public GamepadSource(int device) { _dev = device; Id = "pad" + device; }
 
     public override void Poll()

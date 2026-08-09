@@ -23,11 +23,15 @@ public partial class SettingsPopup : CanvasLayer
 
     private HSlider _bgm, _sfx;
     private Label _bgmValue, _sfxValue;
+    private Label _bgmTitle, _sfxTitle, _replayTitle;
     private SpinBox _replayMax;
     private Button _close;
 
     private enum Option { Bgm, Sfx, Replay, Close }
     private Option _option = Option.Bgm;
+
+    private static readonly Color SelColor = new Color(1f, 0.85f, 0.4f);
+    private static readonly Color IdleColor = new Color(0.85f, 0.87f, 0.92f);
 
     private readonly List<GamepadSource> _pads = new();
     private int _vDir, _vHold;    // up/down hold state for the repeat timer
@@ -66,13 +70,18 @@ public partial class SettingsPopup : CanvasLayer
 
         foreach (var p in _pads) p.Poll();
 
+        bool anyHeld = false;
+        foreach (var p in _pads)
+            anyHeld |= p.ConfirmHeld || p.CancelHeld || p.Left || p.Right || p.Up || p.Down;
+        if (PadGate.Blocked(anyHeld)) return;   // a press the caller scene consumed is still down
+
         int v = (_pads.Exists(p => p.Down) ? 1 : 0) - (_pads.Exists(p => p.Up) ? 1 : 0);
         int h = (_pads.Exists(p => p.Right) ? 1 : 0) - (_pads.Exists(p => p.Left) ? 1 : 0);
         if (StepAxis(ref _vDir, ref _vHold, v)) MoveOption(v);
         if (StepAxis(ref _hDir, ref _hHold, h)) Adjust(h);
 
-        if (_pads.Exists(p => p.ConfirmJustPressed)) MenuPad.PressFocused(GetViewport());
-        if (_pads.Exists(p => p.CancelJustPressed)) { Close(); GetViewport().SetInputAsHandled(); }
+        if (_pads.Exists(p => p.ConfirmJustPressed)) { PadGate.Consume(); MenuPad.PressFocused(GetViewport()); }
+        if (_pads.Exists(p => p.CancelJustPressed)) { PadGate.Consume(); Close(); GetViewport().SetInputAsHandled(); }
     }
 
     // Fires on the press edge, then auto-repeats while held — same pacing as CharSelect/MenuPad.
@@ -89,13 +98,23 @@ public partial class SettingsPopup : CanvasLayer
     private void MoveOption(int d)
     {
         _option = (Option)Mathf.PosMod((int)_option + d, 4);
+        RefreshSelection();
         switch (_option)
         {
             case Option.Bgm: _bgm.GrabFocus(); break;
             case Option.Sfx: _sfx.GrabFocus(); break;
-            case Option.Replay: _replayMax.GrabFocus(); break;
+            // The SpinBox itself is a container with focus_mode NONE — GrabFocus on it silently
+            // does nothing, so the option looked unreachable. Its LineEdit is the focusable part.
+            case Option.Replay: _replayMax.GetLineEdit()?.GrabFocus(); break;
             case Option.Close: _close.GrabFocus(); break;
         }
+    }
+
+    private void RefreshSelection()
+    {
+        if (_bgmTitle != null) _bgmTitle.AddThemeColorOverride("font_color", _option == Option.Bgm ? SelColor : IdleColor);
+        if (_sfxTitle != null) _sfxTitle.AddThemeColorOverride("font_color", _option == Option.Sfx ? SelColor : IdleColor);
+        if (_replayTitle != null) _replayTitle.AddThemeColorOverride("font_color", _option == Option.Replay ? SelColor : IdleColor);
     }
 
     private void Adjust(int d)
@@ -129,6 +148,7 @@ public partial class SettingsPopup : CanvasLayer
         RefreshValueLabels();
         _option = Option.Bgm;
         Show();
+        RefreshSelection();
         _bgm.GrabFocus();   // after Show: focusing a hidden control would not stick
     }
 
@@ -203,12 +223,12 @@ public partial class SettingsPopup : CanvasLayer
         _close.Pressed += Close;
         header.AddChild(_close);
 
-        _bgm = AddSlider(col, "BGM 音量", out _bgmValue, v =>
+        _bgm = AddSlider(col, "BGM 音量", out _bgmValue, out _bgmTitle, v =>
         {
             if (AppSettings.Instance != null) AppSettings.Instance.BgmVolume = (float)v;
             RefreshValueLabels();
         });
-        _sfx = AddSlider(col, "音效 音量", out _sfxValue, v =>
+        _sfx = AddSlider(col, "音效 音量", out _sfxValue, out _sfxTitle, v =>
         {
             if (AppSettings.Instance != null) AppSettings.Instance.SfxVolume = (float)v;
             RefreshValueLabels();
@@ -219,12 +239,12 @@ public partial class SettingsPopup : CanvasLayer
         var replayRow = new HBoxContainer();
         replayRow.AddThemeConstantOverride("separation", 10);
         col.AddChild(replayRow);
-        var replayLabel = new Label
+        _replayTitle = new Label
         {
             Text = "回放保存上限",
             SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
         };
-        replayRow.AddChild(replayLabel);
+        replayRow.AddChild(_replayTitle);
         _replayMax = new SpinBox
         {
             MinValue = 1, MaxValue = 999, Step = 1,
@@ -248,7 +268,7 @@ public partial class SettingsPopup : CanvasLayer
     }
 
     private static HSlider AddSlider(VBoxContainer parent, string label, out Label valueLabel,
-                                     System.Action<double> onChanged)
+                                     out Label titleLabel, System.Action<double> onChanged)
     {
         var row = new VBoxContainer();
         row.AddThemeConstantOverride("separation", 2);
@@ -256,7 +276,8 @@ public partial class SettingsPopup : CanvasLayer
 
         var head = new HBoxContainer();
         row.AddChild(head);
-        head.AddChild(new Label { Text = label, SizeFlagsHorizontal = Control.SizeFlags.ExpandFill });
+        titleLabel = new Label { Text = label, SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+        head.AddChild(titleLabel);
         valueLabel = new Label { HorizontalAlignment = HorizontalAlignment.Right };
         valueLabel.AddThemeColorOverride("font_color", new Color(0.95f, 0.85f, 0.45f));
         head.AddChild(valueLabel);

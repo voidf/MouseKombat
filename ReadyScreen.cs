@@ -58,6 +58,10 @@ public partial class ReadyScreen : Control
     private IInputSource _menuNav;      // keyboard arrows/Enter/backtick — drives the AI seat's panels
     private double _blinkClock;
 
+    // Cross-window pad ownership (see PadLock): which source holds the OS mutex for which pad.
+    private readonly Dictionary<IInputSource, System.Threading.Mutex> _padLocks = new();
+    private AcceptDialog _padBusy;
+
     private bool Bound(int seat) => _dev[seat] != null || _agent[seat] != null;
     private bool Occupied(int seat) => Bound(seat) || _busySeat == seat;
     private bool BothBound => Bound(0) && Bound(1);
@@ -99,6 +103,15 @@ public partial class ReadyScreen : Control
         _charSelect.Confirmed += OnCharConfirmed;
         _charSelect.Cancelled += OnCharCancelled;
 
+        _padBusy = new AcceptDialog
+        {
+            Title = "手柄已被占用",
+            DialogText = "这个手柄已被另一个窗口的玩家占用，请等待其释放机位，或换一个手柄。",
+            OkButtonText = "确定",
+            Exclusive = true,
+        };
+        AddChild(_padBusy);
+
         BuildMenuUi();
         BuildBackspaceHint();
         UpdatePresentation();
@@ -107,6 +120,12 @@ public partial class ReadyScreen : Control
     public override void _ExitTree()
     {
         Input.JoyConnectionChanged -= OnJoyConnectionChanged;
+        foreach (var pair in _padLocks)
+        {
+            var m = pair.Value;
+            PadLock.Release(ref m);
+        }
+        _padLocks.Clear();
     }
 
     private void OnJoyConnectionChanged(long device, bool connected)
@@ -197,6 +216,14 @@ public partial class ReadyScreen : Control
     // "lock out every other device during selection" rule is enforced.
     private void TickSeats()
     {
+        // A press the previous screen's menu consumed is still down (see PadGate): ignore it, so a
+        // held A cannot instantly claim a seat in this freshly loaded lobby.
+        bool anyHeld = false;
+        foreach (var s in _sources)
+            if (s is GamepadSource)
+                anyHeld |= s.ConfirmHeld || s.CancelHeld || s.Left || s.Right || s.Up || s.Down;
+        if (PadGate.Blocked(anyHeld)) return;
+
         foreach (var s in _sources)
         {
             int seat = SeatOf(s);
@@ -232,11 +259,25 @@ public partial class ReadyScreen : Control
     // ---------- selection flow ----------
     private void BeginCharSelect(int seat, IInputSource nav, bool aiMode)
     {
+        // One pad, one window: claiming a seat with a pad takes the OS-level pad lock. If another
+        // window on this machine already holds it, refuse here instead of fighting over the device.
+        if (nav is GamepadSource gs && !_padLocks.ContainsKey(gs))
+        {
+            var m = PadLock.TryAcquire(gs.Device);
+            if (m == null) { ShowPadBusy(); return; }
+            _padLocks[gs] = m;
+        }
+
         _busySeat = seat;
         _panelNav = nav;
         _state = LobbyState.CharSelect;
         CloseMenu();
         _charSelect.Open(seat, nav, _char[seat], aiMode);
+    }
+
+    private void ShowPadBusy()
+    {
+        if (_padBusy != null && !_padBusy.Visible) _padBusy.PopupCentered();
     }
 
     private void BeginAiSeat()
@@ -290,9 +331,11 @@ public partial class ReadyScreen : Control
 
     private void ReleaseSeat(int seat)
     {
+        var src = _dev[seat];
         _dev[seat] = null;
         _agent[seat] = null;
         _aiName[seat] = "";
+        if (src != null && _padLocks.Remove(src, out var m)) PadLock.Release(ref m);
     }
 
     // ---------- AI model menu ----------

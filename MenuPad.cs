@@ -13,6 +13,28 @@ using System.Collections.Generic;
 // A = press the focused button (the same press Enter/Space would produce), B = the screen's
 // back/cancel action (wired to Cancelled). Up/down move focus along the focus chain, with the same
 // hold-to-repeat pacing as CharSelect. Keyboards are unaffected and stay on the built-in ui_* path.
+// Cross-scene press gate. A gamepad press a menu consumed (A just changed the scene, B just closed
+// the popup) is still physically HELD when the next scene's fresh input objects start polling, and
+// a fresh edge detector reads "held" as "just pressed" — that is how one A tap used to chain
+// through two screens. Every menu marks the press as consumed; while it is, every other poller
+// (old scene or new, menu or seat screen) stays inert until the pad fully releases. Only then may
+// the next press register.
+public static class PadGate
+{
+    private static bool _consumed;
+
+    // Call once per frame with the aggregate held state of the pads this poller sees. Returns true
+    // while a consumed press is still physically held, so the caller must not act on edges.
+    public static bool Blocked(bool anyHeld)
+    {
+        if (!_consumed) return false;
+        if (!anyHeld) _consumed = false;
+        return _consumed;
+    }
+
+    public static void Consume() => _consumed = true;
+}
+
 public partial class MenuPad : Node
 {
     public event System.Action Cancelled;
@@ -73,13 +95,20 @@ public partial class MenuPad : Node
 
         foreach (var p in _pads) p.Poll();
 
+        // A press consumed by another scene's poll (see PadGate) stays inert here until the pad
+        // is fully released, so a held button cannot bleed into the freshly loaded scene.
+        bool anyHeld = false;
+        foreach (var p in _pads)
+            anyHeld |= p.ConfirmHeld || p.CancelHeld || p.Left || p.Right || p.Up || p.Down;
+        if (PadGate.Blocked(anyHeld)) return;
+
         int v = (_pads.Exists(p => p.Down) ? 1 : 0) - (_pads.Exists(p => p.Up) ? 1 : 0);
         int h = (_pads.Exists(p => p.Right) ? 1 : 0) - (_pads.Exists(p => p.Left) ? 1 : 0);
         if (StepAxis(ref _vDir, ref _vHold, v)) Navigate(v);
         if (StepAxis(ref _hDir, ref _hHold, h)) Navigate(h);
 
-        if (_pads.Exists(p => p.ConfirmJustPressed)) PressFocused();
-        if (_pads.Exists(p => p.CancelJustPressed)) Cancelled?.Invoke();
+        if (_pads.Exists(p => p.ConfirmJustPressed)) { PadGate.Consume(); PressFocused(); }
+        if (_pads.Exists(p => p.CancelJustPressed)) { PadGate.Consume(); Cancelled?.Invoke(); }
     }
 
     // Fires on the press edge, then auto-repeats while held — same pacing as CharSelect.

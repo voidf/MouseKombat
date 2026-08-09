@@ -53,6 +53,8 @@ public partial class NetSeatScreen : Control
     private readonly List<(string name, bool isOnnx, string path)> _aiItems = new();
 
     private AcceptDialog _dropPopup;
+    private AcceptDialog _padBusyPopup;
+    private System.Threading.Mutex _padMutex;   // OS pad lock while OUR seat is driven by a pad
 
     private NetSession Net => NetSession.Instance;
 
@@ -85,6 +87,7 @@ public partial class NetSeatScreen : Control
 
         BuildAiMenu();
         BuildDropPopup();
+        BuildPadBusyPopup();
 
         if (Net != null)
         {
@@ -99,6 +102,9 @@ public partial class NetSeatScreen : Control
     public override void _ExitTree()
     {
         Input.JoyConnectionChanged -= OnJoyConnectionChanged;
+        System.Threading.Mutex m = _padMutex;
+        _padMutex = null;
+        PadLock.Release(ref m);
         if (Net == null) return;
         Net.RoomChanged -= Render;
         Net.Disconnected -= OnDisconnected;
@@ -182,9 +188,17 @@ public partial class NetSeatScreen : Control
         foreach (var s in _sources) s.Poll();
         _menuNav.Poll();
 
+        // A press the previous screen's menu consumed is still down (see PadGate): ignore it, so a
+        // held A cannot instantly claim a seat in this freshly loaded room.
+        bool anyHeld = false;
+        foreach (var s in _sources)
+            if (s is GamepadSource)
+                anyHeld |= s.ConfirmHeld || s.CancelHeld || s.Left || s.Right || s.Up || s.Down;
+        bool gateBlocked = PadGate.Blocked(anyHeld);
+
         if (_stage == Stage.CharSelect) { _charSelect.Tick(); return; }
         if (_stage == Stage.AiSelect) return;      // driven by _Input
-        TickSeats();
+        if (!gateBlocked) TickSeats();
     }
 
     // One device, one seat. Confirm on a free seat claims it and opens the picker; cancel releases.
@@ -424,6 +438,23 @@ public partial class NetSeatScreen : Control
         _dropPopup.Canceled += () => GetTree().ChangeSceneToFile(MainMenuScenePath);
     }
 
+    private void BuildPadBusyPopup()
+    {
+        _padBusyPopup = new AcceptDialog
+        {
+            Title = "手柄已被占用",
+            DialogText = "这个手柄已被另一个窗口的玩家占用，请等待其释放机位，或换一个手柄。",
+            OkButtonText = "确定",
+            Exclusive = true,
+        };
+        AddChild(_padBusyPopup);
+    }
+
+    private void ShowPadBusy()
+    {
+        if (_padBusyPopup != null && !_padBusyPopup.Visible) _padBusyPopup.PopupCentered();
+    }
+
     private void LeaveRoom()
     {
         if (Net == null) { GetTree().ChangeSceneToFile(LanMenuScenePath); return; }
@@ -454,6 +485,18 @@ public partial class NetSeatScreen : Control
             int seat = _pendingSeat;
             var nav = _panelNav;
             _pendingSeat = -1;
+            if (nav is GamepadSource gs)
+            {
+                // One pad, one window (see PadLock). Another window already holds this pad's OS
+                // mutex: undo the claim with a "手柄已被占用" popup instead of sharing the device.
+                _padMutex = PadLock.TryAcquire(gs.Device);
+                if (_padMutex == null)
+                {
+                    ShowPadBusy();
+                    net.RequestReleaseSeat();
+                    return;
+                }
+            }
             Net.LockDevice(seat, nav);
             BeginCharSelect(seat, nav, ai: false);
         }
@@ -461,7 +504,15 @@ public partial class NetSeatScreen : Control
         // A seat we were locked to that is no longer ours (released, stolen, match ended) frees the
         // lock, so the pad can claim again from this window once it is focused.
         for (int i = 0; i < RoomState.SeatCount; i++)
-            if (Net.LockedDevice(i) != null && net.LocalSeat() != i) Net.UnlockDevice(i);
+        {
+            if (Net.LockedDevice(i) != null && net.LocalSeat() != i)
+            {
+                Net.UnlockDevice(i);
+                System.Threading.Mutex m = _padMutex;
+                _padMutex = null;
+                PadLock.Release(ref m);
+            }
+        }
 
         if (TitleLabel != null)
             TitleLabel.Text = net.IsHost
