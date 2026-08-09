@@ -26,6 +26,7 @@ config/icon="uid://betfal31o5rh8"
 AspectLock="*res://AspectLock.cs"
 AppSettings="*res://AppSettings.cs"
 NetSession="*res://NetSession.cs"
+MCPRuntimeProbe="*uid://bsg12huaf1u5i"
 
 [display]
 
@@ -39,7 +40,7 @@ project/assembly_name="MouseKombat"
 
 [editor_plugins]
 
-enabled=PackedStringArray()
+enabled=PackedStringArray("godot_mcp")
 
 [input]
 
