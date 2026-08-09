@@ -19,5 +19,13 @@
          (server/PROTOCOL is Net/PROTOCOL.md), so a serializer upgrade must be a deliberate,
          reviewed change on both sides rather than something a restore does quietly. -->
     <PackageReference Include="MessagePack" Version="[3.1.8]" />
+    <!-- Rollback netcode (MIT). PINNED with [brackets] = exact version, never floating: Backdash has
+         no stable release (60 previews, 0.5.x -> 0.7.x with breaking API changes), so an unpinned
+         reference could silently move the project onto an incompatible API.
+         It lives HERE rather than in the Godot project so RollbackMatch — the one file that touches
+         it — can be driven headlessly by the test runner. MouseKombat.Sim still never sees it:
+         GameSim.SaveState/LoadState is a plain Span<byte> contract, which is what keeps the sim
+         loadable bare by the pythonnet RL bridge. -->
+    <PackageReference Include="Backdash" Version="[0.7.8-preview]" />
   </ItemGroup>
 </Project>

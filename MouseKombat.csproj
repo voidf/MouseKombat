@@ -10,18 +10,11 @@
   <ItemGroup>
     <!-- Pure combat-logic library (no Godot dep), shared with the RL trainer. -->
     <ProjectReference Include="MouseKombat.Sim\MouseKombat.Sim.csproj" />
-    <!-- Wire protocol + room state + transports. Godot-free so it can be tested headlessly over
-         loopback; see MouseKombat.Net/PROTOCOL.md. -->
+    <!-- Wire protocol + room state + transports + the rollback session (Backdash comes in
+         transitively from here). Godot-free so all of it can be tested headlessly over loopback;
+         see MouseKombat.Net/PROTOCOL.md and MouseKombat.Net/RollbackMatch.cs. -->
     <ProjectReference Include="MouseKombat.Net\MouseKombat.Net.csproj" />
     <!-- In-game inference for trained RL policies (.onnx in ai_rl_model). -->
     <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.20.1" />
-    <!-- Rollback netcode (MIT). PINNED with [brackets] = exact version, never floating: Backdash has
-         no stable release (60 previews, 0.5.x -> 0.7.x with breaking API changes), so an unpinned
-         reference could silently move the project onto an incompatible API.
-         Kept out of MouseKombat.Sim on purpose: GameSim.SaveState/LoadState is a plain Span<byte>
-         contract and Backdash's BinaryBufferWriter/Reader appears only in one Godot-side adapter, so
-         the sim stays dependency-free (the pythonnet RL bridge loads it bare) and swapping netcode
-         libraries later is a one-file change. -->
-    <PackageReference Include="Backdash" Version="[0.7.8-preview]" />
   </ItemGroup>
 </Project>

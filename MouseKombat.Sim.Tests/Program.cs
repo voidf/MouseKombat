@@ -6,7 +6,7 @@ using MouseKombat.Net;
 // Lightweight parity checks for the Godot-free sim math + move data.
 // Run: dotnet run --project ..\MouseKombat.Sim.Tests
 // Exits nonzero on any failure so it can gate CI / manual checks.
-internal static class Program
+internal static partial class Program
 {
     private static int _fail = 0;
 
@@ -80,6 +80,7 @@ internal static class Program
         NetCodecTests();
         RoomStateTests();
         TransportTests();
+        RollbackSessionTests();
 
         Console.WriteLine(_fail == 0 ? "\nALL PASS" : $"\n{_fail} FAILURE(S)");
         return _fail == 0 ? 0 : 1;
