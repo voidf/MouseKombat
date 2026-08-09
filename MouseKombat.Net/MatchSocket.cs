@@ -12,12 +12,13 @@ namespace MouseKombat.Net;
 // The reason this exists: a client has to bind its match port during the room handshake, because the
 // port number is announced in Hello (see Hello.MatchUdpPort) and binding after announcing would leave
 // a window in which something else could take it. But a room hosts many matches in a row, and
-// disposing a Backdash session closes the socket it was given. Rebinding the same port between matches
-// is a race with every other process on the machine, and the failure lands exactly where it is least
-// welcome — at "开始对战".
+// disposing a Backdash session tears the socket down — PeerClient.Dispose calls IDisposable.Dispose
+// on the handed socket, NOT Close. Rebinding the same port between matches is a race with every other
+// process on the machine, and the failure lands exactly where it is least welcome — at "开始对战" (the
+// second match in a room never synchronizes: both Close AND Dispose must be no-ops here).
 //
-// So Close() is a no-op here and only Dispose() really closes. NetSession owns the lifetime: one
-// socket per room, disposed when leaving the room.
+// So both Close() and Dispose() are no-ops and only CloseNow() really closes. NetSession owns the
+// lifetime: one socket per room, closed when leaving the room.
 public sealed class MatchSocket : IPeerSocket, IDisposable
 {
     private readonly UdpSocket _inner;
@@ -56,11 +57,15 @@ public sealed class MatchSocket : IPeerSocket, IDisposable
 
     public void Update() => ((IPeerSocket)_inner).Update();
 
-    // Deliberately does nothing: see the note above. The session that "closes" this is being disposed
-    // between matches and the room is not over.
+    // Both deliberately do nothing: see the note above. The session that "closes" or "disposes" this
+    // is being torn down BETWEEN matches and the room is not over; the port it holds was announced in
+    // Hello and the next match needs it again.
     public void Close() { }
 
-    public void Dispose()
+    public void Dispose() { }
+
+    // The room is ending: release the port for good. The one call site is NetSession.Leave.
+    public void CloseNow()
     {
         if (_disposed) return;
         _disposed = true;

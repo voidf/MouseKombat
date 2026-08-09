@@ -136,7 +136,10 @@ public partial class NetSession : Node
         Client?.Disconnect(reason);
         Client?.Dispose();
         Client = null;
-        MatchSocket?.Dispose();
+        // CloseNow, not Dispose: Dispose is a no-op on MatchSocket (Backdash calls it when a match
+        // session ends, and the socket must survive for the next match of the room). The room is
+        // ending here, which is the one moment the port is really released.
+        MatchSocket?.CloseNow();
         MatchSocket = null;
         Room = null;
         _lockedDevices.Clear();

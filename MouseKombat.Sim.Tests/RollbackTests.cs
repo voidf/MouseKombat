@@ -42,6 +42,7 @@ internal static partial class Program
         RemotePairTest();
         SpectatorTest();
         SpectatorOfLocalPairTest();
+        RematchSameRoomTest();
         MatchPlanTests();
         RelayMatchTest();
     }
@@ -244,7 +245,109 @@ internal static partial class Program
         DrainEvents(b, "B");
     }
 
-    // ---- C. spectator: a third machine that holds no seat and only watches ----
+    // ---- E. two matches in one room ----
+    //
+    // A room plays many matches: after a knockout everyone returns to seat select and the NEXT
+    // StartMatch creates fresh sessions on the SAME ports — the host binds the room port again, and
+    // each client hands over the same MatchSocket it announced in Hello. MatchSocket must survive a
+    // session teardown: Backdash's PeerClient.Dispose calls IDisposable.Dispose on the handed socket
+    // (not just Close), and this test pins both no-ops. It replays the exact lifecycle: run a pair to
+    // synchronization, dispose the sessions (the scene change between matches), then create them
+    // again on the same ports and demand the same result. A second match that cannot even
+    // synchronize is the failure reported in the field.
+    private static void RematchSameRoomTest()
+    {
+        const int delay = 2;
+        var expected = ReferenceRun(NetFrames, delay);
+
+        int hostPort = Backdash.Network.NetUtils.FindFreePort();
+        var epHost = new IPEndPoint(IPAddress.Loopback, hostPort);
+
+        // Round 2 reuses the room's sockets; round 3 is a control with FRESH ones on different
+        // ports, which isolates "the reused socket died" from "the host cannot rebind its port".
+        var reusedSock = new MatchSocket(Backdash.Network.NetUtils.FindFreePort());
+        var reusedSpecSock = new MatchSocket(Backdash.Network.NetUtils.FindFreePort());
+
+        try
+        {
+            for (int round = 1; round <= 3; round++)
+            {
+                var simH = MakeSim(240, 520);
+                var simB = MakeSim(240, 520);
+                var simS = MakeSim(240, 520);
+                var viewH = new TestPresenter(simH, NetScript);
+                var viewB = new TestPresenter(simB, NetScript);
+                var viewS = new TestPresenter(simS, NetScript);
+
+                // Round 3 deliberately breaks the "same room" invariant (fresh client sockets, new
+                // ports) to prove the HOST side of the reuse story: if the host could not rebind its
+                // port this round fails too, and the bug is on the host, not in the reused sockets.
+                using var freshSock = new MatchSocket(Backdash.Network.NetUtils.FindFreePort());
+                using var freshSpecSock = new MatchSocket(Backdash.Network.NetUtils.FindFreePort());
+                var clientSock = round == 3 ? freshSock : reusedSock;
+                var specSock = round == 3 ? freshSpecSock : reusedSpecSock;
+                var epClient = new IPEndPoint(IPAddress.Loopback, clientSock.Port);
+                var epSpec = new IPEndPoint(IPAddress.Loopback, specSock.Port);
+
+                // Host: no handed socket, Backdash binds the room port fresh — exactly what
+                // MatchNetSetup.Port + Socket == null does in the LAN flow. The spectator is
+                // declared up front, like StartMatch does.
+                var h = RollbackMatch.Create(simH, viewH, new MatchNetSetup
+                {
+                    LocalSeat = new[] { true, false },
+                    RemoteEndPoint = epClient,
+                    Spectators = new EndPoint[] { epSpec },
+                    Port = hostPort,
+                    InputDelayFrames = delay,
+                });
+                // Client: rounds 1 and 2 hand over the same MatchSocket the room announced in Hello;
+                // round 3 hands a fresh one. Same for the spectator.
+                var b = RollbackMatch.Create(simB, viewB, new MatchNetSetup
+                {
+                    LocalSeat = new[] { false, true },
+                    RemoteEndPoint = epHost,
+                    Socket = clientSock,
+                    InputDelayFrames = delay,
+                });
+                var s = RollbackMatch.Create(simS, viewS, new MatchNetSetup
+                {
+                    SpectateHost = epHost,
+                    Socket = specSock,
+                    InputDelayFrames = delay,
+                });
+
+                int target = NetFrames + NetOvershoot;
+                bool ok = Drive(new[] { (h, viewH), (b, viewB), (s, viewS) }, target,
+                                TimeSpan.FromSeconds(30));
+                Check(ok, $"rematch round {round}: both sides reached frame {target} "
+                          + $"(H={h.Frame} B={b.Frame} S={s.Frame}, "
+                          + $"sync H={h.Synchronized} B={b.Synchronized})");
+                Check(s.FramesAdvanced >= NetFrames,
+                    $"rematch round {round}: spectator watched at least {NetFrames} frames "
+                    + $"(got {s.FramesAdvanced})");
+                Check(SameValues(expected, viewH.Value, NetFrames, out string whyH),
+                    $"rematch round {round}: host matches a never-rewound run" + whyH);
+                Check(SameValues(expected, viewB.Value, NetFrames, out string whyB),
+                    $"rematch round {round}: client matches a never-rewound run" + whyB);
+                Check(SameValues(expected, viewS.Value, Math.Min(NetFrames, s.FramesAdvanced),
+                        out string whyS),
+                    $"rematch round {round}: spectator sees the same match" + whyS);
+
+                // The scene change: the director disposes its session. Dispose must leave the
+                // clients' sockets usable for the next round.
+                h.Dispose();
+                b.Dispose();
+                s.Dispose();
+            }
+        }
+        finally
+        {
+            reusedSock.CloseNow();
+            reusedSpecSock.CloseNow();
+        }
+    }
+
+
     private static void SpectatorTest()
     {
         const int delay = 2;
