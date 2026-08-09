@@ -82,6 +82,7 @@ internal static partial class Program
         TransportTests();
         MatchHandshakeTests();
         RollbackSessionTests();
+        LobbyServerTests();
 
         Console.WriteLine(_fail == 0 ? "\nALL PASS" : $"\n{_fail} FAILURE(S)");
         return _fail == 0 ? 0 : 1;

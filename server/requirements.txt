@@ -1,0 +1,4 @@
+# MouseKombat lobby server — Python 3.11+
+# The server itself uses only the standard library; msgpack is the wire format
+# shared with the C# client (MouseKombat.Net/NetCodec.cs).
+msgpack>=1.0,<2.0

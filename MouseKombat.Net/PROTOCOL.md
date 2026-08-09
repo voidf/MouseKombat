@@ -22,6 +22,108 @@ channel (UDP) driven by the rollback library, which has its own framing and is n
 Same port *number* for both channels: TCP and UDP port spaces are independent, so no extra listener
 is needed. The lobby relays match UDP by wrapping it in an envelope (§ Relay).
 
+For a lobby game the **match UDP port clients dial is the LOBBY SERVER's** (announced in
+`StartMatch.MatchUdpPort`), never the host player's — the server sits in the middle. There is no
+second listener for spectator traffic: lobby spectators never dial UDP at all (§ Lobby).
+
+## Lobby
+
+The lobby server (`server/lobby_server.py`) is the public host. One protocol, two hosts: a LAN
+game's host runs a mini room server in-process (`TcpRoomHost`); a lobby game's rooms live on the
+server, which implements the same rules by hand (its `room.py` is the RoomState port). The client
+code is identical and only the endpoint differs.
+
+### Connection flow
+
+1. The client connects and sends `Hello` — **the server checks the version itself** against its
+   configured game version: any mismatch → `Rejected`, connection closed. Nothing is relayed before
+   that check.
+2. The client then sends exactly one of `LobbyList` / `LobbyCreate` / `LobbyJoin` on the SAME
+   connection. A browser connection may page through `LobbyList` and then create or join; it is
+   reaped after `idleTimeout` of inactivity.
+3. `LobbyCreate` / `LobbyJoin` are answered with the standard `Welcome`; the connection now IS the
+   room membership, and the server plays the host's role: it authors `RoomState` after every accepted
+   change, `StartMatch`, `MatchEnded`, `Bye`, and enforces every rule in § Room state — including
+   host-only `AddAi`/`RemoveAi`, whose requester is the **host player** (the room creator).
+
+Validation failures in the lobby phase (`LobbyJoin` with a wrong password, a full room, a malformed
+create form) get `Rejected` **without** closing the connection — the browser must stay connected to
+retry or pick another room. Handshake/protocol violations still close.
+
+Directory rules:
+
+* Rooms are in-memory only (spec: no persistence). Creation: `LobbyCreate{maxPlayers 2..4,
+  password ""|4 digits, searchable}`. The room's capacity counts HUMANS only (AI seats consume no
+  slot, matching § Room state); the hard cap is 4 humans regardless of the configured limit.
+* `LobbyList{page}` returns `LobbyRooms{page, totalPages, entries}` with entries
+  `[roomId, hostName, hasPassword, players, maxPlayers]` — **searchable rooms only**, sorted newest
+  first, 10 per page.
+* Room id: 6 random digits, shown in the seat screen (`RoomSnapshot.RoomId`) and on the wire in the
+  UDP envelope as the numeric u32.
+* A room with a password can only be joined with the exact 4-digit password.
+* A member joining mid-match is admitted (if the room is not full) exactly like any other join:
+  `Welcome` + `RoomState`; the host player is told with `LobbyPlayerJoined{playerId}` and serves the
+  newcomer a catch-up over `HostSendTo`.
+
+### Who runs what
+
+The room state and the directory live on the server. The **match session still runs on the host
+player's machine**: it drives the seats it holds plus any AI seats, exactly as a LAN host would.
+The server is a hub, never a simulation. Consequences:
+
+* `MatchStart` (host player → server) carries the stage geometry — the server has no scene to read
+  it from. The server refuses it (silently, like the LAN `BeginMatch`) unless both seats are ready,
+  refuses it with `Rejected` when either fighting seat's holder announced no match port, then
+  broadcasts the standard `StartMatch` with `MatchUdpPort` = the server's UDP port and
+  `SpectatingAvailable = false` (`Seat0Endpoint`/`Seat1Endpoint` stay empty — the server is always
+  the hub).
+* A fighter reaching the knockout sends `MatchResult` to the server, which ends the match, kicks
+  the dropped, and broadcasts `MatchEnded` + a fresh `RoomState` (§ Ending).
+* **All lobby spectating is data, not session.** A seatless member — before or during the match —
+  watches through the catch-up stream (`MatchCatchUp` + `MatchInputs`), never a Backdash spectator
+  session. That is why `StartMatch.SpectatingAvailable` is always false in a lobby and why no
+  spectator UDP port exists.
+
+### Catch-up routing through the hub
+
+The host player's machine is the catch-up authority (it runs the session, or — in the relay
+configuration — merges the fighters' `MatchInputReport` into its `CatchUpHistory`). The server only
+routes:
+
+* fighter → server: `MatchInputReport` is forwarded **verbatim to the host player**;
+* host player → server: `HostSendTo{targetPlayerId, type, body}` is forwarded **verbatim** to that
+  member, with `type` restricted to `MatchCatchUp` (14) and `MatchInputs` (15). `body` is the raw
+  msgpack body of the target frame — never re-packed, or it would turn an array into a bin;
+* server → host player: `LobbyPlayerJoined{playerId}` whenever a member joins, so the match director
+  can serve a catch-up to the newcomer (the LAN `PlayerJoined` event, on the wire).
+
+A host player that disconnects (or quits) destroys the room: everyone is told with `Bye` and the
+connection closes (spec: 主持玩家 ESC/强退时其它玩家弹窗提示连接断开). A non-host member
+disconnecting mid-match is marked disconnected and kicked at match end, exactly like LAN (§ Ending).
+
+## Relay (lobby only)
+
+The server sits in the middle of the match channel too. Fighters wrap every rollback datagram:
+
+```
+u32  roomId      little-endian, the numeric room id (6 digits, as RoomSnapshot.RoomId)
+u8   srcSlot     the sender's seat, 0 or 1
+u8   dstSlot     the target seat, 0 or 1 (never equal to srcSlot)
+...  opaque rollback payload
+```
+
+The server forwards the payload to the dstSlot holder's match endpoint, and **never parses the
+payload** — it is a dumb forwarder for match traffic and only understands room bookkeeping.
+
+Endpoints: at handshake the server pairs the TCP source address with `Hello.MatchUdpPort`, but that
+port is a LOCAL port; behind a NAT the public UDP port differs. So the first datagram from a member
+is trusted by IP + seat claim, its observed source endpoint becomes the member's public match
+endpoint, and **the member is then pinned to that endpoint** — a datagram claiming the same seat
+from another port is dropped. That pin is what prevents a member behind the same NAT from injecting
+frames for another member's seat (IPs are shared there, so IP alone cannot disambiguate). It also
+means a mid-match NAT remap (which UDP mappings do not normally do at 60 fps) would drop traffic;
+accepted trade-off.
+
 ## Framing
 
 Every TCP message is:
@@ -69,12 +171,18 @@ must therefore agree on field ORDER. Rules:
 | 14 | `MatchCatchUp` | host → joiner | a player who joined mid-match: config + confirmed input history (§ Mid-match spectating) |
 | 15 | `MatchInputs` | host → joiner | new confirmed frames since the last batch, to keep the catch-up sim advancing |
 | 16 | `MatchInputReport` | fighter → host | the fighter's confirmed frames since the last report + the match geometry (§ Mid-match spectating, relay configuration) |
+| 20 | `LobbyList` | client → lobby | request a page of searchable rooms, newest first (§ Lobby) |
+| 21 | `LobbyRooms` | lobby → client | one page of the room list |
+| 22 | `LobbyCreate` | client → lobby | create a room; this connection becomes the host player |
+| 23 | `LobbyJoin` | client → lobby | join an existing room by its 6-digit id |
+| 24 | `HostSendTo` | host player → lobby | forward a frame (type + raw msgpack body) to one room member — the catch-up stream |
+| 25 | `MatchStart` | host player → lobby | request a match start with the stage geometry |
+| 26 | `LobbyPlayerJoined` | lobby → host player | a player just joined (mid-match catch-up hook) |
 
 Per-frame match input is **not** in this table: it goes over UDP inside the rollback library's own
 framing and is opaque to everything here (see `MouseKombat.Net/RollbackMatch.cs`). The one thing this
 side defines about it is the 10-bit input packing, which is deliberately the same one a replay file
 uses (`ReplayData.Pack`), so a networked match and a replay of it are fed byte-identical streams.
-| 20.. | reserved | | lobby-only messages (room list / create / join) land here in 期3-5 |
 
 ## Handshake
 
@@ -206,18 +314,10 @@ prediction window before the splash starts (`GameManager.NetKoConfirmFrames`).
 
 ## Relay (lobby only)
 
-For lobby games the server sits in the middle. TCP messages are relayed to the room's members
-unchanged. Match UDP is wrapped:
-
-```
-u32  roomId
-u8   srcSlot
-u8   dstSlot
-...  opaque rollback payload
-```
-
-The server never parses the payload — it is a dumb forwarder for match traffic and only understands
-room bookkeeping.
+See § Lobby and § Relay above: the server is a dumb forwarder for match UDP (envelope
+`u32 roomId + u8 srcSlot + u8 dstSlot + payload`, endpoint pinning after the first datagram) and a
+routing hub for the room channel (lobby messages 20..26; everything else is authored by the server
+itself, never relayed). TCP is not byte-relayed — the server implements the room authority.
 
 ## Note on the serializer
 

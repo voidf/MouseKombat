@@ -34,7 +34,16 @@ public enum MsgType : byte
                       // own and nothing else to learn the inputs from — the fighters are the only
                       // machines that know them. This is what lets the relay host (and mid-match
                       // joiners in a relay room) watch (see PROTOCOL.md § Mid-match spectating)
-    // 20.. reserved for the lobby-only room list / create / join messages (期3-5)
+    // Lobby-only messages (期3-5). Sent on the SAME connection as everything else; the lobby
+    // server (server/lobby_server.py) implements the whole table by hand.
+    LobbyList = 20,   // client -> lobby: request a page of searchable rooms (newest first)
+    LobbyRooms = 21,  // lobby -> client: one page of the room list
+    LobbyCreate = 22, // client -> lobby: create a room; this connection becomes the host player
+    LobbyJoin = 23,   // client -> lobby: join an existing room by its 6-digit id
+    HostSendTo = 24,  // host player -> lobby: forward a frame (type + raw msgpack body) to one
+                      // member of the room — carries the catch-up stream (see § Mid-match spectating)
+    MatchStart = 25,  // host player -> lobby: request a match start with the stage geometry
+    LobbyPlayerJoined = 26,// lobby -> host player: a player just joined (mid-match catch-up hook)
 }
 
 public static class NetVersion
@@ -264,4 +273,77 @@ public sealed class MatchInputReport
     [Key(7)] public float P1StartY { get; set; }
     [Key(8)] public float P2StartX { get; set; }
     [Key(9)] public float P2StartY { get; set; }
+}
+
+// ---- lobby-only messages (期3-5). See PROTOCOL.md § Lobby. ----
+
+[MessagePackObject]
+public sealed class LobbyList
+{
+    [Key(0)] public int Page { get; set; }      // 0-based; server pages at 10 entries per page
+}
+
+[MessagePackObject]
+public sealed class LobbyRoomEntry
+{
+    [Key(0)] public string RoomId { get; set; } = "";
+    [Key(1)] public string HostName { get; set; } = "";
+    [Key(2)] public bool HasPassword { get; set; }
+    [Key(3)] public int Players { get; set; }   // humans; AI seats never count
+    [Key(4)] public int MaxPlayers { get; set; }
+}
+
+[MessagePackObject]
+public sealed class LobbyRooms
+{
+    [Key(0)] public int Page { get; set; }
+    [Key(1)] public int TotalPages { get; set; }
+    [Key(2)] public LobbyRoomEntry[] Entries { get; set; } = System.Array.Empty<LobbyRoomEntry>();
+}
+
+[MessagePackObject]
+public sealed class LobbyCreate
+{
+    [Key(0)] public int MaxPlayers { get; set; } = 4;   // 2..4 (spec: 房间人数限制 2~4)
+    [Key(1)] public string Password { get; set; } = ""; // "" or exactly 4 digits
+    [Key(2)] public bool Searchable { get; set; } = true;
+}
+
+[MessagePackObject]
+public sealed class LobbyJoin
+{
+    [Key(0)] public string RoomId { get; set; } = "";   // 6 digits, as shown in the room list
+    [Key(1)] public string Password { get; set; } = "";
+}
+
+// The host player routing its match director's catch-up stream through the lobby server.
+// Body is the RAW msgpack body (a MatchCatchUp or MatchInputs array), forwarded verbatim.
+[MessagePackObject]
+public sealed class HostSendTo
+{
+    [Key(0)] public int TargetPlayerId { get; set; }
+    [Key(1)] public byte Type { get; set; }             // 14 MatchCatchUp / 15 MatchInputs only
+    [Key(2)] public byte[] Body { get; set; } = System.Array.Empty<byte>();
+}
+
+// The host player asking the lobby server to start the match, carrying the stage geometry the
+// server has no scene to read itself. The server answers with the standard StartMatch broadcast.
+[MessagePackObject]
+public sealed class MatchStart
+{
+    [Key(0)] public float StageMinX { get; set; } = 40f;
+    [Key(1)] public float StageMaxX { get; set; } = 760f;
+    [Key(2)] public float WorldWidth { get; set; } = 800f;
+    [Key(3)] public float P1StartX { get; set; } = 120f;
+    [Key(4)] public float P1StartY { get; set; } = 560f;
+    [Key(5)] public float P2StartX { get; set; } = 650f;
+    [Key(6)] public float P2StartY { get; set; } = 560f;
+}
+
+// The lobby server telling the host player that a member joined, so the host player's match
+// director can serve that joiner a catch-up (the LAN PlayerJoined event, on the wire).
+[MessagePackObject]
+public sealed class LobbyPlayerJoined
+{
+    [Key(0)] public int PlayerId { get; set; }
 }
