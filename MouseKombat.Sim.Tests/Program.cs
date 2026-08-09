@@ -727,6 +727,60 @@ internal static partial class Program
             Check(Pump(host, list, () => good.IsConnected),
                 "transport: and a well-behaved client still connects afterwards");
         }
+
+        // J. mid-match catch-up: the host pushes MatchCatchUp + MatchInputs, the client decodes both
+        {
+            using var host = new TcpRoomHost();
+            host.Start("127.0.0.1", 0, "主机", Ver);
+            using var a = new TcpRoomClient();
+            a.Connect("127.0.0.1", host.Port, "中途加入", Ver);
+            var list = new List<TcpRoomClient> { a };
+            Pump(host, list, () => a.IsConnected);
+            Drain(a);
+
+            // Put the room into "a match is running" so the snapshot carried by the catch-up is the
+            // one a mid-match joiner would really see (seats frozen, both characters picked).
+            host.Room.ClaimSeat(host.HostPlayerId, 0);
+            host.Room.PickCharacter(host.HostPlayerId, 0);
+            a.ClaimSeat(1);
+            Pump(host, list, () => host.Room.Seat(1).Occupied);
+            a.PickCharacter(1);
+            Pump(host, list, () => host.Room.Seat(1).Character == 1);
+            Check(host.Room.BeginMatch(), "transport: the match starts with both seats ready");
+
+            var cu = new MatchCatchUp
+            {
+                Room = host.Room.Snapshot(),
+                StageMinX = 40f, StageMaxX = 760f, WorldWidth = 800f,
+                P1StartX = 120f, P1StartY = 560f, P2StartX = 650f, P2StartY = 560f,
+                FrameCount = 3,
+                P1Inputs = new ushort[] { 1, 2, 3 },
+                P2Inputs = new ushort[] { 4, 5, 6 },
+            };
+            host.SendTo(a.PlayerId, MsgType.MatchCatchUp, cu);
+            host.SendTo(a.PlayerId, MsgType.MatchInputs,
+                new MatchInputs { StartFrame = 3, P1 = new ushort[] { 7 }, P2 = new ushort[] { 8 } });
+
+            MatchCatchUp gotCu = null;
+            MatchInputs gotMi = null;
+            Pump(host, list, () =>
+            {
+                while (a.TryDequeueEvent(out var e))
+                {
+                    if (e.Kind == TcpRoomClient.EventKind.MatchCatchUp) gotCu = e.Frame.As<MatchCatchUp>();
+                    else if (e.Kind == TcpRoomClient.EventKind.MatchInputs) gotMi = e.Frame.As<MatchInputs>();
+                }
+                return gotCu != null && gotMi != null;
+            });
+            Check(gotCu != null && gotCu.FrameCount == 3
+                  && gotCu.P1Inputs.Length == 3 && gotCu.P1Inputs[2] == 3
+                  && gotCu.P2Inputs.Length == 3 && gotCu.P2Inputs[0] == 4,
+                "transport: the client decodes MatchCatchUp with the full confirmed history");
+            Check(gotCu != null && gotCu.Room != null && gotCu.Room.MatchRunning,
+                "transport: the catch-up carries the authoritative match snapshot");
+            Check(gotMi != null && gotMi.StartFrame == 3 && gotMi.P1[0] == 7 && gotMi.P2[0] == 8,
+                "transport: the client decodes the MatchInputs stream batch");
+        }
     }
 
     // ---- WIRE FRAMING ----

@@ -14,7 +14,7 @@ namespace MouseKombat.Net;
 // ever touches this object's state.
 public sealed class TcpRoomClient : IDisposable
 {
-    public enum EventKind { Connecting, Connected, Rejected, RoomChanged, MatchStarting, MatchEnded, Disconnected, Error }
+    public enum EventKind { Connecting, Connected, Rejected, RoomChanged, MatchStarting, MatchEnded, MatchCatchUp, MatchInputs, Disconnected, Error }
 
     public readonly struct ClientEvent
     {
@@ -212,6 +212,8 @@ public sealed class TcpRoomClient : IDisposable
                     break;
                 case MsgType.StartMatch: Emit(EventKind.MatchStarting, null, frame); break;
                 case MsgType.MatchEnded: Emit(EventKind.MatchEnded, null, frame); break;
+                case MsgType.MatchCatchUp: Emit(EventKind.MatchCatchUp, null, frame); break;
+                case MsgType.MatchInputs: Emit(EventKind.MatchInputs, null, frame); break;
                 case MsgType.Bye:
                     LastError = frame.As<Bye>().Reason;
                     Emit(EventKind.Disconnected, LastError);

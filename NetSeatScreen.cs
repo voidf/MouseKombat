@@ -19,6 +19,13 @@ public partial class NetSeatScreen : Control
     [Export] public string LanMenuScenePath = "res://LanMenu.tscn";
     [Export] public string MainMenuScenePath = "res://MainMenu.tscn";
     [Export] public string MatchScenePath = "res://MFEntry.tscn";
+    [Export] public string SpectateScenePath = "res://Spectate.tscn";
+
+    // A mid-match joiner on this machine: the host answered with a catch-up package, so the next
+    // physics tick switches to the spectate screen. A flag rather than an immediate scene change:
+    // CatchUpReceived fires from the autoload's poll, and changing scene from inside another node's
+    // tick is where transitions start doubling up.
+    private bool _pendingSpectate;
 
     // What to show while a match is running and this machine is NOT in it — a relay host, or a
     // spectator in a configuration that cannot be watched. Sticky, because DefaultHint runs on every
@@ -101,6 +108,7 @@ public partial class NetSeatScreen : Control
             Net.Disconnected += OnDisconnected;
             Net.MatchStarting += OnMatchStarting;
             Net.MatchEnded += OnMatchEnded;
+            Net.CatchUpReceived += OnCatchUpReceived;
         }
         Render();
     }
@@ -116,6 +124,7 @@ public partial class NetSeatScreen : Control
         Net.Disconnected -= OnDisconnected;
         Net.MatchStarting -= OnMatchStarting;
         Net.MatchEnded -= OnMatchEnded;
+        Net.CatchUpReceived -= OnCatchUpReceived;
     }
 
     private void OnJoyConnectionChanged(long device, bool connected)
@@ -191,6 +200,13 @@ public partial class NetSeatScreen : Control
 
     public override void _PhysicsProcess(double delta)
     {
+        if (_pendingSpectate)
+        {
+            _pendingSpectate = false;
+            GetTree().ChangeSceneToFile(SpectateScenePath);
+            return;
+        }
+
         foreach (var s in _sources) s.Poll();
         _menuNav.Poll();
 
@@ -508,6 +524,41 @@ public partial class NetSeatScreen : Control
         foreach (var p in room.Players)
             if (p.PlayerId == s.OccupantPlayerId) return p.Name;
         return $"{seat + 1}P";
+    }
+
+    // The host answered a mid-match join: this machine has no seat (seats are frozen while the match
+    // runs), so the catch-up can only mean "you are a spectator — here is what has happened so far".
+    // Package the history into GameSession and switch to the spectate screen.
+    private void OnCatchUpReceived(MatchCatchUp cu)
+    {
+        if (Net == null || cu == null || cu.Room == null) return;
+        if (Net.LocalSeat() >= 0) return;            // seated players are in the match, not watching it
+        if (cu.Room.Seats.Length < RoomState.SeatCount) return;
+
+        var d = new ReplayData
+        {
+            Mode = ReplayData.ModeLan,
+            P1Char = cu.Room.Seats[0].CharacterId,
+            P2Char = cu.Room.Seats[1].CharacterId,
+            P1Name = SeatName(cu.Room, 0),
+            P2Name = SeatName(cu.Room, 1),
+            StageMinX = cu.StageMinX,
+            StageMaxX = cu.StageMaxX,
+            WorldWidth = cu.WorldWidth,
+            P1StartX = cu.P1StartX, P1StartY = cu.P1StartY,
+            P2StartX = cu.P2StartX, P2StartY = cu.P2StartY,
+            RoomId = cu.Room.RoomId ?? "",
+            Host = $"{Net.HostAddress}:{Net.Port}",
+        };
+        d.P1Inputs.AddRange(cu.P1Inputs);
+        d.P2Inputs.AddRange(cu.P2Inputs);
+        GameSession.CatchUpData = d;
+        GameSession.P1Name = d.P1Name;
+        GameSession.P2Name = d.P2Name;
+        GameSession.Mode = ReplayData.ModeLan;
+        GameSession.RoomId = d.RoomId;
+        GameSession.Host = d.Host;
+        _pendingSpectate = true;
     }
 
     private void OnMatchEnded(MatchEnded ended)

@@ -66,6 +66,8 @@ must therefore agree on field ORDER. Rules:
 | 11 | `MatchEnded` | host → all | a knockout happened; everyone returns to seat select |
 | 12 | `RemoveAi` | client → host | host only: free an AI seat (Backspace in the seat screen) |
 | 13 | `MatchResult` | fighter → host | reached the knockout; the host ends the match in room state |
+| 14 | `MatchCatchUp` | host → joiner | a player who joined mid-match: config + confirmed input history (§ Mid-match spectating) |
+| 15 | `MatchInputs` | host → joiner | new confirmed frames since the last batch, to keep the catch-up sim advancing |
 
 Per-frame match input is **not** in this table: it goes over UDP inside the rollback library's own
 framing and is opaque to everything here (see `MouseKombat.Net/RollbackMatch.cs`). The one thing this
@@ -137,8 +139,39 @@ player slot. That is also why the host can be a "fighter" while holding no seat 
 **Spectating requires the host to be running a session**, which it only does when it drives at least
 one seat. With two client fighters the host is a bare forwarder and there is nothing for a spectator
 session to attach to; `StartMatch.spectatingAvailable` says so rather than making each client
-re-derive the rule. Spectators must also be known **before** the session starts, so a machine that
-joins mid-match watches the *next* one.
+re-derive the rule. Spectators who were in the room when the match started join the session directly;
+a machine that joins **mid-match** cannot be added to a running session (Backdash refuses
+`AddSpectator` once synchronization completes), which is what the section below exists for.
+
+### Mid-match spectating
+
+A player joining while `MatchRunning` gets the match as data instead of a session:
+
+1. The host answers the join with `MatchCatchUp`: the authoritative snapshot the match started from
+   (characters, names), the stage geometry and start positions, and the **confirmed** frames of both
+   seats so far (packed with `ReplayData.Pack`, the same 10-bit stream a replay file stores). Only
+   the confirmed prefix is sent: everything after it is speculative and a rollback may still rewrite
+   it.
+2. The joiner builds a `GameSim` from the config and **replays the history** to reach the current
+   state — fast-forward, no prediction. Determinism is what makes this exact: the handshake already
+   refused a version mismatch, and the sim is fixed-point, so the same inputs from the same start
+   land on the same state on every machine.
+3. The host then sends `MatchInputs` once per physics tick: the confirmed frames since the joiner's
+   last batch, tracked per joiner so the stream is gap-free. The joiner's sim steps monotonically
+   and can never be rewound, which is exactly why the stream carries only frames the host has
+   confirmed (`RollbackMatch.ConfirmedFrame`) — a speculative frame corrected by a later rollback
+   would diverge the joiner's view forever. The joiner follows the fight at the confirmation lag
+   plus TCP latency, which is fine for watching.
+
+Seats are frozen while the match runs, so the snapshot carried in `MatchCatchUp` stays accurate for
+its whole lifetime. The stream ends when the match ends; `MatchEnded` brings the joiner back to seat
+select like everyone else.
+
+This only works when the host knows the inputs, which is exactly the case above: the host runs the
+match session itself (host + client, host + AI, AI + AI). A relay host sees only opaque UDP and has
+no history to serve, so a mid-match joiner there keeps waiting for the next match — the same
+limitation as pre-match spectating. Joining mid-match is also inherently a **catch-up**: the joiner
+has not seen the fight up to the point it joined, and nothing pretends otherwise.
 
 ### Ports
 

@@ -165,6 +165,20 @@ public sealed class RollbackMatch : INetcodeSessionHandler, IDisposable
     public int Frame => _session.GetInfo().CurrentFrame.Number;
     public bool IsInRollback => _session.GetInfo().IsInRollback;
 
+    // The highest frame both sides have CONFIRMED: everything at or below it is final and a rollback
+    // can never take it back. The live head (Frame) can be several frames ahead on predictions, so
+    // anything that must never be corrected — the mid-match spectator stream — reads THIS, not Frame.
+    // Backdash exposes the gap directly (FramesBehind = live - confirmed), so no internals leak.
+    public int ConfirmedFrame
+    {
+        get
+        {
+            var info = _session.GetInfo();
+            int behind = Math.Max(0, info.FramesBehind.Frames);
+            return Math.Max(0, info.CurrentFrame.Number - behind);
+        }
+    }
+
     private RollbackMatch(GameSim sim, IMatchPresenter view, MatchNetSetup setup)
     {
         _sim = sim ?? throw new ArgumentNullException(nameof(sim));

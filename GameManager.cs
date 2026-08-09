@@ -112,6 +112,17 @@ public partial class GameManager : Node2D, IMatchPresenter
     private int _koHeldFrames = -1;
     private int _pendingNetWinner = -1;
 
+    // ---- mid-match spectating (host side) ----
+    // The host keeps every frame of the current match here (RecordAt semantics: a rollback re-sim
+    // overwrites the speculative value). A player joining mid-match gets the CONFIRMED prefix as
+    // MatchCatchUp, replays it to the current state, and then follows the per-tick MatchInputs
+    // stream — which also serves only CONFIRMED frames (RollbackMatch.ConfirmedFrame): the joiner's
+    // sim steps monotonically and can never be rewound, so a speculative frame that a later rollback
+    // corrected would diverge the joiner's view forever. _spectatorNextFrame tracks, per joiner,
+    // which frame has been delivered, so the stream is gap-free.
+    private readonly ReplayData _netHistory = new();
+    private readonly Dictionary<int, int> _spectatorNextFrame = new();
+
     [Export] public string NetSeatScenePath = "res://NetSeat.tscn";
 
     private Label _netStatus;
@@ -184,6 +195,7 @@ public partial class GameManager : Node2D, IMatchPresenter
         {
             net.MatchEnded += OnNetMatchEnded;
             net.Disconnected += OnNetDisconnected;
+            net.PlayerJoined += OnHostPlayerJoined;
         }
 
         var setup = new MatchNetSetup
@@ -453,6 +465,7 @@ public partial class GameManager : Node2D, IMatchPresenter
             return;
         }
         if (_stalledTicks > 0) { _stalledTicks = 0; SetNetStatus(""); }
+        StreamCatchUpSpectators();
 
         // A CONFIRMED knockout, not a predicted one — see NetKoConfirmFrames.
         if (_koHeldFrames >= NetKoConfirmFrames)
@@ -462,6 +475,88 @@ public partial class GameManager : Node2D, IMatchPresenter
             BeginWin(_pendingNetWinner);
         }
     }
+
+    // ---- mid-match spectating: serving the confirmed-input stream ----
+    // Runs once per tick on the host, after the session advanced. Each mid-match joiner has a "next
+    // frame to deliver" cursor; everything between the cursor and the CONFIRMED frame goes out as one
+    // batch. On a healthy link that is one frame per physics tick; a burst after a stall carries more.
+    private void StreamCatchUpSpectators()
+    {
+        if (_spectatorNextFrame.Count == 0 || !IsHostNetMatch) return;
+        var net = NetSession.Instance;
+        if (net?.Host == null) return;
+        int upTo = _netMatch.ConfirmedFrame;
+        var gone = new List<int>();
+        foreach (var kv in _spectatorNextFrame)
+        {
+            // A joiner who left the room mid-match has no stream to serve any more. The room snapshot
+            // is refreshed on PlayerLeft, so membership is answerable from the host's own copy.
+            if (!RoomContains(net.Room, kv.Key)) { gone.Add(kv.Key); continue; }
+            if (kv.Value > upTo) continue;   // nothing new confirmed yet
+            int start = kv.Value;
+            int count = upTo - start + 1;
+            var msg = new MatchInputs { StartFrame = start };
+            msg.P1 = new ushort[count];
+            msg.P2 = new ushort[count];
+            for (int i = 0; i < count; i++)
+            {
+                msg.P1[i] = _netHistory.P1Inputs[start + i];
+                msg.P2[i] = _netHistory.P2Inputs[start + i];
+            }
+            net.Host.SendTo(kv.Key, MsgType.MatchInputs, msg);
+            _spectatorNextFrame[kv.Key] = upTo + 1;
+        }
+        foreach (int id in gone) _spectatorNextFrame.Remove(id);
+    }
+
+    private static bool RoomContains(RoomSnapshot room, int playerId)
+    {
+        if (room == null) return false;
+        foreach (var p in room.Players) if (p.PlayerId == playerId) return true;
+        return false;
+    }
+
+    // A player joined while the match is running: hand them the CONFIRMED history and open a stream
+    // from the next frame. Only the host can (it is the only machine that knows both seats' inputs),
+    // and only while it runs the session itself — a relay host has no history and therefore sends
+    // nothing, which is exactly the current "cannot watch this configuration" behavior.
+    private void OnHostPlayerJoined(int playerId)
+    {
+        if (!IsHostNetMatch || playerId <= 0) return;
+        var net = NetSession.Instance;
+        if (net?.Host == null || net.Room == null || !net.Room.MatchRunning) return;
+
+        // The speculative tail of the history (frames newer than the confirmed point) is not sent:
+        // the joiner must land on a state nothing can take back. If the session has not confirmed
+        // any frame yet the history is still empty; FrameCount=0 is a legal catch-up (the joiner
+        // starts at frame 0 and the stream feeds everything).
+        int count = System.Math.Min(_netMatch.ConfirmedFrame + 1, _netHistory.FrameCount);
+        var p1 = new ushort[count];
+        var p2 = new ushort[count];
+        for (int i = 0; i < count; i++)
+        {
+            p1[i] = _netHistory.P1Inputs[i];
+            p2[i] = _netHistory.P2Inputs[i];
+        }
+        var cu = new MatchCatchUp
+        {
+            Room = net.Room,
+            StageMinX = StageMinX,
+            StageMaxX = StageMaxX,
+            WorldWidth = GetViewport().GetVisibleRect().Size.X,
+            P1StartX = P1StartPos.X,
+            P1StartY = P1StartPos.Y,
+            P2StartX = P2StartPos.X,
+            P2StartY = P2StartPos.Y,
+            FrameCount = count,
+            P1Inputs = p1,
+            P2Inputs = p2,
+        };
+        _spectatorNextFrame[playerId] = count;
+        net.Host.SendTo(playerId, MsgType.MatchCatchUp, cu);
+    }
+
+    private bool IsHostNetMatch => _netMatch != null && NetSession.Instance?.IsHost == true;
 
     private void DrainNetEvents()
     {
@@ -523,6 +618,11 @@ public partial class GameManager : Node2D, IMatchPresenter
         // RecordAt, not Record: a frame first simulated with a PREDICTED opponent input is re-simulated
         // with the real one, and the replay has to keep the confirmed version.
         _recording?.RecordAt(frame, f0, f1);
+        // The host's catch-up history is the same data, kept independently of the replay-recording
+        // setting: a mid-match joiner must be able to catch up even when no replay files are written.
+        // The stream below only serves the CONFIRMED prefix of this, so the speculative tail never
+        // reaches a joiner.
+        if (IsHostNetMatch) _netHistory.RecordAt(frame, f0, f1);
         PresentFrame(res, rollback);
 
         // How long the knockout has stood. A rollback that erases it clears MatchOver on the sim, which
@@ -645,6 +745,7 @@ public partial class GameManager : Node2D, IMatchPresenter
         {
             net.MatchEnded -= OnNetMatchEnded;
             net.Disconnected -= OnNetDisconnected;
+            net.PlayerJoined -= OnHostPlayerJoined;
         }
         _netMatch?.Dispose();
         _netMatch = null;

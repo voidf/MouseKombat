@@ -24,6 +24,11 @@ public enum MsgType : byte
     MatchEnded = 11,
     RemoveAi = 12,   // host only: free an AI seat the host placed (Backspace in the seat screen)
     MatchResult = 13,// fighter -> host: this machine reached the knockout, here is the winner
+    MatchCatchUp = 14,// host -> a player who JOINED mid-match: the match config and every confirmed
+                      // input so far, which the joiner replays to reach the current state (see
+                      // SpectateScreen; PROTOCOL.md § Mid-match spectating)
+    MatchInputs = 15,// host -> a mid-match joiner: the confirmed inputs since the last batch, to keep
+                      // their catch-up sim advancing once it has caught up
     // 20.. reserved for the lobby-only room list / create / join messages (期3-5)
 }
 
@@ -190,4 +195,45 @@ public sealed class MatchEnded
     // Players who dropped during the match: kicked now rather than mid-round, where their inputs were
     // simply treated as neutral.
     [Key(1)] public int[] DroppedPlayerIds { get; set; } = System.Array.Empty<int>();
+}
+
+// The host answering a mid-match joiner ("what is happening right now, and what has happened so far").
+// Sent once, right after Welcome, when the joiner arrives while MatchRunning and the host runs the
+// match session itself (so it knows the inputs — see PROTOCOL.md § Mid-match spectating for why the
+// relay configuration cannot).
+//
+// The body is the same input history a replay stores: every CONFIRMED frame of both seats, packed
+// with ReplayData.Pack. The joiner builds a GameSim from the config, steps through the history to
+// reach the current state, then keeps stepping as MatchInputs batches arrive.
+[MessagePackObject]
+public sealed class MatchCatchUp
+{
+    // The authoritative snapshot the match started from: seats carry the characters, players the
+    // names. Resent rather than trusted from the joiner's own (possibly stale) snapshot, exactly like
+    // StartMatch does.
+    [Key(0)] public RoomSnapshot Room { get; set; }
+    [Key(1)] public float StageMinX { get; set; } = 40f;
+    [Key(2)] public float StageMaxX { get; set; } = 760f;
+    [Key(3)] public float WorldWidth { get; set; } = 800f;
+    [Key(4)] public float P1StartX { get; set; } = 120f;
+    [Key(5)] public float P1StartY { get; set; } = 560f;
+    [Key(6)] public float P2StartX { get; set; } = 650f;
+    [Key(7)] public float P2StartY { get; set; } = 560f;
+    // Confirmed frames in the history. 0 is legal (joined before the first frame); the stream then
+    // feeds everything from frame 0.
+    [Key(8)] public int FrameCount { get; set; }
+    [Key(9)] public ushort[] P1Inputs { get; set; } = System.Array.Empty<ushort>();
+    [Key(10)] public ushort[] P2Inputs { get; set; } = System.Array.Empty<ushort>();
+}
+
+// One batch of new confirmed frames for a mid-match joiner. The host sends it per physics tick; on a
+// healthy link that is one frame per message (two ushorts), and a burst simply carries more.
+[MessagePackObject]
+public sealed class MatchInputs
+{
+    // Frame number of P1[0] / P2[0]. The joiner verifies this is exactly its next frame and drops
+    // anything else: a gap would silently shift the whole rest of the match.
+    [Key(0)] public int StartFrame { get; set; }
+    [Key(1)] public ushort[] P1 { get; set; } = System.Array.Empty<ushort>();
+    [Key(2)] public ushort[] P2 { get; set; } = System.Array.Empty<ushort>();
 }

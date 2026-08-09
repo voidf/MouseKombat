@@ -40,6 +40,12 @@ public static class GameSession
     public static MouseKombat.Net.MatchPlan NetPlan;
     public static bool IsNetMatch => NetPlan != null;
 
+    // Non-null = entering the SPECTATE scene as a mid-match joiner. Carries the match config and the
+    // confirmed input history the host sent (MatchCatchUp); the spectate screen replays it to reach
+    // the current state and then follows the live input stream. Set by the seat screen, read once by
+    // SpectateScreen.
+    public static ReplayData CatchUpData;
+
     public static void Set(IInputSource p1, IInputSource p2)
     {
         P1 = p1;
@@ -61,6 +67,7 @@ public static class GameSession
         RoomId = "";
         Host = "";
         NetPlan = null;
+        CatchUpData = null;
         Configured = false;
     }
 }

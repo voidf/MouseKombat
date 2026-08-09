@@ -26,6 +26,15 @@ public partial class NetSession : Node
     public event Action<string> Disconnected;     // reason, for the popup
     public event Action<StartMatch> MatchStarting;
     public event Action<MatchEnded> MatchEnded;
+    // Host only: someone joined the room. The host's match director listens and hands a mid-match
+    // joiner the catch-up package (see MatchCatchUp / SpectateScreen).
+    public event Action<int> PlayerJoined;
+    // Client only: the host answered a mid-match join. The seat screen switches to the spectate
+    // screen on CatchUpReceived; InputsReceived keeps that screen's sim advancing. Everything is also
+    // buffered in PendingCatchUp / PendingStreamInputs, so messages that arrive while the scene is
+    // changing are not lost — the spectate screen drains the buffers in _Ready.
+    public event Action<MatchCatchUp> CatchUpReceived;
+    public event Action<MatchInputs> InputsReceived;
 
     public TcpRoomHost Host { get; private set; }
     public TcpRoomClient Client { get; private set; }
@@ -66,6 +75,13 @@ public partial class NetSession : Node
     public int LocalPlayerId => IsHost ? Host.HostPlayerId : (Client?.PlayerId ?? 0);
 
     public RoomSnapshot Room { get; private set; }
+
+    // ---- mid-match spectating (see MatchCatchUp) ----
+    // Set on the client when the host answers a mid-match join. PendingStreamInputs holds every
+    // MatchInputs batch received since, including ones that arrive while the spectate screen is being
+    // loaded; the screen drains it in _Ready and then follows InputsReceived live.
+    public MatchCatchUp PendingCatchUp { get; private set; }
+    public readonly List<MatchInputs> PendingStreamInputs = new();
 
     public static string GameVersion =>
         (string)ProjectSettings.GetSetting("application/config/version", "");
@@ -142,6 +158,8 @@ public partial class NetSession : Node
         MatchSocket?.CloseNow();
         MatchSocket = null;
         Room = null;
+        PendingCatchUp = null;
+        PendingStreamInputs.Clear();
         _lockedDevices.Clear();
     }
 
@@ -296,8 +314,12 @@ public partial class NetSession : Node
         while (Host.TryDequeueEvent(out var e))
         {
             if (e.Kind is TcpRoomHost.EventKind.RoomChanged
-                       or TcpRoomHost.EventKind.PlayerJoined
                        or TcpRoomHost.EventKind.PlayerLeft) changed = true;
+            else if (e.Kind == TcpRoomHost.EventKind.PlayerJoined)
+            {
+                changed = true;
+                PlayerJoined?.Invoke(e.PlayerId);
+            }
             else if (e.Kind == TcpRoomHost.EventKind.MatchResult) reportedWinner = e.Value;
         }
 
@@ -331,8 +353,21 @@ public partial class NetSession : Node
                     break;
                 case TcpRoomClient.EventKind.MatchEnded:
                     EndMatchLocal();
+                    PendingCatchUp = null;
+                    PendingStreamInputs.Clear();
                     MatchEnded?.Invoke(e.Frame.As<MatchEnded>());
                     break;
+                case TcpRoomClient.EventKind.MatchCatchUp:
+                    PendingCatchUp = e.Frame.As<MatchCatchUp>();
+                    CatchUpReceived?.Invoke(PendingCatchUp);
+                    break;
+                case TcpRoomClient.EventKind.MatchInputs:
+                {
+                    var m = e.Frame.As<MatchInputs>();
+                    PendingStreamInputs.Add(m);
+                    InputsReceived?.Invoke(m);
+                    break;
+                }
                 case TcpRoomClient.EventKind.Rejected:
                 case TcpRoomClient.EventKind.Disconnected:
                 {
