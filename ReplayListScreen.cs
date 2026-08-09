@@ -39,9 +39,14 @@ public partial class ReplayListScreen : Control
     private const int DeleteButtonWidth = 34;
 
     private readonly List<ReplayStore.Entry> _entries = new();
+    private MenuPad _menuPad;
+    private Button _firstPlay;   // first row's play button, the gamepad's default focus
 
     public override void _Ready()
     {
+        _menuPad = new MenuPad();
+        _menuPad.Cancelled += () => GetTree().ChangeSceneToFile(MainMenuScenePath);   // B = Esc
+        AddChild(_menuPad);
         BuildHeader();
         Refresh();
     }
@@ -103,7 +108,14 @@ public partial class ReplayListScreen : Control
         _entries.AddRange(ReplayStore.ListAll());
 
         foreach (var c in Rows.GetChildren()) c.QueueFree();
+        _firstPlay = null;
         foreach (var e in _entries) Rows.AddChild(BuildRow(e));
+
+        if (_menuPad != null)
+        {
+            // the pad lands on the newest replay's play button; on an empty list, on the back button
+            _menuPad.DefaultFocus = _firstPlay ?? GetNodeOrNull<Button>("Footer/Back");
+        }
 
         if (EmptyLabel != null) EmptyLabel.Visible = _entries.Count == 0;
         if (CountLabel != null)
@@ -143,6 +155,7 @@ public partial class ReplayListScreen : Control
             string path = e.Path;
             play.Pressed += () => OpenReplay(path);
             line.AddChild(play);
+            if (_firstPlay == null) _firstPlay = play;
         }
 
         // one-click delete, no confirmation (per spec)

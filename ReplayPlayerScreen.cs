@@ -36,6 +36,7 @@ public partial class ReplayPlayerScreen : Control
 
     private ReplaySession _session;
     private Player _p1, _p2;
+    private MenuPad _menuPad;
 
     // ---- precomputed timeline ----
     // The whole replay is simulated once at load, capturing each frame's ANIMATION state for both
@@ -62,6 +63,11 @@ public partial class ReplayPlayerScreen : Control
 
     public override void _Ready()
     {
+        // Created before the data check so B can still take a player out of a failed load.
+        _menuPad = new MenuPad { DefaultFocus = PlayButton };
+        _menuPad.Cancelled += OnBackPressed;   // B = Esc = back to the list
+        AddChild(_menuPad);
+
         string path = ReplayStore.PendingPath;
         var data = string.IsNullOrEmpty(path) ? null : ReplayStore.Load(path, out _);
         if (data == null)

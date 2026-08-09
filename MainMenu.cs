@@ -17,12 +17,19 @@ public partial class MainMenu : Control
     [Export] public Label StatusLabel;   // transient "not built yet" line under the buttons
 
     private SettingsPopup _settings;
+    private MenuPad _menuPad;
     private Timer _statusTimer;
 
     public override void _Ready()
     {
         _settings = new SettingsPopup();
         AddChild(_settings);
+
+        _menuPad = new MenuPad
+        {
+            DefaultFocus = GetNodeOrNull<Button>("Layout/Buttons/LobbyButton"),
+        };
+        AddChild(_menuPad);
 
         _statusTimer = new Timer { OneShot = true, WaitTime = 2.5 };
         _statusTimer.Timeout += () => { if (StatusLabel != null) StatusLabel.Text = ""; };
@@ -37,6 +44,15 @@ public partial class MainMenu : Control
 
         // keyboard/gamepad users land on the first mode rather than nothing
         GetNodeOrNull<Button>("Layout/Buttons/LobbyButton")?.GrabFocus();
+
+        // closing the settings popup hands the pad back to the menu buttons
+        _settings.Closed += () => _menuPad.DefaultFocus?.GrabFocus();
+    }
+
+    public override void _PhysicsProcess(double delta)
+    {
+        // While the settings popup owns the input, the menu pad must stay quiet.
+        if (_menuPad != null) _menuPad.Enabled = !(_settings?.IsOpen ?? false);
     }
 
     private void Wire(string name, System.Action onPressed)

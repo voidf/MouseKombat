@@ -27,8 +27,14 @@ public partial class LanMenuScreen : Control
     // about six Chinese characters.
     public const int NameMaxBytes = 18;
 
+    private MenuPad _menuPad;
+
     public override void _Ready()
     {
+        _menuPad = new MenuPad { DefaultFocus = HostButton };
+        _menuPad.Cancelled += OnBackPressed;   // B = Esc = leave the form
+        AddChild(_menuPad);
+
         if (NameField != null)
         {
             NameField.Text = DefaultPlayerName();

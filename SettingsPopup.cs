@@ -1,4 +1,5 @@
 using Godot;
+using System.Collections.Generic;
 
 // Settings panel. A CanvasLayer, not a plain Control, so it draws over whatever spawned it without
 // caring about that scene's node order — the point of this being a popup rather than its own scene
@@ -6,21 +7,112 @@ using Godot;
 //
 // Built in code for the same reason CharSelect is: several screens instantiate it and there is no
 // shared .tscn to keep in sync.
+//
+// Gamepad: the d-pad / left stick moves between the options (BGM, SFX, replay cap, the ✕ button),
+// left/right adjusts the highlighted one (volume in 10% steps, replay cap in 1), A presses the
+// focused control and B closes. Like every menu, only the focused window's pads are read; the
+// built-in ui_* actions were already stripped of joypad by MenuPad.
 public partial class SettingsPopup : CanvasLayer
 {
     [Signal] public delegate void ClosedEventHandler();
 
     [Export] public int PopupLayer = 100;
 
+    private const double VolumeStep = 0.1;
+    private const int ReplayStep = 1;
+
     private HSlider _bgm, _sfx;
     private Label _bgmValue, _sfxValue;
     private SpinBox _replayMax;
+    private Button _close;
+
+    private enum Option { Bgm, Sfx, Replay, Close }
+    private Option _option = Option.Bgm;
+
+    private readonly List<GamepadSource> _pads = new();
+    private int _vDir, _vHold;    // up/down hold state for the repeat timer
+    private int _hDir, _hHold;    // left/right hold state
+
+    [Export] public int NavRepeatFirstFrames = 18;
+    [Export] public int NavRepeatFrames = 6;
 
     public override void _Ready()
     {
         Layer = PopupLayer;
         BuildUi();
         Hide();
+
+        foreach (int dev in Input.GetConnectedJoypads()) _pads.Add(new GamepadSource(dev));
+        Input.JoyConnectionChanged += OnJoyConnectionChanged;
+    }
+
+    public override void _ExitTree() => Input.JoyConnectionChanged -= OnJoyConnectionChanged;
+
+    private void OnJoyConnectionChanged(long device, bool connected)
+    {
+        string id = "pad" + device;
+        if (connected)
+        {
+            if (_pads.Find(p => p.Id == id) == null) _pads.Add(new GamepadSource((int)device));
+            return;
+        }
+        _pads.RemoveAll(p => p.Id == id);
+    }
+
+    public override void _PhysicsProcess(double delta)
+    {
+        if (!Visible || _pads.Count == 0) return;
+        if (!GetWindow().HasFocus()) return;   // only the focused window's pads steer this popup
+
+        foreach (var p in _pads) p.Poll();
+
+        int v = (_pads.Exists(p => p.Down) ? 1 : 0) - (_pads.Exists(p => p.Up) ? 1 : 0);
+        int h = (_pads.Exists(p => p.Right) ? 1 : 0) - (_pads.Exists(p => p.Left) ? 1 : 0);
+        if (StepAxis(ref _vDir, ref _vHold, v)) MoveOption(v);
+        if (StepAxis(ref _hDir, ref _hHold, h)) Adjust(h);
+
+        if (_pads.Exists(p => p.ConfirmJustPressed)) MenuPad.PressFocused(GetViewport());
+        if (_pads.Exists(p => p.CancelJustPressed)) { Close(); GetViewport().SetInputAsHandled(); }
+    }
+
+    // Fires on the press edge, then auto-repeats while held — same pacing as CharSelect/MenuPad.
+    private bool StepAxis(ref int dir, ref int hold, int now)
+    {
+        if (now == 0) { dir = 0; hold = 0; return false; }
+        if (now != dir) { dir = now; hold = 0; return true; }
+        hold++;
+        int threshold = hold <= NavRepeatFirstFrames ? NavRepeatFirstFrames : NavRepeatFrames;
+        if (hold >= threshold) { hold = 0; return true; }
+        return false;
+    }
+
+    private void MoveOption(int d)
+    {
+        _option = (Option)Mathf.PosMod((int)_option + d, 4);
+        switch (_option)
+        {
+            case Option.Bgm: _bgm.GrabFocus(); break;
+            case Option.Sfx: _sfx.GrabFocus(); break;
+            case Option.Replay: _replayMax.GrabFocus(); break;
+            case Option.Close: _close.GrabFocus(); break;
+        }
+    }
+
+    private void Adjust(int d)
+    {
+        switch (_option)
+        {
+            case Option.Bgm:
+                _bgm.Value = Mathf.Clamp(_bgm.Value + VolumeStep * d, 0.0, 1.0);
+                break;
+            case Option.Sfx:
+                _sfx.Value = Mathf.Clamp(_sfx.Value + VolumeStep * d, 0.0, 1.0);
+                break;
+            case Option.Replay:
+                _replayMax.Value = Mathf.Clamp(_replayMax.Value + ReplayStep * d, 1, 999);
+                break;
+            case Option.Close: break;
+        }
     }
 
     public void Open()
@@ -35,7 +127,9 @@ public partial class SettingsPopup : CanvasLayer
             _replayMax.SetValueNoSignal(s.ReplayMax);
         }
         RefreshValueLabels();
+        _option = Option.Bgm;
         Show();
+        _bgm.GrabFocus();   // after Show: focusing a hidden control would not stick
     }
 
     public void Close()
@@ -97,17 +191,17 @@ public partial class SettingsPopup : CanvasLayer
         header.AddChild(title);
 
         // red X, top-right of the panel
-        var close = new Button
+        _close = new Button
         {
             Text = "✕",
             CustomMinimumSize = new Vector2(34, 34),
             TooltipText = "关闭 (Esc)",
         };
-        close.AddThemeColorOverride("font_color", new Color(1f, 0.45f, 0.42f));
-        close.AddThemeColorOverride("font_hover_color", new Color(1f, 0.7f, 0.68f));
-        close.AddThemeFontSizeOverride("font_size", 20);
-        close.Pressed += Close;
-        header.AddChild(close);
+        _close.AddThemeColorOverride("font_color", new Color(1f, 0.45f, 0.42f));
+        _close.AddThemeColorOverride("font_hover_color", new Color(1f, 0.7f, 0.68f));
+        _close.AddThemeFontSizeOverride("font_size", 20);
+        _close.Pressed += Close;
+        header.AddChild(_close);
 
         _bgm = AddSlider(col, "BGM 音量", out _bgmValue, v =>
         {
