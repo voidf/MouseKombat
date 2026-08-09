@@ -29,6 +29,11 @@ public enum MsgType : byte
                       // SpectateScreen; PROTOCOL.md § Mid-match spectating)
     MatchInputs = 15,// host -> a mid-match joiner: the confirmed inputs since the last batch, to keep
                       // their catch-up sim advancing once it has caught up
+    MatchInputReport = 16,// fighter -> host (relay configuration only): the confirmed inputs since the
+                      // last report, plus the match geometry. The relay host has no simulation of its
+                      // own and nothing else to learn the inputs from — the fighters are the only
+                      // machines that know them. This is what lets the relay host (and mid-match
+                      // joiners in a relay room) watch (see PROTOCOL.md § Mid-match spectating)
     // 20.. reserved for the lobby-only room list / create / join messages (期3-5)
 }
 
@@ -236,4 +241,27 @@ public sealed class MatchInputs
     [Key(0)] public int StartFrame { get; set; }
     [Key(1)] public ushort[] P1 { get; set; } = System.Array.Empty<ushort>();
     [Key(2)] public ushort[] P2 { get; set; } = System.Array.Empty<ushort>();
+}
+
+// A fighter telling the host what it CONFIRMED since the last report. The body is the same shape as
+// MatchInputs (a slice of the 10-bit input stream), plus the match geometry: in the relay
+// configuration the host has no scene of its own to read the geometry from, and the fighters are the
+// only machines that know it. Sent every physics tick for as long as the fighter runs a session; a
+// few floats per tick is nothing on a LAN, and it keeps the message shape trivial.
+[MessagePackObject]
+public sealed class MatchInputReport
+{
+    // Frame number of P1[0] / P2[0].
+    [Key(0)] public int StartFrame { get; set; }
+    [Key(1)] public ushort[] P1 { get; set; } = System.Array.Empty<ushort>();
+    [Key(2)] public ushort[] P2 { get; set; } = System.Array.Empty<ushort>();
+    // The match geometry, repeated on every report. Sent rather than assumed because these are the
+    // fighters' AUTHORED values (their scene's slots), which is the only source of truth.
+    [Key(3)] public float StageMinX { get; set; }
+    [Key(4)] public float StageMaxX { get; set; }
+    [Key(5)] public float WorldWidth { get; set; }
+    [Key(6)] public float P1StartX { get; set; }
+    [Key(7)] public float P1StartY { get; set; }
+    [Key(8)] public float P2StartX { get; set; }
+    [Key(9)] public float P2StartY { get; set; }
 }

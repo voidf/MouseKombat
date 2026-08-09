@@ -29,10 +29,12 @@ public partial class NetSession : Node
     // Host only: someone joined the room. The host's match director listens and hands a mid-match
     // joiner the catch-up package (see MatchCatchUp / SpectateScreen).
     public event Action<int> PlayerJoined;
-    // Client only: the host answered a mid-match join. The seat screen switches to the spectate
-    // screen on CatchUpReceived; InputsReceived keeps that screen's sim advancing. Everything is also
-    // buffered in PendingCatchUp / PendingStreamInputs, so messages that arrive while the scene is
-    // changing are not lost — the spectate screen drains the buffers in _Ready.
+    // CatchUpReceived: client only — the host answered a mid-match join; the seat screen switches to
+    // the spectate screen. InputsReceived: BOTH sides — a spectate screen's sim advancing stream. On
+    // a client it is the host's MatchInputs batches; on a relay host it is the fighters' reports
+    // (merged in PollHost). Everything is also buffered in PendingCatchUp / PendingStreamInputs, so
+    // messages that arrive while the scene is changing are not lost — the spectate screen drains the
+    // buffers in _Ready.
     public event Action<MatchCatchUp> CatchUpReceived;
     public event Action<MatchInputs> InputsReceived;
 
@@ -82,6 +84,26 @@ public partial class NetSession : Node
     // loaded; the screen drains it in _Ready and then follows InputsReceived live.
     public MatchCatchUp PendingCatchUp { get; private set; }
     public readonly List<MatchInputs> PendingStreamInputs = new();
+
+    // ---- relay-config spectating: the host's catch-up authority ----
+    //
+    // When both fighters are clients the host runs NO session and has no simulation of its own, so it
+    // can neither watch nor serve mid-match joiners — the fighters are the only machines that know the
+    // inputs. They report every CONFIRMED frame over TCP (MatchInputReport), which this buffer merges.
+    // The relay host's own seat screen then enters the spectate screen (it replays the same way a
+    // joiner does), and joiners who arrive mid-match are served from here too. Both consumers follow
+    // the InputsReceived event.
+    //
+    // Only meaningful while Relay != null. In host-session configurations the host's GameManager is
+    // the catch-up authority instead, and this buffer stays empty.
+    public readonly ReplayData CatchUpHistory = new();
+    public float CatchUpStageMinX = 40f, CatchUpStageMaxX = 760f, CatchUpWorldWidth = 800f;
+    public float CatchUpP1StartX = 120f, CatchUpP1StartY = 560f;
+    public float CatchUpP2StartX = 650f, CatchUpP2StartY = 560f;
+    // True once the first report landed (it carries the geometry). Until then the relay host cannot
+    // build a sim, so its seat screen waits.
+    public bool CatchUpReady { get; private set; }
+    private readonly Dictionary<int, int> _relaySpectatorNextFrame = new();  // joiner id -> next frame
 
     public static string GameVersion =>
         (string)ProjectSettings.GetSetting("application/config/version", "");
@@ -170,6 +192,22 @@ public partial class NetSession : Node
         Relay?.Dispose();
         Relay = null;
         Plan = null;
+        // Everything match-scoped goes with it. The relay catch-up buffer is refilled by the next
+        // match's fighters; PendingStreamInputs is a SHARED buffer (a client's stream batches, a
+        // relay host's merged reports) and a stale batch from a finished match would replay the
+        // wrong fight — the next spectate screen drains it believing it belongs to its match.
+        CatchUpHistory.P1Inputs.Clear();
+        CatchUpHistory.P2Inputs.Clear();
+        CatchUpReady = false;
+        _relaySpectatorNextFrame.Clear();
+        PendingCatchUp = null;
+        if (PendingStreamInputs.Count > 0)
+        {
+            // A shared buffer (a client's stream batches, a relay host's merged reports) that only
+            // the match's spectate screen drains. Leftovers here would replay the wrong fight.
+            GD.Print($"[net] dropped {PendingStreamInputs.Count} stale catch-up stream batch(es) at match end");
+            PendingStreamInputs.Clear();
+        }
     }
 
     // ---- requests: one call site for screens, whichever side we are ----
@@ -304,6 +342,7 @@ public partial class NetSession : Node
         // Forwarding runs on the game tick like every other transport here. The host is not simulating
         // in this configuration, so this is all it does for the match.
         Relay?.Poll();
+        if (Host != null && Relay != null) StreamRelaySpectators();
     }
 
     private void PollHost()
@@ -319,8 +358,14 @@ public partial class NetSession : Node
             {
                 changed = true;
                 PlayerJoined?.Invoke(e.PlayerId);
+                // The relay host serves mid-match joiners itself (no GameManager exists here): the
+                // history is confirmed by construction (fighters only report confirmed frames), so a
+                // join any time after the first report can be answered immediately.
+                if (Relay != null && Room != null && Room.MatchRunning && CatchUpReady)
+                    ServeRelayCatchUp(e.PlayerId);
             }
             else if (e.Kind == TcpRoomHost.EventKind.MatchResult) reportedWinner = e.Value;
+            else if (e.Kind == TcpRoomHost.EventKind.InputReport) MergeInputReport(e);
         }
 
         // A fighter reached the knockout. This is how the match ends when the host is only relaying and
@@ -334,6 +379,122 @@ public partial class NetSession : Node
         if (!changed) return;
         Room = Host.Room.Snapshot();
         RoomChanged?.Invoke();
+    }
+
+    // A fighter's confirmed-input report (relay configuration only). Merged into CatchUpHistory,
+    // which feeds both the relay host's own spectate screen and the catch-ups it serves to mid-match
+    // joiners. Report frames are CONFIRMED by construction — the fighter only reports what its own
+    // session confirmed — so nothing here needs the trim the host-session path applies.
+    private void MergeInputReport(TcpRoomHost.HostEvent e)
+    {
+        var r = e.Report;
+        if (r == null) return;
+        if (!CatchUpReady)
+        {
+            CatchUpStageMinX = r.StageMinX;
+            CatchUpStageMaxX = r.StageMaxX;
+            CatchUpWorldWidth = r.WorldWidth;
+            CatchUpP1StartX = r.P1StartX; CatchUpP1StartY = r.P1StartY;
+            CatchUpP2StartX = r.P2StartX; CatchUpP2StartY = r.P2StartY;
+            CatchUpReady = true;
+            GD.Print($"[catchup] relay host: first input report from player {e.PlayerId}, "
+                     + $"{r.P1.Length} frame(s)");
+        }
+        int n = System.Math.Min(r.P1.Length, r.P2.Length);
+        if (n == 0) return;
+        for (int i = 0; i < n; i++)
+            CatchUpHistory.RecordAt(r.StartFrame + i, ReplayData.Unpack(r.P1[i]), ReplayData.Unpack(r.P2[i]));
+        // The relay host's own spectate screen (and nothing else) follows this: delivered as an
+        // event now, and buffered for the window between the seat screen's catch-up build and the
+        // spectate screen's subscription — same buffer a joiner's TCP batches land in.
+        var batch = new MatchInputs { StartFrame = r.StartFrame, P1 = r.P1, P2 = r.P2 };
+        PendingStreamInputs.Add(batch);
+        InputsReceived?.Invoke(batch);
+        ServeRelayCatchUpToLurkers();
+    }
+
+    // Anyone in the room without a seat and without a catch-up yet gets served, on every merge: the
+    // serve-on-join path misses a player who arrived in the window before the first report (there
+    // was no history to send then), and a spectator who was in the room from the START of a relay
+    // match never had a PlayerJoined event at all.
+    private void ServeRelayCatchUpToLurkers()
+    {
+        if (!CatchUpReady || Room == null || !Room.MatchRunning) return;
+        int hostId = Host?.HostPlayerId ?? 0;
+        foreach (var p in Room.Players)
+        {
+            if (p.PlayerId == hostId) continue;
+            if (p.Seat >= 0) continue;                                // a fighter, not a watcher
+            if (_relaySpectatorNextFrame.ContainsKey(p.PlayerId)) continue;   // already served
+            ServeRelayCatchUp(p.PlayerId);
+        }
+    }
+
+    // The relay host answering a mid-match joiner: the whole confirmed history so far. Served from
+    // CatchUpHistory (no trimming needed — reports are confirmed by construction).
+    private void ServeRelayCatchUp(int playerId)
+    {
+        int count = CatchUpHistory.FrameCount;
+        var p1 = new ushort[count];
+        var p2 = new ushort[count];
+        for (int i = 0; i < count; i++)
+        {
+            p1[i] = CatchUpHistory.P1Inputs[i];
+            p2[i] = CatchUpHistory.P2Inputs[i];
+        }
+        var cu = new MatchCatchUp
+        {
+            Room = Room,
+            StageMinX = CatchUpStageMinX,
+            StageMaxX = CatchUpStageMaxX,
+            WorldWidth = CatchUpWorldWidth,
+            P1StartX = CatchUpP1StartX,
+            P1StartY = CatchUpP1StartY,
+            P2StartX = CatchUpP2StartX,
+            P2StartY = CatchUpP2StartY,
+            FrameCount = count,
+            P1Inputs = p1,
+            P2Inputs = p2,
+        };
+        _relaySpectatorNextFrame[playerId] = count;
+        Host.SendTo(playerId, MsgType.MatchCatchUp, cu);
+        GD.Print($"[catchup] relay host sent catch-up to player {playerId}: {count} frames");
+    }
+
+    // The relay-host mirror of GameManager.StreamCatchUpSpectators: every tick, push the frames
+    // confirmed since each joiner's last batch. Runs only while a relay is live (the host-session
+    // configuration streams from GameManager instead).
+    private void StreamRelaySpectators()
+    {
+        if (_relaySpectatorNextFrame.Count == 0) return;
+        int upTo = CatchUpHistory.FrameCount - 1;
+        if (upTo < 0) return;
+        var gone = new List<int>();
+        foreach (var kv in _relaySpectatorNextFrame)
+        {
+            if (!RoomContains(Room, kv.Key)) { gone.Add(kv.Key); continue; }
+            if (kv.Value > upTo) continue;
+            int start = kv.Value;
+            int count = upTo - start + 1;
+            var msg = new MatchInputs { StartFrame = start };
+            msg.P1 = new ushort[count];
+            msg.P2 = new ushort[count];
+            for (int i = 0; i < count; i++)
+            {
+                msg.P1[i] = CatchUpHistory.P1Inputs[start + i];
+                msg.P2[i] = CatchUpHistory.P2Inputs[start + i];
+            }
+            Host.SendTo(kv.Key, MsgType.MatchInputs, msg);
+            _relaySpectatorNextFrame[kv.Key] = upTo + 1;
+        }
+        foreach (int id in gone) _relaySpectatorNextFrame.Remove(id);
+    }
+
+    private static bool RoomContains(RoomSnapshot room, int playerId)
+    {
+        if (room == null) return false;
+        foreach (var p in room.Players) if (p.PlayerId == playerId) return true;
+        return false;
     }
 
     private void PollClient()

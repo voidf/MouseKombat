@@ -26,6 +26,10 @@ public partial class NetSeatScreen : Control
     // CatchUpReceived fires from the autoload's poll, and changing scene from inside another node's
     // tick is where transitions start doubling up.
     private bool _pendingSpectate;
+    // Relay configuration: this machine is the host, holds no seat, and forwards between two client
+    // fighters. It can still WATCH — the fighters report their confirmed inputs, and once the first
+    // report (which carries the geometry) lands, this screen hands itself to the spectate screen.
+    private bool _relayWaiting;
 
     // What to show while a match is running and this machine is NOT in it — a relay host, or a
     // spectator in a configuration that cannot be watched. Sticky, because DefaultHint runs on every
@@ -110,6 +114,11 @@ public partial class NetSeatScreen : Control
             Net.MatchEnded += OnMatchEnded;
             Net.CatchUpReceived += OnCatchUpReceived;
         }
+        // A mid-match joiner connects from the LAN MENU, whose scene is still active when the host's
+        // MatchCatchUp arrives — the event fires with no subscriber and would be lost. The buffer is
+        // exactly for that window; drain it now that this screen exists.
+        if (Net != null && Net.PendingCatchUp != null)
+            OnCatchUpReceived(Net.PendingCatchUp);
         Render();
     }
 
@@ -204,6 +213,16 @@ public partial class NetSeatScreen : Control
         {
             _pendingSpectate = false;
             GetTree().ChangeSceneToFile(SpectateScenePath);
+            return;
+        }
+
+        // Relay host: wait for the fighters' first input report, then watch the match like any
+        // mid-match joiner would (same spectate screen, same replay-then-follow flow).
+        if (_relayWaiting && Net != null && Net.CatchUpReady)
+        {
+            _relayWaiting = false;
+            BuildRelayCatchUp();
+            _pendingSpectate = true;
             return;
         }
 
@@ -451,9 +470,11 @@ public partial class NetSeatScreen : Control
                 return;
             case MatchRole.Relay:
                 // The host holds no seat and both fighters are clients, so it forwards their UDP and
-                // has no simulation of its own to show (see UdpMatchRelay). NetSession polls the relay
-                // from the autoload, so staying on this screen is all that is required.
-                _matchNote = "本局由两位玩家对战，本机作为主机中转对局中…";
+                // has no simulation of its own to show (see UdpMatchRelay). It can still WATCH: the
+                // fighters report their confirmed inputs, and once the first report lands this screen
+                // hands itself to the spectate screen.
+                _relayWaiting = true;
+                _matchNote = "正在获取对局数据…";
                 break;
             default:
                 _matchNote = plan.Problem ?? "本机未参与本局";
@@ -534,6 +555,8 @@ public partial class NetSeatScreen : Control
         if (Net == null || cu == null || cu.Room == null) return;
         if (Net.LocalSeat() >= 0) return;            // seated players are in the match, not watching it
         if (cu.Room.Seats.Length < RoomState.SeatCount) return;
+        GD.Print($"[catchup] joiner received catch-up: {cu.FrameCount} frames, "
+                 + $"match running={cu.Room.MatchRunning}");
 
         var d = new ReplayData
         {
@@ -561,9 +584,45 @@ public partial class NetSeatScreen : Control
         _pendingSpectate = true;
     }
 
+    // Package the relay host's accumulated catch-up state (fighters' reports, geometry) into
+    // GameSession and switch to the spectate screen — the same data a mid-match joiner receives over
+    // the wire, read from the host's own buffer instead.
+    private void BuildRelayCatchUp()
+    {
+        var net = Net;
+        if (net?.Room == null) return;
+        var room = net.Room;
+        var d = new ReplayData
+        {
+            Mode = ReplayData.ModeLan,
+            P1Char = room.Seats[0].CharacterId,
+            P2Char = room.Seats[1].CharacterId,
+            P1Name = SeatName(room, 0),
+            P2Name = SeatName(room, 1),
+            StageMinX = net.CatchUpStageMinX,
+            StageMaxX = net.CatchUpStageMaxX,
+            WorldWidth = net.CatchUpWorldWidth,
+            P1StartX = net.CatchUpP1StartX,
+            P1StartY = net.CatchUpP1StartY,
+            P2StartX = net.CatchUpP2StartX,
+            P2StartY = net.CatchUpP2StartY,
+            RoomId = room.RoomId ?? "",
+            Host = $"{net.HostAddress}:{net.Port}",
+        };
+        d.P1Inputs.AddRange(net.CatchUpHistory.P1Inputs);
+        d.P2Inputs.AddRange(net.CatchUpHistory.P2Inputs);
+        GameSession.CatchUpData = d;
+        GameSession.P1Name = d.P1Name;
+        GameSession.P2Name = d.P2Name;
+        GameSession.Mode = ReplayData.ModeLan;
+        GameSession.RoomId = d.RoomId;
+        GameSession.Host = d.Host;
+    }
+
     private void OnMatchEnded(MatchEnded ended)
     {
         _matchNote = "";
+        _relayWaiting = false;
         Render();
     }
 

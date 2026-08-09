@@ -781,6 +781,45 @@ internal static partial class Program
             Check(gotMi != null && gotMi.StartFrame == 3 && gotMi.P1[0] == 7 && gotMi.P2[0] == 8,
                 "transport: the client decodes the MatchInputs stream batch");
         }
+
+        // K. relay input report: a fighter's confirmed frames + geometry reach the host decoded
+        {
+            using var host = new TcpRoomHost();
+            host.Start("127.0.0.1", 0, "主机", Ver);
+            using var a = new TcpRoomClient();
+            a.Connect("127.0.0.1", host.Port, "战士A", Ver);
+            var list = new List<TcpRoomClient> { a };
+            Pump(host, list, () => a.IsConnected);
+            Drain(a);
+
+            host.Room.ClaimSeat(host.HostPlayerId, 0);
+            host.Room.PickCharacter(host.HostPlayerId, 0);
+            a.ClaimSeat(1);
+            Pump(host, list, () => host.Room.Seat(1).Occupied);
+            a.PickCharacter(1);
+            Pump(host, list, () => host.Room.Seat(1).Character == 1);
+            Check(host.Room.BeginMatch(), "transport: the match starts with both seats ready");
+
+            a.Send(MsgType.MatchInputReport, new MatchInputReport
+            {
+                StartFrame = 42,
+                P1 = new ushort[] { 11, 22 },
+                P2 = new ushort[] { 33, 44 },
+                StageMinX = 40f, StageMaxX = 760f, WorldWidth = 800f,
+                P1StartX = 120f, P1StartY = 560f, P2StartX = 650f, P2StartY = 560f,
+            });
+
+            MatchInputReport got = null;
+            Pump(host, list, () =>
+            {
+                while (host.TryDequeueEvent(out var e))
+                    if (e.Kind == TcpRoomHost.EventKind.InputReport) got = e.Report;
+                return got != null;
+            });
+            Check(got != null && got.StartFrame == 42 && got.P1.Length == 2
+                  && got.P1[1] == 22 && got.P2[0] == 33 && got.StageMaxX == 760f,
+                "transport: the host decodes the fighter's MatchInputReport");
+        }
     }
 
     // ---- WIRE FRAMING ----

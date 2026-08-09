@@ -68,6 +68,7 @@ must therefore agree on field ORDER. Rules:
 | 13 | `MatchResult` | fighter → host | reached the knockout; the host ends the match in room state |
 | 14 | `MatchCatchUp` | host → joiner | a player who joined mid-match: config + confirmed input history (§ Mid-match spectating) |
 | 15 | `MatchInputs` | host → joiner | new confirmed frames since the last batch, to keep the catch-up sim advancing |
+| 16 | `MatchInputReport` | fighter → host | the fighter's confirmed frames since the last report + the match geometry (§ Mid-match spectating, relay configuration) |
 
 Per-frame match input is **not** in this table: it goes over UDP inside the rollback library's own
 framing and is opaque to everything here (see `MouseKombat.Net/RollbackMatch.cs`). The one thing this
@@ -168,10 +169,17 @@ its whole lifetime. The stream ends when the match ends; `MatchEnded` brings the
 select like everyone else.
 
 This only works when the host knows the inputs, which is exactly the case above: the host runs the
-match session itself (host + client, host + AI, AI + AI). A relay host sees only opaque UDP and has
-no history to serve, so a mid-match joiner there keeps waiting for the next match — the same
-limitation as pre-match spectating. Joining mid-match is also inherently a **catch-up**: the joiner
-has not seen the fight up to the point it joined, and nothing pretends otherwise.
+match session itself (host + client, host + AI, AI + AI). The relay configuration (both fighters are
+clients, the host only forwards) works too, with one extra hop: every non-host fighter reports the
+frames it CONFIRMED since its last report over TCP (`MatchInputReport`, one per physics tick, plus
+the match geometry — the relay host has no scene of its own to read it from). The host merges the
+reports into the same catch-up buffer and can then serve mid-match joiners AND watch the match
+itself, exactly as if it had run the session — the relay-host seat screen switches to the spectate
+view once the first report lands. A relay host that has not received a report yet shows
+"正在获取对局数据…" rather than pretending to know the geometry.
+
+Joining mid-match is inherently a **catch-up**: the joiner has not seen the fight up to the point it
+joined, and nothing pretends otherwise.
 
 ### Ports
 

@@ -142,7 +142,10 @@ public sealed class MatchPlan
         if (!HostDrivesASeat(room, hostId))
         {
             plan.Role = MatchRole.Idle;
-            plan.Problem = "本局由两位玩家直接对战、主机仅中转，暂不支持观战";
+            // Not a dead end any more: the relay host still serves the match as DATA (the fighters
+            // report their confirmed inputs; see PROTOCOL.md § Mid-match spectating), so the seat
+            // screen shows this while waiting for the first report instead of saying "cannot watch".
+            plan.Problem = "本局由两位玩家直接对战，正在获取对局数据…";
             return plan;
         }
         if (hostMatchEp == null)

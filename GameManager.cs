@@ -122,6 +122,7 @@ public partial class GameManager : Node2D, IMatchPresenter
     // which frame has been delivered, so the stream is gap-free.
     private readonly ReplayData _netHistory = new();
     private readonly Dictionary<int, int> _spectatorNextFrame = new();
+    private readonly HashSet<int> _streamNotified = new();   // diagnostics: printed once per joiner
 
     [Export] public string NetSeatScenePath = "res://NetSeat.tscn";
 
@@ -466,6 +467,7 @@ public partial class GameManager : Node2D, IMatchPresenter
         }
         if (_stalledTicks > 0) { _stalledTicks = 0; SetNetStatus(""); }
         StreamCatchUpSpectators();
+        ReportConfirmedFrames();
 
         // A CONFIRMED knockout, not a predicted one — see NetKoConfirmFrames.
         if (_koHeldFrames >= NetKoConfirmFrames)
@@ -474,6 +476,44 @@ public partial class GameManager : Node2D, IMatchPresenter
             FinishRecording();
             BeginWin(_pendingNetWinner);
         }
+    }
+
+    // ---- relay-config spectating: the fighter's report to the host ----
+    // When both fighters are clients the host has no simulation and cannot learn the inputs any
+    // other way, so every non-host fighter reports the frames it CONFIRMED since the last report
+    // (MatchInputReport), plus the match geometry for the host's catch-up. The report is a slice of
+    // _netHistory between a cursor and RollbackMatch.ConfirmedFrame, so only frames a rollback can
+    // never take back ever reach the host.
+    private int _reportedUpTo;
+
+    private void ReportConfirmedFrames()
+    {
+        if (_plan == null || _plan.Role != MatchRole.Fighter) return;
+        var net = NetSession.Instance;
+        if (net?.Client == null || net.IsHost) return;
+        int upTo = System.Math.Min(_netMatch.ConfirmedFrame + 1, _netHistory.FrameCount);
+        if (upTo <= _reportedUpTo) return;
+        int count = upTo - _reportedUpTo;
+        var rep = new MatchInputReport
+        {
+            StartFrame = _reportedUpTo,
+            StageMinX = StageMinX,
+            StageMaxX = StageMaxX,
+            WorldWidth = GetViewport().GetVisibleRect().Size.X,
+            P1StartX = P1StartPos.X,
+            P1StartY = P1StartPos.Y,
+            P2StartX = P2StartPos.X,
+            P2StartY = P2StartPos.Y,
+        };
+        rep.P1 = new ushort[count];
+        rep.P2 = new ushort[count];
+        for (int i = 0; i < count; i++)
+        {
+            rep.P1[i] = _netHistory.P1Inputs[_reportedUpTo + i];
+            rep.P2[i] = _netHistory.P2Inputs[_reportedUpTo + i];
+        }
+        net.Client.Send(MsgType.MatchInputReport, rep);
+        _reportedUpTo = upTo;
     }
 
     // ---- mid-match spectating: serving the confirmed-input stream ----
@@ -485,7 +525,11 @@ public partial class GameManager : Node2D, IMatchPresenter
         if (_spectatorNextFrame.Count == 0 || !IsHostNetMatch) return;
         var net = NetSession.Instance;
         if (net?.Host == null) return;
-        int upTo = _netMatch.ConfirmedFrame;
+        // Belt and braces under the RollbackMatch clamp: never read past the recorded history, even
+        // if a future change makes ConfirmedFrame lie again — an out-of-range crash inside a poll
+        // would take the whole match down.
+        int upTo = System.Math.Min(_netMatch.ConfirmedFrame, _netHistory.FrameCount - 1);
+        if (upTo < 0) return;
         var gone = new List<int>();
         foreach (var kv in _spectatorNextFrame)
         {
@@ -505,6 +549,8 @@ public partial class GameManager : Node2D, IMatchPresenter
             }
             net.Host.SendTo(kv.Key, MsgType.MatchInputs, msg);
             _spectatorNextFrame[kv.Key] = upTo + 1;
+            if (_streamNotified.Add(kv.Key))
+                GD.Print($"[catchup] host stream to player {kv.Key}: first batch frames {start}..{upTo}");
         }
         foreach (int id in gone) _spectatorNextFrame.Remove(id);
     }
@@ -554,6 +600,7 @@ public partial class GameManager : Node2D, IMatchPresenter
         };
         _spectatorNextFrame[playerId] = count;
         net.Host.SendTo(playerId, MsgType.MatchCatchUp, cu);
+        GD.Print($"[catchup] host sent catch-up to player {playerId}: {count} frames");
     }
 
     private bool IsHostNetMatch => _netMatch != null && NetSession.Instance?.IsHost == true;
@@ -618,11 +665,11 @@ public partial class GameManager : Node2D, IMatchPresenter
         // RecordAt, not Record: a frame first simulated with a PREDICTED opponent input is re-simulated
         // with the real one, and the replay has to keep the confirmed version.
         _recording?.RecordAt(frame, f0, f1);
-        // The host's catch-up history is the same data, kept independently of the replay-recording
-        // setting: a mid-match joiner must be able to catch up even when no replay files are written.
-        // The stream below only serves the CONFIRMED prefix of this, so the speculative tail never
-        // reaches a joiner.
-        if (IsHostNetMatch) _netHistory.RecordAt(frame, f0, f1);
+        // The catch-up history is the same data, kept independently of the replay-recording setting:
+        // a mid-match joiner must be able to catch up even when no replay files are written. The
+        // host uses its own copy to serve joiners; a non-host fighter reports the CONFIRMED prefix of
+        // its copy to the host (relay configuration), and the speculative tail never reaches anyone.
+        if (_netMatch != null) _netHistory.RecordAt(frame, f0, f1);
         PresentFrame(res, rollback);
 
         // How long the knockout has stood. A rollback that erases it clears MatchOver on the sim, which

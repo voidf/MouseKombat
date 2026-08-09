@@ -276,46 +276,93 @@ internal static partial class Program
     // ---- F. mid-match spectator data: the confirmed-input history ----
     //
     // The host answers a mid-match join with the CONFIRMED prefix of its input history (see
-    // GameManager._netHistory / RollbackMatch.ConfirmedFrame). This pins the three facts that
-    // contract stands on:
+    // GameManager._netHistory / RollbackMatch.ConfirmedFrame). This pins the facts that contract
+    // stands on, for BOTH session shapes a host can run:
+    //   * host + client: a remote peer drives confirmation, so the confirmed point lags the live
+    //     head — which is exactly why the spectator stream must read ConfirmedFrame and not Frame;
+    //   * host + AI / AI + AI (all-local seats): Backdash's confirmation is driven by REMOTE acks
+    //     and never advances for this shape, so ConfirmedFrame must clamp to the live head instead
+    //     of leaking a bogus huge value (the crash seen in the field);
+    // and for both:
     //   * the recorded history is, frame for frame, the reference input stream (the joiner replays
     //     exactly this),
     //   * replaying the history up to the confirmed point in a fresh sim reproduces the reference
-    //     state at that frame — which is what the joiner's catch-up does,
-    //   * ConfirmedFrame is a sane frame of the session (never above the live head).
+    //     state at that frame — which is what the joiner's catch-up does.
     private static void CatchUpHistoryTest()
     {
         const int delay = 2;
         int frames = NetFrames;
         var refChecksums = ReferenceSimChecksums(frames, delay);
 
-        using var sockA = BindUdp();
-        using var sockB = BindUdp();
-        var epA = new IPEndPoint(IPAddress.Loopback, sockA.Port);
-        var epB = new IPEndPoint(IPAddress.Loopback, sockB.Port);
-        var simA = MakeSim(240, 520);
-        var simB = MakeSim(240, 520);
-        var viewA = new TestPresenter(simA, NetScript);
-        var viewB = new TestPresenter(simB, NetScript);
-        var lat = TimeSpan.FromMilliseconds(16);
-        using var a = RollbackMatch.Create(simA, viewA, new MatchNetSetup
+        // Shape A: host + client over loopback with enough latency to force predictions.
         {
-            LocalSeat = new[] { true, false }, RemoteEndPoint = epB,
-            Socket = sockA, InputDelayFrames = delay, SimulatedLatency = lat,
-        });
-        using var b = RollbackMatch.Create(simB, viewB, new MatchNetSetup
-        {
-            LocalSeat = new[] { false, true }, RemoteEndPoint = epA,
-            Socket = sockB, InputDelayFrames = delay, SimulatedLatency = lat,
-        });
+            using var sockA = BindUdp();
+            using var sockB = BindUdp();
+            var epA = new IPEndPoint(IPAddress.Loopback, sockA.Port);
+            var epB = new IPEndPoint(IPAddress.Loopback, sockB.Port);
+            var simA = MakeSim(240, 520);
+            var simB = MakeSim(240, 520);
+            var viewA = new TestPresenter(simA, NetScript);
+            var viewB = new TestPresenter(simB, NetScript);
+            var lat = TimeSpan.FromMilliseconds(16);
+            using var a = RollbackMatch.Create(simA, viewA, new MatchNetSetup
+            {
+                LocalSeat = new[] { true, false }, RemoteEndPoint = epB,
+                Socket = sockA, InputDelayFrames = delay, SimulatedLatency = lat,
+            });
+            using var b = RollbackMatch.Create(simB, viewB, new MatchNetSetup
+            {
+                LocalSeat = new[] { false, true }, RemoteEndPoint = epA,
+                Socket = sockB, InputDelayFrames = delay, SimulatedLatency = lat,
+            });
 
-        int target = frames + NetOvershoot;
-        Check(Drive(new[] { (a, viewA), (b, viewB) }, target, TimeSpan.FromSeconds(30)),
-            $"catch-up: both sides reached frame {target} (A={a.Frame} B={b.Frame})");
-        Check(a.RollbackCount > 0 || b.RollbackCount > 0,
-            "catch-up: rollbacks happened (the parity checks would be vacuous without them)");
-        Check(a.ConfirmedFrame >= 0 && a.ConfirmedFrame <= a.Frame,
-            $"catch-up: confirmed is a frame of the session (confirmed {a.ConfirmedFrame}, live {a.Frame})");
+            int target = frames + NetOvershoot;
+            Check(Drive(new[] { (a, viewA), (b, viewB) }, target, TimeSpan.FromSeconds(30)),
+                $"catch-up: both sides reached frame {target} (A={a.Frame} B={b.Frame})");
+            Check(a.RollbackCount > 0 || b.RollbackCount > 0,
+                "catch-up: rollbacks happened (the parity checks would be vacuous without them)");
+            VerifyHistoryAndParity(a, viewA, refChecksums, frames, delay, "catch-up host+client");
+        }
+
+        // Shape B: all-local seats plus a spectator — the host+AI room. No remote input player
+        // exists, so nothing drives Backdash's confirmation; ConfirmedFrame must clamp to the live
+        // head instead of computing a bogus huge number.
+        {
+            using var sockH = BindUdp();
+            using var sockS = BindUdp();
+            var epH = new IPEndPoint(IPAddress.Loopback, sockH.Port);
+            var epS = new IPEndPoint(IPAddress.Loopback, sockS.Port);
+            var simH = MakeSim(240, 520);
+            var simS = MakeSim(240, 520);
+            var viewH = new TestPresenter(simH, NetScript);
+            var viewS = new TestPresenter(simS, NetScript);
+            using var h = RollbackMatch.Create(simH, viewH, new MatchNetSetup
+            {
+                LocalSeat = new[] { true, true },
+                Spectators = new EndPoint[] { epS },
+                Socket = sockH, InputDelayFrames = delay,
+            });
+            using var s = RollbackMatch.Create(simS, viewS, new MatchNetSetup
+            {
+                SpectateHost = epH, Socket = sockS, InputDelayFrames = delay,
+            });
+
+            int target = frames + NetOvershoot;
+            Check(Drive(new[] { (h, viewH), (s, viewS) }, target, TimeSpan.FromSeconds(30)),
+                $"catch-up all-local: host reached frame {target} (H={h.Frame})");
+            VerifyHistoryAndParity(h, viewH, refChecksums, frames, delay, "catch-up all-local");
+        }
+    }
+
+    // The shared part of the catch-up contract: the recorded history equals the reference input
+    // stream, ConfirmedFrame is a sane frame of the session, and replaying the history up to it
+    // reproduces the reference state at that frame.
+    private static void VerifyHistoryAndParity(RollbackMatch m, TestPresenter view,
+                                               Dictionary<int, uint> refChecksums, int frames,
+                                               int delay, string label)
+    {
+        Check(m.ConfirmedFrame >= 0 && m.ConfirmedFrame <= m.Frame,
+            $"{label}: confirmed is a frame of the session (confirmed {m.ConfirmedFrame}, live {m.Frame})");
 
         // The recorded history must be the reference input stream: the host hands exactly this to a
         // mid-match joiner, and the joiner's replay only lands on the right state if it is.
@@ -326,25 +373,25 @@ internal static partial class Program
             int src = f - delay;
             ushort want1 = src < 0 ? (ushort)0 : NetScript(0, src);
             ushort want2 = src < 0 ? (ushort)0 : NetScript(1, src);
-            if (viewA.RecP1[f] != want1 || viewA.RecP2[f] != want2)
+            if (view.RecP1[f] != want1 || view.RecP2[f] != want2)
             {
                 inputsMatch = false;
-                why = $" — frame {f}: host recorded ({viewA.RecP1[f]},{viewA.RecP2[f]}), "
+                why = $" — frame {f}: host recorded ({view.RecP1[f]},{view.RecP2[f]}), "
                       + $"reference ({want1},{want2})";
                 break;
             }
         }
-        Check(inputsMatch, "catch-up: the recorded history equals the reference input stream" + why);
+        Check(inputsMatch, $"{label}: the recorded history equals the reference input stream" + why);
 
         // The joiner's actual catch-up, headless: replay the host's recorded history up to its
         // confirmed frame in a fresh sim, and demand the reference state at that frame.
-        int cf = Math.Min(a.ConfirmedFrame, frames - 1);
+        int cf = Math.Min(m.ConfirmedFrame, frames - 1);
         var fresh = MakeSim(240, 520);
         for (int i = 0; i <= cf; i++)
-            fresh.Step(ReplayData.Unpack(viewA.RecP1[i]), ReplayData.Unpack(viewA.RecP2[i]));
+            fresh.Step(ReplayData.Unpack(view.RecP1[i]), ReplayData.Unpack(view.RecP2[i]));
         uint got = fresh.Checksum();
         Check(got == refChecksums[cf],
-            $"catch-up: replaying the confirmed history reproduces the reference state at frame {cf} "
+            $"{label}: replaying the confirmed history reproduces the reference state at frame {cf} "
             + $"({got:X8} vs {refChecksums[cf]:X8})");
     }
 

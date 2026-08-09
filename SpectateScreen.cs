@@ -58,6 +58,7 @@ public partial class SpectateScreen : Control
         {
             // No catch-up means we got here by accident (scene opened directly, or state was
             // cleared). There is nothing to watch; go back to the seat screen.
+            GD.PushWarning("[spectate] entered without catch-up data; returning to seats.");
             ReturnToSeats();
             return;
         }
@@ -113,8 +114,11 @@ public partial class SpectateScreen : Control
         // ordering guarantee ("StartFrame == my next frame") holds for everything after.
         if (Net != null)
         {
+            int buffered = Net.PendingStreamInputs.Count;
             foreach (var m in Net.PendingStreamInputs) ApplyBatch(m);
             Net.PendingStreamInputs.Clear();
+            GD.Print($"[spectate] entered: replayed {_data.FrameCount} frames, "
+                     + $"buffered stream batches {buffered}, {_p1.Character} vs {_p2.Character}");
         }
         SetStatus($"观战中 · 第 {_nextFrame} 帧");
     }
@@ -157,18 +161,32 @@ public partial class SpectateScreen : Control
     private void ApplyBatch(MatchInputs m)
     {
         if (m == null) return;
+        int n = System.Math.Min(m.P1.Length, m.P2.Length);
+        if (n == 0) return;
+
         // The stream is ordered and gap-free by construction (the host tracks a per-joiner cursor),
         // so anything that does not start exactly where we stand is a protocol bug — stepping anyway
-        // would silently shift the whole match.
-        if (m.StartFrame != _nextFrame)
+        // would silently shift the whole match. The one tolerated case is overlap: on the relay host
+        // the first fighter report can precede the catch-up build, so its batch covers frames the
+        // history already replayed — apply only the tail that is new.
+        int overlap = _nextFrame - m.StartFrame;
+        if (overlap >= n) return;
+        if (overlap > 0)
+        {
+            for (int i = overlap; i < n; i++)
+                StepFrame(ReplayData.Unpack(m.P1[i]), ReplayData.Unpack(m.P2[i]));
+        }
+        else if (m.StartFrame > _nextFrame)
         {
             GD.PushWarning($"[spectate] input stream gap: have frame {_nextFrame}, host sent "
-                           + $"{m.StartFrame}; skipping {m.P1.Length} frame(s).");
+                           + $"{m.StartFrame}; skipping {n} frame(s).");
             return;
         }
-        int n = System.Math.Min(m.P1.Length, m.P2.Length);
-        for (int i = 0; i < n; i++)
-            StepFrame(ReplayData.Unpack(m.P1[i]), ReplayData.Unpack(m.P2[i]));
+        else
+        {
+            for (int i = 0; i < n; i++)
+                StepFrame(ReplayData.Unpack(m.P1[i]), ReplayData.Unpack(m.P2[i]));
+        }
         if (StatusLabel != null && !_sim.MatchOver)
             SetStatus($"观战中 · 第 {_nextFrame} 帧");
     }
@@ -176,9 +194,17 @@ public partial class SpectateScreen : Control
     public override void _PhysicsProcess(double delta)
     {
         if (_leaving || _sim == null) return;
-        if (_pending.Count == 0) return;
+        if (_pending.Count == 0)
+        {
+            // The PendingStreamInputs buffer exists only to carry batches that arrived before this
+            // screen subscribed; every batch since is also delivered as an InputsReceived event, so
+            // the buffer can be dropped each tick instead of growing for the whole match.
+            Net?.PendingStreamInputs.Clear();
+            return;
+        }
         foreach (var m in _pending) ApplyBatch(m);
         _pending.Clear();
+        Net?.PendingStreamInputs.Clear();
     }
 
     // ---- leaving ----

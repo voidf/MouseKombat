@@ -18,7 +18,7 @@ namespace MouseKombat.Net;
 // completely separate (UDP, driven by the rollback library) and is not throttled by this.
 public sealed class TcpRoomHost : IDisposable
 {
-    public enum EventKind { PlayerJoined, PlayerLeft, RoomChanged, Rejected, Error, MatchResult }
+    public enum EventKind { PlayerJoined, PlayerLeft, RoomChanged, Rejected, Error, MatchResult, InputReport }
 
     public readonly struct HostEvent
     {
@@ -26,8 +26,10 @@ public sealed class TcpRoomHost : IDisposable
         public readonly int PlayerId;
         public readonly string Detail;
         public readonly int Value;      // MatchResult: the winning seat
-        public HostEvent(EventKind kind, int playerId, string detail, int value = 0)
-        { Kind = kind; PlayerId = playerId; Detail = detail; Value = value; }
+        public readonly MatchInputReport Report;   // InputReport: the confirmed frames + geometry
+        public HostEvent(EventKind kind, int playerId, string detail, int value = 0,
+                         MatchInputReport report = null)
+        { Kind = kind; PlayerId = playerId; Detail = detail; Value = value; Report = report; }
     }
 
     private sealed class Conn
@@ -203,6 +205,15 @@ public sealed class TcpRoomHost : IDisposable
                     Emit(EventKind.MatchResult, c.PlayerId, null, frame.As<MatchResult>().WinnerSeat);
                 break;
             }
+            case MsgType.MatchInputReport:
+            {
+                // A fighter's confirmed-input report (relay configuration). Decoded here rather than
+                // in the caller so the host layer stays Godot-free; the caller (NetSession) merges it
+                // into the catch-up history and re-broadcasts the frames to mid-match joiners.
+                if (Room.MatchRunning)
+                    Emit(EventKind.InputReport, c.PlayerId, null, report: frame.As<MatchInputReport>());
+                break;
+            }
             case MsgType.Bye: Close(c, frame.As<Bye>().Reason); break;
             default: break;   // unknown / host-only types from a client are ignored
         }
@@ -373,8 +384,9 @@ public sealed class TcpRoomHost : IDisposable
         try { c.Sock?.Close(); } catch { }
     }
 
-    private void Emit(EventKind kind, int playerId, string detail, int value = 0) =>
-        _events.Enqueue(new HostEvent(kind, playerId, detail, value));
+    private void Emit(EventKind kind, int playerId, string detail, int value = 0,
+                      MatchInputReport report = null) =>
+        _events.Enqueue(new HostEvent(kind, playerId, detail, value, report));
 
     public void Dispose() => Stop("主机关闭");
 }

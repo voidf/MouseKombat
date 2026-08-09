@@ -169,13 +169,20 @@ public sealed class RollbackMatch : INetcodeSessionHandler, IDisposable
     // can never take it back. The live head (Frame) can be several frames ahead on predictions, so
     // anything that must never be corrected — the mid-match spectator stream — reads THIS, not Frame.
     // Backdash exposes the gap directly (FramesBehind = live - confirmed), so no internals leak.
+    //
+    // CLAMPED both ways on purpose. The confirmation is driven by the REMOTE players' acks, and a
+    // session with no remote input players (host + AI, or AI + AI) never receives any: Backdash then
+    // sets its confirmed frame to Frame.MaxValue, which would make FramesBehind a huge negative
+    // number. For such a session the right answer is that the live head IS the confirmed point —
+    // nothing is predicted, so nothing can be taken back. The clamp yields exactly that, and keeps a
+    // broken value from ever leaking past [0, the live head].
     public int ConfirmedFrame
     {
         get
         {
             var info = _session.GetInfo();
             int behind = Math.Max(0, info.FramesBehind.Frames);
-            return Math.Max(0, info.CurrentFrame.Number - behind);
+            return Math.Max(0, Math.Min(info.CurrentFrame.Number, info.CurrentFrame.Number - behind));
         }
     }
 
