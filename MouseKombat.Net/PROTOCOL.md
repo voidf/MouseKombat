@@ -64,6 +64,7 @@ must therefore agree on field ORDER. Rules:
 | 9 | `StartMatch` | host → all | both seats ready; carries the match setup |
 | 10 | `Bye` | either | leaving / shutting down / kicked, with a reason |
 | 11 | `MatchEnded` | host → all | a knockout happened; everyone returns to seat select |
+| 12 | `RemoveAi` | client → host | host only: free an AI seat (Backspace in the seat screen) |
 | 20.. | reserved | | lobby-only messages (room list / create / join) land here in 期3-5 |
 
 ## Handshake
@@ -94,7 +95,8 @@ Rules the host enforces:
 * Unlimited spectators — a player with no seat is a spectator, not an error.
 * **AI seats are host-only.** Only the host may `AddAi`, and the host may put an AI in either seat
   regardless of what it holds itself. The AI runs on the host's machine and its inputs enter the
-  match as if the host had sent them.
+  match as if the host had sent them. Only the host may `RemoveAi` to free such a seat (the
+  Backspace key in the seat screen); a human seat can only be released by its own holder.
 * A match may start only when both seats are occupied and each has a character.
 
 ## Match lifecycle

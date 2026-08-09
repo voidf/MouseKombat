@@ -133,6 +133,18 @@ public sealed class RoomState
         return true;
     }
 
+    // HOST ONLY, the mirror of AddAi: frees an AI seat so the host can hand it to someone else or
+    // place a different AI. The host's own HUMAN seat is released with ReleaseSeat as usual.
+    public bool RemoveAi(int requesterId, int seat)
+    {
+        if (MatchRunning) return false;
+        if (seat < 0 || seat >= SeatCount) return false;
+        if (requesterId != HostPlayerId || HostPlayerId == 0) return false;
+        if (!_seats[seat].IsAi) return false;
+        ClearSeat(seat);
+        return true;
+    }
+
     private void ClearSeat(int seat)
     {
         int occupant = _seats[seat].OccupantPlayerId;

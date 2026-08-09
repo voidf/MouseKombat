@@ -1,5 +1,6 @@
 using Godot;
 using System.Collections.Generic;
+using System.Linq;
 using MouseKombat.Net;
 using MouseKombat.Sim;
 
@@ -74,6 +75,7 @@ public partial class NetSeatScreen : Control
         _sources.Add(KeyboardSource.LeftSeat());
         _sources.Add(KeyboardSource.RightSeat());
         foreach (int dev in Input.GetConnectedJoypads()) _sources.Add(new GamepadSource(dev));
+        Input.JoyConnectionChanged += OnJoyConnectionChanged;
         _menuNav = KeyboardSource.MenuSeat();
 
         _charSelect = new CharSelect();
@@ -96,11 +98,39 @@ public partial class NetSeatScreen : Control
 
     public override void _ExitTree()
     {
+        Input.JoyConnectionChanged -= OnJoyConnectionChanged;
         if (Net == null) return;
         Net.RoomChanged -= Render;
         Net.Disconnected -= OnDisconnected;
         Net.MatchStarting -= OnMatchStarting;
         Net.MatchEnded -= OnMatchEnded;
+    }
+
+    private void OnJoyConnectionChanged(long device, bool connected)
+    {
+        string id = "pad" + device;
+        if (connected)
+        {
+            if (_sources.Find(s => s.Id == id) == null)
+                _sources.Add(new GamepadSource((int)device));
+            return;
+        }
+
+        var src = _sources.Find(s => s.Id == id);
+        if (src == null) return;
+        _sources.Remove(src);
+
+        // A pad unplugged mid-selection would leave the panel owned by a ghost. Close it, and if
+        // our seat was claimed with that pad, give the seat back so the room is not stuck.
+        if (ReferenceEquals(src, _panelNav))
+        {
+            bool hadSeat = Net != null && Net.LocalSeat() >= 0;
+            AbortPanel();
+            if (hadSeat) Net?.RequestReleaseSeat();
+            return;
+        }
+        if (Net != null && Net.LocalSeat() >= 0 && Net.LockedDevice(Net.LocalSeat()) == src)
+            Net.RequestReleaseSeat();
     }
 
     // ---- input ----
@@ -136,6 +166,10 @@ public partial class NetSeatScreen : Control
             case Key.Quoteleft:
                 if (Net != null && Net.IsHost) { BeginAiSeat(); AcceptEvent(); }
                 break;
+            // host only: undo an AI seat (same muscle memory as ReadyScreen's backspace)
+            case Key.Backspace:
+                if (Net != null && Net.IsHost) { RemoveAiSeat(); AcceptEvent(); }
+                break;
             case Key.Escape:
                 AcceptEvent();
                 LeaveRoom();
@@ -154,6 +188,13 @@ public partial class NetSeatScreen : Control
     }
 
     // One device, one seat. Confirm on a free seat claims it and opens the picker; cancel releases.
+    //
+    // Two-instances-on-one-machine rule: an UNLOCKED gamepad may claim only while its window is
+    // focused, because every instance on the machine reads every pad. The first press of the pad in
+    // the focused window locks it to that window; from then on it works without focus (and later,
+    // as the locked device of that window's in-match inputs) until the player cancels, which
+    // releases both the seat and the lock. Keyboards need no gate: the OS already delivers each key
+    // to exactly one window.
     private void TickSeats()
     {
         if (Net == null || Net.Room == null || Net.Room.MatchRunning) return;
@@ -161,15 +202,22 @@ public partial class NetSeatScreen : Control
 
         foreach (var s in _sources)
         {
-            if (s.CancelJustPressed && mine >= 0) { Net.RequestReleaseSeat(); return; }
+            // only the device that claimed OUR seat may operate it — an unlocked pad pressing
+            // B must not release a seat some keyboard claimed
+            bool isOwner = mine >= 0 && Net.LockedDevice(mine) == s;
+
+            if (s.CancelJustPressed && isOwner) { Net.RequestReleaseSeat(); return; }
             if (!s.ConfirmJustPressed) continue;
 
-            if (mine >= 0)
+            if (isOwner)
             {
                 // already seated: confirm re-opens the character picker for our seat
                 BeginCharSelect(mine, s, ai: false);
                 return;
             }
+            if (mine >= 0) continue;   // our seat belongs to another device; stay quiet
+
+            if (s is GamepadSource && !GetWindow().HasFocus()) continue;
             int free = FirstFreeSeat();
             if (free < 0) return;                  // both taken; we are a spectator
             Net.RequestClaimSeat(free);
@@ -179,6 +227,14 @@ public partial class NetSeatScreen : Control
             _panelNav = s;
             return;
         }
+    }
+
+    // host only: backspace removes the newest AI seat, mirroring ReadyScreen's unbind-last
+    private void RemoveAiSeat()
+    {
+        if (Net == null || Net.Room == null || Net.Room.MatchRunning) return;
+        for (int i = RoomState.SeatCount - 1; i >= 0; i--)
+            if (Net.Seat(i).IsAi) { Net.RequestRemoveAi(i); return; }
     }
 
     private int FirstFreeSeat()
@@ -213,12 +269,18 @@ public partial class NetSeatScreen : Control
         _cursor = picked;
         if (_pendingIsAi)
         {
+            // AI flow keeps _pendingSeat: the AI-model menu needs it to place the AI.
             _charSelect.Close();
             OpenAiMenu();
             return;
         }
         _charSelect.Close();
         _stage = Stage.Seats;
+        // MUST clear the pending claim here. Render() re-opens the picker when a pending claim is
+        // confirmed by a snapshot, and this pick round-trips through a snapshot of its own — leaving
+        // _pendingSeat set would re-open the panel a moment after the player confirmed a character.
+        _pendingSeat = -1;
+        _panelNav = null;
         Net.RequestPickCharacter(picked);
     }
 
@@ -226,18 +288,27 @@ public partial class NetSeatScreen : Control
     {
         _charSelect.Close();
         _stage = Stage.Seats;
-        if (!_pendingIsAi && Net.LocalSeat() == seat) Net.RequestReleaseSeat();
         _pendingSeat = -1;
+        _panelNav = null;
+        if (!_pendingIsAi && Net.LocalSeat() == seat) Net.RequestReleaseSeat();
     }
 
     private void AbortPanel()
     {
+        // Esc from the picker means "give the seat up" — but only while the pick is still the FIRST
+        // one. Once a character is chosen the seat counts as bound, and Esc on a re-pick keeps it,
+        // exactly like ReadyScreen. AI seats are never claimed in RoomState until the model is
+        // confirmed, so there is nothing to release for them.
+        bool release = !_pendingIsAi && Net != null && Net.LocalSeat() == _pendingSeat
+                       && Net.Seat(_pendingSeat).Character < 0;
         _charSelect.Close();
         if (_aiRoot != null) _aiRoot.Visible = false;
         _stage = Stage.Seats;
         _pendingSeat = -1;
+        _panelNav = null;
         _pendingIsAi = false;
         Render();
+        if (release) Net.RequestReleaseSeat();
     }
 
     // ---- AI model menu (host only) ----
@@ -330,8 +401,9 @@ public partial class NetSeatScreen : Control
 
     private void OnMatchStarting(StartMatch setup)
     {
-        // 期3-4(4/4) hooks the rollback session up here. Until then the flow stops at "ready".
-        SetHint("局内同步（rollback）将在下一提交接入，本提交只完成房间与选人流程。");
+        // 期3-4(4/4) hooks the rollback session up here. Until then the flow stops at "ready"; the
+        // hint below comes from DefaultHint on every Render, so it cannot be overwritten by a later
+        // snapshot of the running room.
     }
 
     private void OnMatchEnded(MatchEnded ended) => Render();
@@ -373,15 +445,23 @@ public partial class NetSeatScreen : Control
         var net = Net;
         if (net == null) return;
 
-        // A pending claim only becomes a picker once the host confirms we hold that seat.
+        // A pending claim only becomes a picker once the host confirms we hold that seat. Locking
+        // the device here — not at the press — means the lock follows the host's decision: a claim
+        // we lost never locks anything.
         if (_stage == Stage.Seats && _pendingSeat >= 0 && _panelNav != null
             && net.LocalSeat() == _pendingSeat)
         {
             int seat = _pendingSeat;
             var nav = _panelNav;
             _pendingSeat = -1;
+            Net.LockDevice(seat, nav);
             BeginCharSelect(seat, nav, ai: false);
         }
+
+        // A seat we were locked to that is no longer ours (released, stolen, match ended) frees the
+        // lock, so the pad can claim again from this window once it is focused.
+        for (int i = 0; i < RoomState.SeatCount; i++)
+            if (Net.LockedDevice(i) != null && net.LocalSeat() != i) Net.UnlockDevice(i);
 
         if (TitleLabel != null)
             TitleLabel.Text = net.IsHost
@@ -401,7 +481,7 @@ public partial class NetSeatScreen : Control
         if (StartButton != null)
         {
             StartButton.Visible = net.IsHost;
-            StartButton.Disabled = !net.BothSeatsReady();
+            StartButton.Disabled = !net.BothSeatsReady() || (net.Room != null && net.Room.MatchRunning);
         }
         SetHint(DefaultHint(net));
     }
@@ -462,11 +542,14 @@ public partial class NetSeatScreen : Control
 
     private string DefaultHint(NetSession net)
     {
-        if (net.Room != null && net.Room.MatchRunning) return "对局进行中…";
+        if (net.Room != null && net.Room.MatchRunning)
+            return "对局进行中…（局内同步将在下一提交接入）";
         int mine = net.LocalSeat();
         var parts = new List<string>();
         parts.Add(mine >= 0 ? "确认键改角色 · 取消键让位" : "确认键占一个空位");
         if (net.IsHost) parts.Add("~ 键给空位加 AI");
+        bool hasAi = net.Room != null && net.Room.Seats.Any(s => s.IsAi);
+        if (net.IsHost && hasAi) parts.Add("Backspace 取消 AI");
         parts.Add(net.IsHost ? "Esc 关闭房间" : "Esc 离开房间");
         if (net.IsHost && !net.BothSeatsReady()) parts.Add("两个机位都选好角色后才能开始");
         return string.Join(" · ", parts);

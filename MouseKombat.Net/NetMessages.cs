@@ -22,6 +22,7 @@ public enum MsgType : byte
     StartMatch = 9,
     Bye = 10,
     MatchEnded = 11,
+    RemoveAi = 12,   // host only: free an AI seat the host placed (Backspace in the seat screen)
     // 20.. reserved for the lobby-only room list / create / join messages (期3-5)
 }
 
@@ -115,6 +116,12 @@ public sealed class AddAi
 {
     [Key(0)] public int Seat { get; set; }
     [Key(1)] public string AiModel { get; set; } = "";   // "" = built-in state machine
+}
+
+[MessagePackObject]
+public sealed class RemoveAi
+{
+    [Key(0)] public int Seat { get; set; }
 }
 
 [MessagePackObject]

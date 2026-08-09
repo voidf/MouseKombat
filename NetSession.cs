@@ -1,5 +1,6 @@
 using Godot;
 using System;
+using System.Collections.Generic;
 using MouseKombat.Net;
 using MouseKombat.Sim;
 
@@ -97,6 +98,7 @@ public partial class NetSession : Node
         Client?.Dispose();
         Client = null;
         Room = null;
+        _lockedDevices.Clear();
     }
 
     // ---- requests: one call site for screens, whichever side we are ----
@@ -125,6 +127,13 @@ public partial class NetSession : Node
     {
         if (!IsHost) return;
         if (Host.Room.AddAi(Host.HostPlayerId, seat, (int)c, model)) HostChanged();
+    }
+
+    // Host-only, the mirror of RequestAddAi: frees an AI seat (Backspace in the seat screen).
+    public void RequestRemoveAi(int seat)
+    {
+        if (!IsHost) return;
+        if (Host.Room.RemoveAi(Host.HostPlayerId, seat)) HostChanged();
     }
 
     public void RequestStartMatch(StartMatch setup)
@@ -236,4 +245,22 @@ public partial class NetSession : Node
         foreach (var s in Room.Seats) if (!s.Ready) return false;
         return true;
     }
+
+    // ---- per-window device locking ----
+    //
+    // A gamepad is OS-global: every window on the machine reads every pad. Two game instances side by
+    // side would both react to the same confirm press, so the seat screen lets a pad claim OUR seat
+    // only while its window is focused, and once claimed the pad stays LOCKED to this instance —
+    // it drives this instance's panels and (from 期3-4 4/4 on) this instance's in-match inputs until
+    // the player releases the seat. Keyboards need none of this: the OS already delivers each key to
+    // exactly one window.
+    private readonly Dictionary<int, IInputSource> _lockedDevices = new();
+
+    // Which device this window locked to a seat, or null. Keyed by seat, not by device: the seat is
+    // what the in-match code will look up.
+    public IInputSource LockedDevice(int seat) =>
+        _lockedDevices.TryGetValue(seat, out var s) ? s : null;
+
+    public void LockDevice(int seat, IInputSource src) => _lockedDevices[seat] = src;
+    public void UnlockDevice(int seat) => _lockedDevices.Remove(seat);
 }

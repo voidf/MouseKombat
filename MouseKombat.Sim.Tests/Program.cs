@@ -587,6 +587,31 @@ internal static class Program
             Check(a.IsConnected, "transport: and the client is not disconnected for asking");
         }
 
+        // D2. RemoveAi is host-only over the wire too, and the host's own removal reaches everyone
+        {
+            using var host = new TcpRoomHost();
+            host.Start("127.0.0.1", 0, "主机", Ver);
+            using var a = new TcpRoomClient();
+            a.Connect("127.0.0.1", host.Port, "A", Ver);
+            var list = new List<TcpRoomClient> { a };
+            Pump(host, list, () => a.IsConnected);
+
+            host.Room.AddAi(host.HostPlayerId, 1, 0, "x.onnx");
+            host.BroadcastRoom();
+            Check(Pump(host, list, () => a.Room.Seats[1].IsAi),
+                "transport: the client sees the host's AI seat");
+
+            a.Send(MsgType.RemoveAi, new RemoveAi { Seat = 1 });
+            Pump(host, list, () => false, maxTicks: 30);
+            Check(host.Room.Seat(1).IsAi, "transport: a client's RemoveAi is refused by the host");
+            Check(a.IsConnected, "transport: and the client is not disconnected for asking");
+
+            Check(host.Room.RemoveAi(host.HostPlayerId, 1), "transport: the host removes the AI seat");
+            host.BroadcastRoom();
+            Check(Pump(host, list, () => !a.Room.Seats[1].Occupied),
+                "transport: everyone sees the AI seat freed");
+        }
+
         // E. a client dropping outside a match frees its seat and everyone is told
         {
             using var host = new TcpRoomHost();
@@ -862,6 +887,27 @@ internal static class Program
             Check(r.Seat(1).IsAi && r.Seat(1).AiModel == "v8.onnx", "room: the AI seat records its model");
             Check(!r.AddAi(host.PlayerId, 1, 0, ""), "room: an AI cannot displace an occupied seat");
             Check(!r.ClaimSeat(a.PlayerId, 1), "room: a human cannot claim the AI's seat");
+        }
+
+        // only the host may remove an AI it placed (Backspace in the seat screen); a human seat is
+        // only ever released by its own holder, never by RemoveAi
+        {
+            var r = new RoomState();
+            var host = r.AddPlayer("host", true);
+            var a = r.AddPlayer("a", false);
+            Check(r.AddAi(host.PlayerId, 1, 1, "v8.onnx"), "room: an AI seat is placed for the removal test");
+            Check(!r.RemoveAi(a.PlayerId, 1), "room: a non-host cannot remove an AI");
+            Check(r.Seat(1).IsAi, "room: the refused removal changed nothing");
+            Check(r.RemoveAi(host.PlayerId, 1) && !r.Seat(1).Occupied, "room: the host removes its AI seat");
+            Check(!r.RemoveAi(host.PlayerId, 1), "room: removing a free seat is refused");
+
+            r.ClaimSeat(host.PlayerId, 0);
+            r.PickCharacter(host.PlayerId, 0);
+            Check(!r.RemoveAi(host.PlayerId, 0), "room: RemoveAi never touches a human seat");
+            Check(r.AddAi(host.PlayerId, 1, 2, ""), "room: an AI sits in the other seat again");
+            Check(r.BeginMatch(), "room: the match starts with host + AI");
+            Check(!r.RemoveAi(host.PlayerId, 1),
+                "room: seat changes, including AI removal, are refused while a match runs");
         }
 
         // starting requires BOTH seats occupied AND both characters chosen

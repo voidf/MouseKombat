@@ -183,6 +183,12 @@ public sealed class TcpRoomHost : IDisposable
                 Apply(Room.AddAi(c.PlayerId, m.Seat, Room.Seat(m.Seat).Character, m.AiModel));
                 break;
             }
+            case MsgType.RemoveAi:
+            {
+                // Host-only like AddAi: only the host may free the AI seat it placed.
+                Apply(Room.RemoveAi(c.PlayerId, frame.As<RemoveAi>().Seat));
+                break;
+            }
             case MsgType.Bye: Close(c, frame.As<Bye>().Reason); break;
             default: break;   // unknown / host-only types from a client are ignored
         }
