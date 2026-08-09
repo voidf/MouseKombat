@@ -18,6 +18,12 @@ public partial class NetSeatScreen : Control
 {
     [Export] public string LanMenuScenePath = "res://LanMenu.tscn";
     [Export] public string MainMenuScenePath = "res://MainMenu.tscn";
+    [Export] public string MatchScenePath = "res://MFEntry.tscn";
+
+    // What to show while a match is running and this machine is NOT in it — a relay host, or a
+    // spectator in a configuration that cannot be watched. Sticky, because DefaultHint runs on every
+    // snapshot and would otherwise wipe a one-shot message a frame later.
+    private string _matchNote = "";
 
     [Export] public VBoxContainer PlayerList;      // top-left roster
     [Export] public Label RoomIdLabel;             // lobby games only
@@ -413,14 +419,102 @@ public partial class NetSeatScreen : Control
 
     // ---- room events ----
 
+    // The host decided the match is on. NetSession has already worked out what this machine does in it
+    // (MatchPlan), so this only has to either enter the match scene or say why it is staying put.
     private void OnMatchStarting(StartMatch setup)
     {
-        // 期3-4(4/4) hooks the rollback session up here. Until then the flow stops at "ready"; the
-        // hint below comes from DefaultHint on every Render, so it cannot be overwritten by a later
-        // snapshot of the running room.
+        var net = Net;
+        var plan = net?.Plan;
+        if (plan == null) { _matchNote = "对局已开始，但本机未取得对局分配"; Render(); return; }
+
+        switch (plan.Role)
+        {
+            case MatchRole.Fighter:
+            case MatchRole.Spectator:
+                EnterMatch(net, setup, plan);
+                return;
+            case MatchRole.Relay:
+                // The host holds no seat and both fighters are clients, so it forwards their UDP and
+                // has no simulation of its own to show (see UdpMatchRelay). NetSession polls the relay
+                // from the autoload, so staying on this screen is all that is required.
+                _matchNote = "本局由两位玩家对战，本机作为主机中转对局中…";
+                break;
+            default:
+                _matchNote = plan.Problem ?? "本机未参与本局";
+                break;
+        }
+        Render();
     }
 
-    private void OnMatchEnded(MatchEnded ended) => Render();
+    private void EnterMatch(NetSession net, StartMatch setup, MatchPlan plan)
+    {
+        var room = setup.Room ?? net.Room;
+        var s0 = room.Seats[0];
+        var s1 = room.Seats[1];
+
+        GameSession.Clear();
+        GameSession.P1Char = s0.CharacterId;
+        GameSession.P2Char = s1.CharacterId;
+        GameSession.P1Name = SeatName(room, 0);
+        GameSession.P2Name = SeatName(room, 1);
+        GameSession.Mode = ReplayData.ModeLan;
+        GameSession.RoomId = room.RoomId ?? "";
+        GameSession.Host = $"{net.HostAddress}:{net.Port}";
+
+        // Only the seats THIS machine drives get a device or an agent. Everything else arrives over the
+        // wire, and the locked device is the one this window claimed the seat with (see PadLock).
+        for (int seat = 0; seat < RoomState.SeatCount; seat++)
+        {
+            if (!plan.LocalSeat[seat]) continue;
+            if (plan.AiSeat[seat]) SetSeatAgent(seat, room.Seats[seat].AiModel);
+            else SetSeatDevice(seat, net.LockedDevice(seat));
+        }
+
+        GameSession.NetPlan = plan;
+        GameSession.Configured = true;
+        GetTree().ChangeSceneToFile(MatchScenePath);
+    }
+
+    private static void SetSeatDevice(int seat, IInputSource src)
+    {
+        if (seat == 0) GameSession.P1 = src; else GameSession.P2 = src;
+    }
+
+    // Built here rather than carried in the snapshot: the model is a path on the HOST's disk and the AI
+    // only ever runs on the host, so nobody else could load it anyway.
+    private static void SetSeatAgent(int seat, string model)
+    {
+        IAgent agent;
+        if (string.IsNullOrEmpty(model)) agent = new StateMachineAgent(seat);
+        else
+        {
+            // Fall back to the state machine on any load failure, same as ReadyScreen: a bad model file
+            // must not strand the whole room in a match that cannot start.
+            try { agent = new OnnxAgent(ProjectSettings.GlobalizePath(model)); }
+            catch (System.Exception e)
+            {
+                GD.PushError($"[NetSeat] failed to load ONNX {model}: {e.Message}; using state machine.");
+                agent = new StateMachineAgent(seat);
+            }
+        }
+        if (seat == 0) GameSession.P1Agent = agent; else GameSession.P2Agent = agent;
+    }
+
+    // Whose name goes over that fighter's head. An AI seat shows the model rather than a player name.
+    private static string SeatName(RoomSnapshot room, int seat)
+    {
+        var s = room.Seats[seat];
+        if (s.IsAi) return string.IsNullOrEmpty(s.AiModel) ? "AI" : s.AiModel.GetFile();
+        foreach (var p in room.Players)
+            if (p.PlayerId == s.OccupantPlayerId) return p.Name;
+        return $"{seat + 1}P";
+    }
+
+    private void OnMatchEnded(MatchEnded ended)
+    {
+        _matchNote = "";
+        Render();
+    }
 
     private void OnDisconnected(string reason)
     {
@@ -466,6 +560,16 @@ public partial class NetSeatScreen : Control
     public void OnStartPressed()
     {
         if (Net == null || !Net.IsHost || !Net.BothSeatsReady()) return;
+
+        // Refuse with the real reason rather than starting a match that cannot synchronize. The one
+        // case this actually catches is a fighter that never announced a match port, which no amount of
+        // waiting fixes (see MatchPlan).
+        var preview = Net.PreviewPlan();
+        if (preview != null && preview.Role == MatchRole.Idle)
+        {
+            SetHint(preview.Problem ?? "当前无法开始对局");
+            return;
+        }
         Net.RequestStartMatch(new StartMatch());
     }
 
@@ -594,7 +698,7 @@ public partial class NetSeatScreen : Control
     private string DefaultHint(NetSession net)
     {
         if (net.Room != null && net.Room.MatchRunning)
-            return "对局进行中…（局内同步将在下一提交接入）";
+            return string.IsNullOrEmpty(_matchNote) ? "对局进行中…" : _matchNote;
         int mine = net.LocalSeat();
         var parts = new List<string>();
         parts.Add(mine >= 0 ? "确认键改角色 · 取消键让位" : "确认键占一个空位");

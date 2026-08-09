@@ -18,15 +18,16 @@ namespace MouseKombat.Net;
 // completely separate (UDP, driven by the rollback library) and is not throttled by this.
 public sealed class TcpRoomHost : IDisposable
 {
-    public enum EventKind { PlayerJoined, PlayerLeft, RoomChanged, Rejected, Error }
+    public enum EventKind { PlayerJoined, PlayerLeft, RoomChanged, Rejected, Error, MatchResult }
 
     public readonly struct HostEvent
     {
         public readonly EventKind Kind;
         public readonly int PlayerId;
         public readonly string Detail;
-        public HostEvent(EventKind kind, int playerId, string detail)
-        { Kind = kind; PlayerId = playerId; Detail = detail; }
+        public readonly int Value;      // MatchResult: the winning seat
+        public HostEvent(EventKind kind, int playerId, string detail, int value = 0)
+        { Kind = kind; PlayerId = playerId; Detail = detail; Value = value; }
     }
 
     private sealed class Conn
@@ -36,6 +37,10 @@ public sealed class TcpRoomHost : IDisposable
         public int PlayerId;              // 0 until Hello is accepted
         public bool Closing;
         public string CloseReason;
+        // Where this client's MATCH traffic goes: the source address of this TCP connection paired
+        // with the UDP port it announced in Hello. Built once at handshake so starting a match needs
+        // no discovery step (see PROTOCOL.md § Match lifecycle).
+        public IPEndPoint MatchEndPoint;
     }
 
     private Socket _listener;
@@ -189,6 +194,15 @@ public sealed class TcpRoomHost : IDisposable
                 Apply(Room.RemoveAi(c.PlayerId, frame.As<RemoveAi>().Seat));
                 break;
             }
+            case MsgType.MatchResult:
+            {
+                // Only meaningful while a match is running. The rules for ending one live in RoomState;
+                // this just forwards the fact upward, because deciding it here would put match policy
+                // in the socket handler.
+                if (Room.MatchRunning)
+                    Emit(EventKind.MatchResult, c.PlayerId, null, frame.As<MatchResult>().WinnerSeat);
+                break;
+            }
             case MsgType.Bye: Close(c, frame.As<Bye>().Reason); break;
             default: break;   // unknown / host-only types from a client are ignored
         }
@@ -207,9 +221,33 @@ public sealed class TcpRoomHost : IDisposable
         if (p == null) { Reject(c, "房间已满"); return; }
 
         c.PlayerId = p.PlayerId;
+        c.MatchEndPoint = MatchEndPointFrom(c.Sock, h.MatchUdpPort);
         Send(c, MsgType.Welcome, new Welcome { PlayerId = p.PlayerId, IsHost = false, Room = Room.Snapshot() });
         Emit(EventKind.PlayerJoined, p.PlayerId, p.Name);
         BroadcastRoom();
+    }
+
+    // The client's match endpoint, or null when it announced no port (an older build, or a bind that
+    // failed on its side). A null here is what makes MatchPlan refuse to start rather than guess.
+    public IPEndPoint MatchEndPointOf(int playerId)
+    {
+        if (playerId == 0) return null;
+        var c = _conns.Find(x => x.PlayerId == playerId);
+        return c?.MatchEndPoint;
+    }
+
+    // The ADDRESS comes from the connection, never from the message: a client that lies about its own
+    // IP would otherwise make the host send match traffic wherever it liked. Only the port is taken on
+    // trust, and the worst a wrong one does is break that client's own match.
+    private static IPEndPoint MatchEndPointFrom(Socket sock, int udpPort)
+    {
+        if (udpPort <= 0 || udpPort > 65535) return null;
+        if (sock?.RemoteEndPoint is not IPEndPoint peer) return null;
+        var addr = peer.Address;
+        // A dual-mode listener reports IPv4 peers as ::ffff:a.b.c.d. The match socket is IPv4, so map
+        // it back or every LAN client would be unreachable over a v6 listener.
+        if (addr.IsIPv4MappedToIPv6) addr = addr.MapToIPv4();
+        return new IPEndPoint(addr, udpPort);
     }
 
     // Accepted request => everyone needs the new snapshot. Refused => nothing changed, so nothing is
@@ -335,8 +373,8 @@ public sealed class TcpRoomHost : IDisposable
         try { c.Sock?.Close(); } catch { }
     }
 
-    private void Emit(EventKind kind, int playerId, string detail) =>
-        _events.Enqueue(new HostEvent(kind, playerId, detail));
+    private void Emit(EventKind kind, int playerId, string detail, int value = 0) =>
+        _events.Enqueue(new HostEvent(kind, playerId, detail, value));
 
     public void Dispose() => Stop("主机关闭");
 }

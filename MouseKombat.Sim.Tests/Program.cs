@@ -80,6 +80,7 @@ internal static partial class Program
         NetCodecTests();
         RoomStateTests();
         TransportTests();
+        MatchHandshakeTests();
         RollbackSessionTests();
 
         Console.WriteLine(_fail == 0 ? "\nALL PASS" : $"\n{_fail} FAILURE(S)");
@@ -732,6 +733,98 @@ internal static partial class Program
     // TCP is a byte stream: a read can return half a message, three messages, or one message split
     // across four reads. These assertions are about that reassembly, because it is the part that
     // works fine on loopback and then breaks against a real network.
+    // ---- the two match-specific things that go over TCP ----
+    //
+    // Both exist for the SAME configuration: the host holding no seat while two clients fight. It cannot
+    // see the knockout (no simulation) and it cannot reach the fighters (no addresses) unless they are
+    // announced, so a bug in either of these strands the room in MatchRunning forever.
+    private static void MatchHandshakeTests()
+    {
+        const string Ver = "0.0.7-test";
+
+        static bool Pump(TcpRoomHost host, IList<TcpRoomClient> clients, Func<bool> until, int maxTicks = 400)
+        {
+            for (int t = 0; t < maxTicks; t++)
+            {
+                host?.Poll();
+                for (int i = 0; i < clients.Count; i++) clients[i].Poll();
+                if (until()) return true;
+                System.Threading.Thread.Sleep(1);
+            }
+            return false;
+        }
+
+        // A. the announced match port becomes a full endpoint, paired with the TCP source address.
+        {
+            using var host = new TcpRoomHost();
+            host.Start("127.0.0.1", 0, "主机", Ver);
+            using var a = new TcpRoomClient { MatchUdpPort = 45123 };
+            a.Connect("127.0.0.1", host.Port, "客户端A", Ver);
+
+            var list = new List<TcpRoomClient> { a };
+            Check(Pump(host, list, () => a.IsConnected), "match: client with a match port connects");
+            var ep = host.MatchEndPointOf(a.PlayerId);
+            Check(ep != null && ep.Port == 45123, $"match: the host records the announced UDP port (got {ep?.Port})");
+            Check(ep != null && ep.Address.ToString() == "127.0.0.1",
+                $"match: the ADDRESS comes from the connection, not the message (got {ep?.Address})");
+            Check(a.ConnectedAddress != null && a.ConnectedAddress.ToString() == "127.0.0.1",
+                "match: the client remembers the address it actually resolved to");
+        }
+
+        // B. no port announced -> no endpoint, which is what makes MatchPlan refuse instead of guess.
+        {
+            using var host = new TcpRoomHost();
+            host.Start("127.0.0.1", 0, "主机", Ver);
+            using var a = new TcpRoomClient();   // MatchUdpPort left at 0
+            a.Connect("127.0.0.1", host.Port, "沉默的客户端", Ver);
+
+            var list = new List<TcpRoomClient> { a };
+            Check(Pump(host, list, () => a.IsConnected), "match: a client that announces no port still joins");
+            Check(host.MatchEndPointOf(a.PlayerId) == null,
+                "match: but it has no match endpoint, so no match can be started against it");
+        }
+
+        // C. MatchResult: only while a match is running, and it carries the winning seat.
+        {
+            using var host = new TcpRoomHost();
+            host.Start("127.0.0.1", 0, "主机", Ver);
+            using var a = new TcpRoomClient { MatchUdpPort = 45124 };
+            using var b = new TcpRoomClient { MatchUdpPort = 45125 };
+            a.Connect("127.0.0.1", host.Port, "A", Ver);
+            b.Connect("127.0.0.1", host.Port, "B", Ver);
+            var list = new List<TcpRoomClient> { a, b };
+            Pump(host, list, () => a.IsConnected && b.IsConnected);
+
+            // Reported with no match running: ignored outright.
+            a.ReportMatchResult(1);
+            int seen = -99;
+            Pump(host, list, () =>
+            {
+                while (host.TryDequeueEvent(out var e))
+                    if (e.Kind == TcpRoomHost.EventKind.MatchResult) seen = e.Value;
+                return false;
+            }, maxTicks: 40);
+            Check(seen == -99, "match: a result reported outside a match is ignored");
+
+            // Now with a real match: both clients take a seat, pick, and the host starts it.
+            a.ClaimSeat(0); b.ClaimSeat(1);
+            Pump(host, list, () => host.Room.Seat(0).Occupied && host.Room.Seat(1).Occupied);
+            a.PickCharacter((int)CharacterId.Hamster);
+            b.PickCharacter((int)CharacterId.Kangaroo);
+            Pump(host, list, () => host.Room.CanStart);
+            Check(host.Room.BeginMatch(), "match: two client fighters can start a match");
+
+            a.ReportMatchResult(1);
+            Pump(host, list, () =>
+            {
+                while (host.TryDequeueEvent(out var e))
+                    if (e.Kind == TcpRoomHost.EventKind.MatchResult) seen = e.Value;
+                return seen != -99;
+            });
+            Check(seen == 1, $"match: the host is told which seat won (got {seen})");
+        }
+    }
+
     private static void NetCodecTests()
     {
         var hello = new Hello { Protocol = NetVersion.Protocol, GameVersion = "0.0.7", Name = "袋鼠玩家" };

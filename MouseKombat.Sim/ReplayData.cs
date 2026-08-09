@@ -76,6 +76,24 @@ public sealed class ReplayData
         P2Inputs.Add(Pack(f2));
     }
 
+    // Records the input for a SPECIFIC frame, overwriting whatever was there.
+    //
+    // Rollback needs this. In a networked match a frame is first simulated with PREDICTED opponent
+    // input and then re-simulated with the real thing, so appending would write the prediction and
+    // never correct it — the resulting file would replay a fight nobody had. Here the last write for a
+    // frame wins, which is by definition the confirmed input.
+    //
+    // Gaps cannot happen in practice (frames arrive in order and rollbacks only revisit frames already
+    // recorded), but a gap would silently shift every later frame, so it is padded with neutral rather
+    // than left to chance.
+    public void RecordAt(int frame, InputFrame f1, InputFrame f2)
+    {
+        if (frame < 0) return;
+        while (P1Inputs.Count <= frame) { P1Inputs.Add(0); P2Inputs.Add(0); }
+        P1Inputs[frame] = Pack(f1);
+        P2Inputs[frame] = Pack(f2);
+    }
+
     public InputFrame P1At(int frame) => Unpack(P1Inputs[frame]);
     public InputFrame P2At(int frame) => Unpack(P2Inputs[frame]);
 

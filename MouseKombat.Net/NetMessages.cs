@@ -23,6 +23,7 @@ public enum MsgType : byte
     Bye = 10,
     MatchEnded = 11,
     RemoveAi = 12,   // host only: free an AI seat the host placed (Backspace in the seat screen)
+    MatchResult = 13,// fighter -> host: this machine reached the knockout, here is the winner
     // 20.. reserved for the lobby-only room list / create / join messages (期3-5)
 }
 
@@ -30,7 +31,13 @@ public static class NetVersion
 {
     // Bumped whenever the wire format changes in a way an older peer would misread. Separate from the
     // game version so a pure protocol fix does not require a game release note, and vice versa.
-    public const int Protocol = 1;
+    //
+    // 2: the match channel. Hello announces a bound match UDP port, StartMatch carries the host's port
+    //    and whether spectating is possible, and MatchResult was added. All of it is append-only at the
+    //    format level, so a v1 peer would not MISREAD anything — but it would announce no match port,
+    //    and the host would then refuse to start a match against it with a message about a missing
+    //    port rather than about versions. Refusing at the handshake says the true thing instead.
+    public const int Protocol = 2;
 }
 
 [MessagePackObject]
@@ -41,6 +48,11 @@ public sealed class Hello
     [Key(2)] public string Name { get; set; } = "";
     // Set when joining a lobby room that has a password. Empty for LAN.
     [Key(3)] public string RoomPassword { get; set; } = "";
+    // UDP port this client has ALREADY BOUND for match traffic. The host pairs it with the source
+    // address of this TCP connection to get a full endpoint, which is how it can put the client into a
+    // rollback session (or a relay) without any discovery step. Announced rather than negotiated, and
+    // bound before it is announced, so the number cannot be stolen in between.
+    [Key(4)] public int MatchUdpPort { get; set; }
 }
 
 [MessagePackObject]
@@ -137,8 +149,32 @@ public sealed class StartMatch
     [Key(7)] public float P2StartY { get; set; } = 560f;
     // How each fighting seat is reached over UDP. Empty for a seat driven locally (the host's own
     // seat, or an AI seat, whose inputs enter the match as the host's).
+    //
+    // UNUSED BY LAN, and deliberately so: the host is always the hub (spec: 走房主中转，不做 P2P), so
+    // every client dials MatchUdpPort below and never needs another client's address — which also means
+    // one player's IP is never handed to another. These two stay for the lobby relay in 期3-5.
     [Key(8)] public string Seat0Endpoint { get; set; } = "";
     [Key(9)] public string Seat1Endpoint { get; set; } = "";
+    // The host's UDP port for this match. Same number as the room's TCP port for a LAN game, but sent
+    // explicitly rather than assumed: a lobby game relays through a different port entirely.
+    [Key(10)] public int MatchUdpPort { get; set; }
+    // Spectating requires the host to be RUNNING the session, which it only does when it drives at
+    // least one seat (its own or an AI's). When two clients fight and the host holds nothing, the host
+    // is a dumb UDP relay with no session to attach a spectator to, so nobody can watch. Sent rather
+    // than re-derived so a client does not have to reimplement the rule.
+    [Key(11)] public bool SpectatingAvailable { get; set; }
+}
+
+// A fighter telling the host the match is over.
+//
+// Needed because of the relay configuration: when both fighters are clients and the host holds no seat,
+// the host runs no simulation and has no other way to learn that a knockout happened — so the room would
+// stay MatchRunning forever and nobody could pick again. Fighters always send it; the host ignores a
+// second report because the first one already cleared MatchRunning.
+[MessagePackObject]
+public sealed class MatchResult
+{
+    [Key(0)] public int WinnerSeat { get; set; } = -1;
 }
 
 [MessagePackObject]

@@ -1,5 +1,6 @@
 using Godot;
 using System.Collections.Generic;
+using MouseKombat.Net;
 using MouseKombat.Sim;
 
 // Presentation VIEW + match director. Owns the headless GameSim, feeds it two InputFrames
@@ -9,7 +10,7 @@ using MouseKombat.Sim;
 // The two fighters are NOT part of this scene: the ready screen picks a character per seat, and
 // _Ready instantiates the matching Char_*.tscn (see CharacterDb). P1Slot / P2Slot are design-time
 // markers that give the fighters their world position and draw order.
-public partial class GameManager : Node2D
+public partial class GameManager : Node2D, IMatchPresenter
 {
     [Export] public Node2D P1Slot;   // marker: position + draw order for the P1 fighter
     [Export] public Node2D P2Slot;
@@ -89,6 +90,34 @@ public partial class GameManager : Node2D
     [Export] public bool RecordReplays = true;
     private ReplayData _recording;
 
+    // ---- networked match ----
+    // Null for local play. When set, the ROLLBACK SESSION owns the clock: this director no longer
+    // decides when a frame happens, it implements IMatchPresenter and is called back once per advanced
+    // frame — including for frames being re-simulated after a misprediction.
+    private RollbackMatch _netMatch;
+    private MatchPlan _plan;
+    private bool _inRollback;
+    private int _stalledTicks;
+
+    // A KO seen on a PREDICTED frame can be taken back. Starting the victory sequence would stop the
+    // sim, so the rollback that retracts it would never arrive and the two machines would disagree
+    // about whether the match is over. So in a net match the knockout has to stand for this many
+    // frames before the splash starts — comfortably more than Backdash's 8 prediction frames.
+    [Export] public int NetKoConfirmFrames = 10;
+
+    // Frames of input delay in a networked match. Trades a little local input lag for fewer
+    // mispredictions; 2 at 60 fps is ~33 ms, which a LAN does not need much of. Exported because the
+    // right value depends on the link, not on the game.
+    [Export] public int NetInputDelayFrames = 2;
+    private int _koHeldFrames = -1;
+    private int _pendingNetWinner = -1;
+
+    [Export] public string NetSeatScenePath = "res://NetSeat.tscn";
+
+    private Label _netStatus;
+    private AcceptDialog _netDropPopup;
+    private bool _leavingNetMatch;
+
     private GameSim _sim;
     private readonly Dictionary<int, Projectile> _projViews = new(); // sim projectile id -> view node
     private readonly HashSet<int> _liveIds = new();
@@ -138,6 +167,52 @@ public partial class GameManager : Node2D
         CacheAndHideLabel(WinTextLine2, ref _l2Home);
         UpdateHpBars();
         StartRecording();
+        StartNetMatch();
+    }
+
+    // ---- networked match setup ----
+
+    private void StartNetMatch()
+    {
+        _plan = GameSession.NetPlan;
+        if (_plan == null) return;
+
+        var net = NetSession.Instance;
+        BuildNetStatusLabel();
+        BuildNetDropPopup();
+        if (net != null)
+        {
+            net.MatchEnded += OnNetMatchEnded;
+            net.Disconnected += OnNetDisconnected;
+        }
+
+        var setup = new MatchNetSetup
+        {
+            LocalSeat = new[] { _plan.LocalSeat[0], _plan.LocalSeat[1] },
+            RemoteEndPoint = _plan.RemoteEndPoint,
+            Spectators = _plan.Spectators,
+            SpectateHost = _plan.SpectateHost,
+            // A client hands over the socket it bound during the handshake (its port was announced in
+            // Hello and must not change); the host just names the room port and lets Backdash bind it.
+            Socket = net != null && !net.IsHost ? net.MatchSocket : null,
+            Port = net?.MatchUdpPort ?? 0,
+            InputDelayFrames = NetInputDelayFrames,
+            FrameRate = Engine.PhysicsTicksPerSecond,
+            LogSink = msg => GD.Print(msg),
+        };
+
+        try
+        {
+            _netMatch = RollbackMatch.Create(_sim, this, setup);
+            SetNetStatus(_plan.Role == MatchRole.Spectator ? "正在连接对局…" : "正在与对方同步…");
+        }
+        catch (System.Exception e)
+        {
+            GD.PushError($"[GameManager] rollback session failed: {e}");
+            SetNetStatus($"无法建立对局同步：{e.Message}");
+            _recording = null;
+            ShowNetDrop($"无法建立对局同步：{e.Message}");
+        }
     }
 
     // A recording captures ONE knockout. The header carries everything playback needs to rebuild the
@@ -265,6 +340,7 @@ public partial class GameManager : Node2D
     }
 
     [Export] public string ReadyScenePath = "res://ReadyScreen.tscn";
+    [Export] public string MainMenuScenePath = "res://MainMenu.tscn";
 
     // Esc bails out of the match and returns to the ready screen so devices can be re-bound.
     public override void _UnhandledInput(InputEvent @event)
@@ -272,6 +348,10 @@ public partial class GameManager : Node2D
         if (@event is InputEventKey k && k.Pressed && !k.Echo && k.Keycode == Key.Escape)
         {
             GetViewport().SetInputAsHandled();
+            // Explicitly DISABLED in a networked match (spec: 局内 ESC 回主界面禁用). One player walking
+            // out mid-round would leave the other simulating against a seat nobody is driving, and the
+            // room's own rules already say when a match ends.
+            if (_netMatch != null) return;
             // Drop the partial recording: a replay file represents a completed knockout, and half a
             // round with no result is not something the list should offer.
             _recording = null;
@@ -292,6 +372,8 @@ public partial class GameManager : Node2D
     {
         if (_sim == null) return; // SpawnFighters failed; errors already logged in _Ready
 
+        if (_netMatch != null) DrainNetEvents();
+
         if (_phase != Phase.Fighting)
         {
             // The sim is paused, but the ANIMATION clock is the physics tick now (see
@@ -304,6 +386,8 @@ public partial class GameManager : Node2D
             return;
         }
 
+        if (_netMatch != null) { NetTick(); return; }
+
         // Record the frames ACTUALLY fed to the sim, which includes anything an AI decided. That is
         // what makes an AI match replayable without shipping the model: the replay carries the
         // resulting inputs, not the policy.
@@ -311,7 +395,25 @@ public partial class GameManager : Node2D
         var f2 = FrameFor(p2, 1);
         _recording?.Record(f1, f2);
         var res = _sim.Step(f1, f2);
+        PresentFrame(res, rollback: false);
 
+        // winner index: 1 = P2 won (P1 dead), 0 = P1 won (P2 dead) — matches old CheckKO mapping
+        if (res.MatchOverWinner >= 0)
+        {
+            FinishRecording();
+            BeginWin(res.MatchOverWinner);
+        }
+    }
+
+    // Everything the view does for ONE advanced logic frame. Shared by local play and by the rollback
+    // session, which is what keeps a re-simulated frame from being presented differently to a live one.
+    //
+    // `rollback` suppresses only what would fire TWICE for a frame the player already saw: hit sparks,
+    // sound, and the command banner. Position, animation and HP are recomputed either way because they
+    // are pure functions of the state — and because a whole rollback plus the following live frame
+    // happen inside ONE physics tick, only the last of them is ever drawn.
+    private void PresentFrame(StepResult res, bool rollback)
+    {
         // push logic -> views (position + this frame's animation commands), then advance the
         // animation by exactly one logic frame
         p1.SyncFromSim();
@@ -320,22 +422,220 @@ public partial class GameManager : Node2D
         p2.TickAnimation();
         UpdateNameTags();
 
-        foreach (int id in res.SpawnedProjectileIds) SpawnProjectileView(id);
+        // Views are reconciled BY ID rather than created from the spawn event, so a projectile that a
+        // rollback re-creates gets one node, not a second one. See SyncProjectileViews.
         SyncProjectileViews();
 
-        foreach (var h in res.Hits)
-            PlayHitFeedback(h.Result, h.WorldHitbox.ToGodot(), h.DefenderIndex == 0 ? p1 : p2);
+        if (!rollback)
+        {
+            foreach (var h in res.Hits)
+                PlayHitFeedback(h.Result, h.WorldHitbox.ToGodot(), h.DefenderIndex == 0 ? p1 : p2);
 
-        foreach (var pop in res.Popups) ShowCommandPopup(pop.PlayerIndex, pop.Text);
+            foreach (var pop in res.Popups) ShowCommandPopup(pop.PlayerIndex, pop.Text);
+        }
 
         UpdateHpBars();
+    }
 
-        // winner index: 1 = P2 won (P1 dead), 0 = P1 won (P2 dead) — matches old CheckKO mapping
-        if (res.MatchOverWinner >= 0)
+    // ---- the networked clock ----
+
+    private void NetTick()
+    {
+        if (!_netMatch.Tick())
         {
-            FinishRecording();
-            BeginWin(res.MatchOverWinner);
+            // The session produced no frame: still synchronizing, or holding back because we are ahead
+            // of the peer. Nothing is ticked — the sim did not move and the animation is locked to the
+            // sim (see Player.TickAnimation), so freezing is the right picture of "waiting".
+            _stalledTicks++;
+            // Only once the peer is actually synchronized: during the initial handshake every tick
+            // stalls, and "等待对方…" would replace the more accurate "正在与对方同步…".
+            if (_stalledTicks == 30 && _netMatch.Synchronized) SetNetStatus("等待对方…");
+            return;
         }
+        if (_stalledTicks > 0) { _stalledTicks = 0; SetNetStatus(""); }
+
+        // A CONFIRMED knockout, not a predicted one — see NetKoConfirmFrames.
+        if (_koHeldFrames >= NetKoConfirmFrames)
+        {
+            _koHeldFrames = -1;
+            FinishRecording();
+            BeginWin(_pendingNetWinner);
+        }
+    }
+
+    private void DrainNetEvents()
+    {
+        while (_netMatch.TryDequeueEvent(out var e))
+        {
+            switch (e.Kind)
+            {
+                case MatchEventKind.Desync:
+                    // Never repaired, always reported: from here on the two machines are watching
+                    // different fights, and pretending otherwise is worse than saying so.
+                    GD.PushError($"[net] {e.Text} local={e.LocalChecksum:X8} remote={e.RemoteChecksum:X8}");
+                    SetNetStatus(e.Text + " —— 双方画面可能已不一致");
+                    break;
+                case MatchEventKind.Synchronized:
+                    SetNetStatus("");
+                    break;
+                default:
+                    SetNetStatus(e.Text);
+                    break;
+            }
+        }
+    }
+
+    // ---- IMatchPresenter ----
+
+    public ushort LocalInput(int seat) => ReplayData.Pack(FrameFor(seat == 0 ? p1 : p2, seat));
+
+    // The three fields per fighter a rewind has to restore alongside the sim state, because the sim
+    // knows nothing about them (see Player.ViewState).
+    public void SaveView(ref SimStateWriter w)
+    {
+        WriteView(ref w, p1.SaveView());
+        WriteView(ref w, p2.SaveView());
+    }
+
+    public void LoadView(ref SimStateReader r)
+    {
+        p1.LoadView(ReadView(ref r));
+        p2.LoadView(ReadView(ref r));
+    }
+
+    private static void WriteView(ref SimStateWriter w, Player.ViewState v)
+    {
+        w.ShortString(v.Clip);
+        w.Int(v.Frame);
+        w.Bool(v.Reverse);
+    }
+
+    private static Player.ViewState ReadView(ref SimStateReader r)
+    {
+        string clip = r.ShortString() ?? "";
+        int frame = r.Int();
+        bool rev = r.Bool();
+        return new Player.ViewState(clip, frame, rev);
+    }
+
+    public void OnFrame(int frame, InputFrame f0, InputFrame f1, StepResult res, bool rollback)
+    {
+        // RecordAt, not Record: a frame first simulated with a PREDICTED opponent input is re-simulated
+        // with the real one, and the replay has to keep the confirmed version.
+        _recording?.RecordAt(frame, f0, f1);
+        PresentFrame(res, rollback);
+
+        // How long the knockout has stood. A rollback that erases it clears MatchOver on the sim, which
+        // is exactly what this reads — no second copy of the fact to get out of step.
+        if (res.MatchOverWinner >= 0) { _pendingNetWinner = res.MatchOverWinner; _koHeldFrames = 0; }
+        else if (!_sim.MatchOver) { _pendingNetWinner = -1; _koHeldFrames = -1; }
+        else if (_koHeldFrames >= 0) _koHeldFrames++;
+    }
+
+    public void OnRollbackBegin(int frame) => _inRollback = true;
+
+    // The last re-simulated frame already wrote its sprite frame through PresentFrame, so there is
+    // nothing to repair here. The flag exists so "am I re-simulating" is answerable at all.
+    public void OnRollbackEnd(int frame) => _inRollback = false;
+
+    // ---- leaving a networked match ----
+
+    private void OnNetMatchEnded(MatchEnded ended)
+    {
+        // Normally each machine reaches the knockout on its own and leaves when its victory sequence
+        // finishes. This is the safety net: if we never see the KO (a desync, a stalled peer), the
+        // host's MatchEnded still gets everyone back to seat select.
+        if (_phase == Phase.Win) return;   // let the local sequence finish first
+        ReturnToSeatScreen();
+    }
+
+    private void OnNetDisconnected(string reason)
+    {
+        if (_leavingNetMatch) return;
+        _recording = null;   // half a round with no result is not a replay
+        ShowNetDrop(string.IsNullOrEmpty(reason) ? "与房间的连接已断开。" : reason);
+    }
+
+    private void ReturnToSeatScreen()
+    {
+        if (_leavingNetMatch) return;
+        _leavingNetMatch = true;
+        var net = NetSession.Instance;
+        // Only the host may change the room's state: ending the match clears both seats and kicks
+        // whoever dropped mid-round (PROTOCOL.md § Match lifecycle). A client instead REPORTS the
+        // result, which is the only way the match ends at all when the host is merely relaying between
+        // two client fighters and has no simulation of its own.
+        if (net == null) { }
+        else if (net.IsHost) net.RequestEndMatch(_pendingNetWinner);
+        else if (_plan != null && _plan.Role == MatchRole.Fighter) net.ReportMatchResult(_pendingNetWinner);
+        GameSession.NetPlan = null;
+        GetTree().ChangeSceneToFile(NetSeatScenePath);
+    }
+
+    private void BuildNetStatusLabel()
+    {
+        var layer = new CanvasLayer { Layer = 4 };   // above the victory text; see the WinAnim note
+        AddChild(layer);
+        _netStatus = new Label
+        {
+            HorizontalAlignment = HorizontalAlignment.Center,
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+            Visible = false,
+        };
+        layer.AddChild(_netStatus);
+        // Anchors before offsets, and only AFTER AddChild — a preset applied to a parentless Control
+        // computes against a rect that does not exist yet (the CharSelect bug).
+        _netStatus.AnchorLeft = 0f; _netStatus.AnchorRight = 1f;
+        _netStatus.AnchorTop = 0f; _netStatus.AnchorBottom = 0f;
+        _netStatus.OffsetLeft = 0; _netStatus.OffsetRight = 0;
+        _netStatus.OffsetTop = 92; _netStatus.OffsetBottom = 124;
+        _netStatus.AddThemeFontSizeOverride("font_size", 17);
+        _netStatus.AddThemeColorOverride("font_color", new Color(1f, 0.88f, 0.5f));
+        _netStatus.AddThemeColorOverride("font_outline_color", new Color(0, 0, 0, 0.9f));
+        _netStatus.AddThemeConstantOverride("outline_size", 5);
+    }
+
+    private void SetNetStatus(string text)
+    {
+        if (_netStatus == null) return;
+        _netStatus.Text = text ?? "";
+        _netStatus.Visible = !string.IsNullOrEmpty(text);
+    }
+
+    private void BuildNetDropPopup()
+    {
+        _netDropPopup = new AcceptDialog { Title = "对局中断", OkButtonText = "确定", Exclusive = true };
+        AddChild(_netDropPopup);
+        _netDropPopup.Confirmed += LeaveToMainMenu;
+        _netDropPopup.Canceled += LeaveToMainMenu;
+    }
+
+    private void ShowNetDrop(string text)
+    {
+        if (_netDropPopup == null || _netDropPopup.Visible) return;
+        _netDropPopup.DialogText = text;
+        _netDropPopup.PopupCentered();
+    }
+
+    private void LeaveToMainMenu()
+    {
+        if (_leavingNetMatch) return;
+        _leavingNetMatch = true;
+        NetSession.Instance?.Leave(null);
+        GameSession.Clear();
+        GetTree().ChangeSceneToFile(MainMenuScenePath);
+    }
+
+    public override void _ExitTree()
+    {
+        var net = NetSession.Instance;
+        if (net != null)
+        {
+            net.MatchEnded -= OnNetMatchEnded;
+            net.Disconnected -= OnNetDisconnected;
+        }
+        _netMatch?.Dispose();
+        _netMatch = null;
     }
 
     // AI agent overrides device input when present; else poll the device / InputMap.
@@ -371,7 +671,13 @@ public partial class GameManager : Node2D
         _projViews[id] = node;
     }
 
-    // mirror live sim projectile positions onto view nodes; free views whose projectile ended
+    // Reconcile the view nodes against the live sim projectiles: create one for any id that has none,
+    // move the ones that do, free the ones whose projectile ended.
+    //
+    // Creating from the ID SET rather than from the spawn event is what makes this rollback-safe.
+    // Projectile ids come out of the savestate, so a rewind re-creates the same projectile with the
+    // same id; reacting to StepResult.SpawnedProjectileIds would then add a second node for it every
+    // time that frame was re-simulated, and nothing would ever free the extra.
     private void SyncProjectileViews()
     {
         _liveIds.Clear();
@@ -380,7 +686,12 @@ public partial class GameManager : Node2D
         {
             var pr = list[i];
             _liveIds.Add(pr.Id);
-            if (_projViews.TryGetValue(pr.Id, out var node) && IsInstanceValid(node))
+            if (!_projViews.TryGetValue(pr.Id, out var node) || !IsInstanceValid(node))
+            {
+                SpawnProjectileView(pr.Id);
+                _projViews.TryGetValue(pr.Id, out node);
+            }
+            if (node != null && IsInstanceValid(node))
                 node.Position = pr.Position.ToGodot();
         }
 
@@ -457,6 +768,10 @@ public partial class GameManager : Node2D
     private void PlaySfx(AudioStreamPlayer p)
     {
         if (p == null) return;
+        // Belt and braces. PresentFrame already withholds feedback for re-simulated frames, but a sound
+        // is the one thing a player NOTICES firing twice, and a future caller that forgets the flag
+        // would be hard to hear as a bug rather than as sloppy audio.
+        if (_inRollback) return;
         float v = SfxPitchVariation;
         p.PitchScale = v > 0f ? Mathf.Max(0.01f, 1f + (GD.Randf() * 2f - 1f) * v) : 1f;
         p.Play();
@@ -475,7 +790,7 @@ public partial class GameManager : Node2D
     // flip = mirror on X (directional FX faces the correct way for the defender)
     private void SpawnFx(PackedScene scene, Vector2 worldPos, bool flip)
     {
-        if (scene == null) return;
+        if (scene == null || _inRollback) return;   // see PlaySfx
         var fx = scene.Instantiate<Node2D>();
         fx.GlobalPosition = worldPos;
         fx.Scale = new Vector2(flip ? -1f : 1f, 1f);
@@ -600,6 +915,10 @@ public partial class GameManager : Node2D
     {
         if (_phase != Phase.Win) return;
         if (!_winAnimDone || !_winTextDone) return;
+        // A networked "match" is ONE knockout: everyone goes back to seat select with the seats cleared
+        // and picks again (spec: 每局游戏结束后都返回到占座选人界面). Local play resets in place instead,
+        // so the two devices keep their bindings.
+        if (_netMatch != null) { ReturnToSeatScreen(); return; }
         ResetMatch();
     }
 

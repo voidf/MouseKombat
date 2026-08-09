@@ -46,6 +46,16 @@ public sealed class TcpRoomClient : IDisposable
     public bool IsBusy => _stage is Stage.Resolving or Stage.Connecting or Stage.Handshaking;
     public string LastError { get; private set; }
 
+    // UDP port this client has already bound for match traffic, sent in Hello. 0 = none announced,
+    // which the host turns into a refusal to start rather than a guess.
+    public int MatchUdpPort { get; set; }
+
+    // The address actually connected to. The match session dials the same host, so this is what
+    // MatchPlan pairs with StartMatch.MatchUdpPort — using the RESOLVED address rather than the typed
+    // hostname means a domain name that resolves to several addresses cannot send room traffic to one
+    // and match traffic to another.
+    public IPAddress ConnectedAddress { get; private set; }
+
     public bool TryDequeueEvent(out ClientEvent e)
     {
         if (_events.Count == 0) { e = default; return false; }
@@ -123,12 +133,14 @@ public sealed class TcpRoomClient : IDisposable
 
         _sock.Blocking = false;
         _stage = Stage.Handshaking;
+        ConnectedAddress = (_sock.RemoteEndPoint as IPEndPoint)?.Address ?? _addrs[_addrIndex];
         Send(MsgType.Hello, new Hello
         {
             Protocol = NetVersion.Protocol,
             GameVersion = _gameVersion,
             Name = _name,
             RoomPassword = _password,
+            MatchUdpPort = MatchUdpPort,
         });
     }
 
@@ -217,6 +229,8 @@ public sealed class TcpRoomClient : IDisposable
     public void ReleaseSeat() => Send(MsgType.SeatRelease, new SeatRelease());
     public void PickCharacter(int character) => Send(MsgType.CharPick, new CharPick { Character = character });
     public void AddAi(int seat, string model) => Send(MsgType.AddAi, new AddAi { Seat = seat, AiModel = model ?? "" });
+    public void ReportMatchResult(int winnerSeat) =>
+        Send(MsgType.MatchResult, new MatchResult { WinnerSeat = winnerSeat });
 
     public void Send<T>(MsgType type, T payload)
     {

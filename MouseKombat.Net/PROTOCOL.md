@@ -65,17 +65,29 @@ must therefore agree on field ORDER. Rules:
 | 10 | `Bye` | either | leaving / shutting down / kicked, with a reason |
 | 11 | `MatchEnded` | host → all | a knockout happened; everyone returns to seat select |
 | 12 | `RemoveAi` | client → host | host only: free an AI seat (Backspace in the seat screen) |
+| 13 | `MatchResult` | fighter → host | reached the knockout; the host ends the match in room state |
+
+Per-frame match input is **not** in this table: it goes over UDP inside the rollback library's own
+framing and is opaque to everything here (see `MouseKombat.Net/RollbackMatch.cs`). The one thing this
+side defines about it is the 10-bit input packing, which is deliberately the same one a replay file
+uses (`ReplayData.Pack`), so a networked match and a replay of it are fed byte-identical streams.
 | 20.. | reserved | | lobby-only messages (room list / create / join) land here in 期3-5 |
 
 ## Handshake
 
-1. Client connects and sends `Hello{protocol, gameVersion, name}`.
+1. Client binds its match UDP port, then connects and sends
+   `Hello{protocol, gameVersion, name, matchUdpPort}`.
 2. The host compares BOTH numbers with its own. Any mismatch → `Rejected{reason}` then close.
    Version compatibility is explicitly not attempted: a desynced simulation is worse than a refusal.
 3. Otherwise → `Welcome{playerId, isHost, snapshot}`, then `RoomState` to everyone.
 
 `name` is display text only, capped at 18 UTF-8 bytes, control characters stripped. It is **never**
 an identity: `playerId` is.
+
+`matchUdpPort` is **bound before it is announced**, so the number cannot be taken by something else in
+between. The host pairs it with the **source address of the TCP connection** — never with an address
+from the message — and stores the result as that client's match endpoint. A client that announces
+nothing gets a null endpoint, which makes the host refuse to start rather than guess.
 
 ## Room state
 
@@ -101,13 +113,55 @@ Rules the host enforces:
 
 ## Match lifecycle
 
-`StartMatch` carries what the match needs that is not already in the snapshot: the stage bounds, the
-start positions, and how to reach the other fighter over UDP. Recording a replay needs the names and
-characters, which the snapshot already has.
+`StartMatch` carries what the match needs that is not already in the snapshot: the host's match UDP
+port, whether spectating is possible, and (for the lobby) the stage geometry. Recording a replay needs
+the names and characters, which the snapshot already has.
+
+### The host is always the hub
+
+There is no P2P. Every client aims its rollback traffic at `StartMatch.matchUdpPort` on the host, and
+therefore never learns another client's address. Which gives five configurations, all decided by
+`MatchPlan.Build` from one snapshot and asserted in the test runner:
+
+| Seats | Host | Other clients |
+|---|---|---|
+| host + client | fighter, dials that client directly | spectators |
+| host + AI | fighter, **drives both seats** (the AI's input enters as the host's) | spectators |
+| AI + AI | fighter, drives both seats | spectators |
+| client + client | **relay only**, runs no session (`UdpMatchRelay` forwards verbatim) | cannot watch |
+| anything, port missing | refuses to start, with the reason | — |
+
+An **AI seat always runs on the host**, whichever seat it is, so it needs no player id and consumes no
+player slot. That is also why the host can be a "fighter" while holding no seat itself.
+
+**Spectating requires the host to be running a session**, which it only does when it drives at least
+one seat. With two client fighters the host is a bare forwarder and there is nothing for a spectator
+session to attach to; `StartMatch.spectatingAvailable` says so rather than making each client
+re-derive the rule. Spectators must also be known **before** the session starts, so a machine that
+joins mid-match watches the *next* one.
+
+### Ports
+
+The host's match port is the room's TCP port, so it needs no announcing — but it is bound **per match**,
+because when the host fights the rollback library owns it and when the host relays `UdpMatchRelay` does,
+and those two cannot both hold it. A client's port is ephemeral, so it is bound **for the whole room**
+and outlives each session (see `MatchSocket`): re-binding the same ephemeral port between matches would
+be a race with every other process on the machine.
+
+### Ending
 
 After a knockout the host sends `MatchEnded`; everyone returns to seat select and the seat/character
 state is cleared, so the room re-picks. A player who dropped during the match is kicked at that
-point, not mid-round: mid-round their inputs are simply treated as neutral.
+point, not mid-round: mid-round their inputs are simply treated as neutral (the rollback session
+derives that from its own `Disconnected` flag, so both machines substitute neutral on the same frames).
+
+In-match `Esc` is disabled: one player walking out mid-round would leave the other simulating against
+a seat nobody drives, and the rules above already decide when a match ends.
+
+A knockout seen on a **predicted** frame is not acted on immediately. Starting the victory sequence
+stops the simulation, so a rollback retracting the KO would never arrive; the host and client would then
+disagree about whether the match was over. The knockout therefore has to stand for more frames than the
+prediction window before the splash starts (`GameManager.NetKoConfirmFrames`).
 
 ## Relay (lobby only)
 

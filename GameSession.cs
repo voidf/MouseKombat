@@ -30,6 +30,16 @@ public static class GameSession
 
     public static bool Configured;
 
+    // Non-null = this is a NETWORKED match, and this is what THIS machine does in it (which seats it
+    // drives, who it talks to). Set by the seat screen from the authoritative snapshot, read once by
+    // GameManager. Null for local play and replays.
+    //
+    // The match GEOMETRY (stage bounds, start positions) deliberately does NOT come through here even
+    // though StartMatch carries it: both machines run the same build, the version check already refused
+    // a mismatch, and the scene is the one place those numbers are authored.
+    public static MouseKombat.Net.MatchPlan NetPlan;
+    public static bool IsNetMatch => NetPlan != null;
+
     public static void Set(IInputSource p1, IInputSource p2)
     {
         P1 = p1;
@@ -50,6 +60,7 @@ public static class GameSession
         Mode = MouseKombat.Sim.ReplayData.ModeLocal;
         RoomId = "";
         Host = "";
+        NetPlan = null;
         Configured = false;
     }
 }

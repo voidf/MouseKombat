@@ -41,6 +41,9 @@ internal static partial class Program
         LocalSessionTest();
         RemotePairTest();
         SpectatorTest();
+        SpectatorOfLocalPairTest();
+        MatchPlanTests();
+        RelayMatchTest();
     }
 
     // ---- the presenter double ----
@@ -232,8 +235,11 @@ internal static partial class Program
             "rollback remote: side A matches a never-rewound run" + whyA);
         Check(SameValues(expected, viewB.Value, NetFrames, out string whyB),
             "rollback remote: side B matches a never-rewound run" + whyB);
-        Check(simA.Checksum() == simB.Checksum() || a.Frame != b.Frame,
-            "rollback remote: sims agree when both stand on the same frame");
+        // Deliberately NOT asserting that the two live sims agree once both stand on the same frame.
+        // Standing on frame N is not the same as having CONFIRMED frame N: whichever side is ahead of
+        // the other's inputs holds a prediction there, and a prediction is allowed to be wrong — that is
+        // the entire premise. The confirmed value of every frame is what has to match, which is what the
+        // two comparisons above check.
         DrainEvents(a, "A");
         DrainEvents(b, "B");
     }
@@ -286,6 +292,56 @@ internal static partial class Program
         Check(SameValues(expected, viewS.Value, Math.Min(NetFrames, s.FramesAdvanced), out string whyS),
             "rollback spectator: sees exactly the same match as the fighters" + whyS);
         DrainEvents(s, "S");
+    }
+
+    // ---- D. host drives BOTH seats and somebody watches ----
+    //
+    // The host-plus-AI room with a spectator in it. Worth its own case because the session has two LOCAL
+    // players and no remote one, which is a shape nothing else exercises: with no spectator it would be
+    // SessionMode.Local, and the moment one appears it has to become Remote instead — a configuration
+    // that is easy to assume works and is used by the very first thing a player will try (host, add an
+    // AI, let a friend watch).
+    private static void SpectatorOfLocalPairTest()
+    {
+        const int delay = 2;
+        var expected = ReferenceRun(NetFrames, delay);
+
+        using var sockH = BindUdp();
+        using var sockS = BindUdp();
+        var epH = new IPEndPoint(IPAddress.Loopback, sockH.Port);
+        var epS = new IPEndPoint(IPAddress.Loopback, sockS.Port);
+
+        var simH = MakeSim(240, 520);
+        var simS = MakeSim(240, 520);
+        var viewH = new TestPresenter(simH, NetScript);
+        var viewS = new TestPresenter(simS, NetScript);
+
+        using var h = RollbackMatch.Create(simH, viewH, new MatchNetSetup
+        {
+            LocalSeat = new[] { true, true },
+            Spectators = new EndPoint[] { epS },
+            Socket = sockH, InputDelayFrames = delay,
+        });
+        using var s2 = RollbackMatch.Create(simS, viewS, new MatchNetSetup
+        {
+            SpectateHost = epH, Socket = sockS, InputDelayFrames = delay,
+        });
+
+        Check(h.Mode == SessionMode.Remote,
+            $"rollback host+AI: two local seats plus a spectator must be Remote, not Local (got {h.Mode})");
+
+        int target = NetFrames + NetOvershoot;
+        bool ok = Drive(new[] { (h, viewH), (s2, viewS) }, target, TimeSpan.FromSeconds(30));
+        Check(ok, $"rollback host+AI: host reached frame {target} (H={h.Frame} S={s2.Frame})");
+        Check(h.RollbackCount == 0, "rollback host+AI: no remote INPUT, so still nothing to predict");
+        Check(SameValues(expected, viewH.Value, NetFrames, out string whyH),
+            "rollback host+AI: the host's own run is unaffected by being watched" + whyH);
+        Check(s2.FramesAdvanced >= NetFrames,
+            $"rollback host+AI: the spectator watched at least {NetFrames} frames (got {s2.FramesAdvanced})");
+        Check(SameValues(expected, viewS.Value, Math.Min(NetFrames, s2.FramesAdvanced), out string whyS),
+            "rollback host+AI: the spectator sees the same match" + whyS);
+        DrainEvents(h, "host+AI H");
+        DrainEvents(s2, "host+AI S");
     }
 
     // Binds a UDP socket on a port that can be ANNOUNCED. Port 0 is not usable for this: Backdash's
