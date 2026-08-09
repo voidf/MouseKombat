@@ -43,17 +43,20 @@ public partial class LobbyMenuScreen : Control
     private bool _busy;
 
     // Custom popups (AcceptDialog has no input fields), built in code like the AI menu.
+    // The panels are plain Panel (a NON-container Control): a Container (PanelContainer, VBox...)
+    // would take over child layout and pile every manually positioned field on top of the others —
+    // that overlap bug was exactly that.
     private Control _popupRoot;
-    private PanelContainer _pwPanel;
+    private Panel _pwPanel;
     private LineEdit _pwField;          // join-a-room-with-password popup
     private Button _pwConfirm;
     private string _pwRoomId = "";
-    private PanelContainer _createPanel;
+    private Panel _createPanel;
     private LineEdit _createPlayers;
     private LineEdit _createPassword;
     private CheckBox _createSearchable;
     private Button _createConfirm;
-    private PanelContainer _joinPanel;
+    private Panel _joinPanel;
     private LineEdit _joinIdField;
     private LineEdit _joinPwField;
     private Button _joinConfirm;
@@ -239,47 +242,46 @@ public partial class LobbyMenuScreen : Control
     }
 
     // ---- popups ----
+    // The three popup panels live in the SCENE (LobbyMenu.tscn > Popups) so the layout is editable
+    // in the editor; this code only resolves them and wires the buttons.
 
     private void BuildPopups()
     {
-        _popupRoot = new Control { Visible = false, MouseFilter = Control.MouseFilterEnum.Ignore };
-        AddChild(_popupRoot);
-        _popupRoot.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+        _popupRoot = GetNodeOrNull<Control>("Popups");
+        _pwPanel = GetNodeOrNull<Panel>("Popups/PasswordPanel");
+        _pwField = GetNodeOrNull<LineEdit>("Popups/PasswordPanel/Row/Field");
+        _pwConfirm = GetNodeOrNull<Button>("Popups/PasswordPanel/Buttons/JoinBtn");
+        _createPanel = GetNodeOrNull<Panel>("Popups/CreatePanel");
+        _createPlayers = GetNodeOrNull<LineEdit>("Popups/CreatePanel/PlayersRow/Field");
+        _createPassword = GetNodeOrNull<LineEdit>("Popups/CreatePanel/PasswordRow/Field");
+        _createSearchable = GetNodeOrNull<CheckBox>("Popups/CreatePanel/Searchable");
+        _createConfirm = GetNodeOrNull<Button>("Popups/CreatePanel/Buttons/CreateBtn");
+        _joinPanel = GetNodeOrNull<Panel>("Popups/JoinIdPanel");
+        _joinIdField = GetNodeOrNull<LineEdit>("Popups/JoinIdPanel/IdRow/Field");
+        _joinPwField = GetNodeOrNull<LineEdit>("Popups/JoinIdPanel/PwRow/Field");
+        _joinConfirm = GetNodeOrNull<Button>("Popups/JoinIdPanel/Buttons/JoinBtn");
 
-        // dim the screen behind the popup
-        var dim = new ColorRect { Color = new Color(0, 0, 0, 0.55f),
-                                  MouseFilter = Control.MouseFilterEnum.Stop };
-        dim.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
-        _popupRoot.AddChild(dim);
+        var cancel = GetNodeOrNull<Button>("Popups/PasswordPanel/Buttons/CancelBtn");
+        if (cancel != null) cancel.Pressed += () => ClosePopup();
+        cancel = GetNodeOrNull<Button>("Popups/CreatePanel/Buttons/CancelBtn");
+        if (cancel != null) cancel.Pressed += () => ClosePopup();
+        cancel = GetNodeOrNull<Button>("Popups/JoinIdPanel/Buttons/CancelBtn");
+        if (cancel != null) cancel.Pressed += () => ClosePopup();
 
-        _pwPanel = BuildPopupPanel("PasswordPanel", new Vector2(320, 210));
-        PopupTitle("该房间有密码", _pwPanel, 22);
-        _pwField = PopupField(_pwPanel, "密码", 84, "4位数字", secret: true);
-        _pwConfirm = PopupButton(_pwPanel, "加入", 70, () =>
+        if (_pwConfirm != null) _pwConfirm.Pressed += () =>
         {
             string room = _pwRoomId;
-            string pw = _pwField.Text.Trim();
+            string pw = _pwField?.Text.Trim() ?? "";
             ClosePopup();
             RequestJoin(room, pw);
-        });
-        PopupButton(_pwPanel, "取消", 200, () => ClosePopup());
-
-        _createPanel = BuildPopupPanel("CreatePanel", new Vector2(360, 280));
-        PopupTitle("创建房间", _createPanel, 22);
-        _createPlayers = PopupField(_createPanel, "人数上限", 84, "2–4");
-        _createPassword = PopupField(_createPanel, "密码", 128, "4位数字（可留空）", secret: true);
-        _createSearchable = new CheckBox
-        {
-            Text = "在大厅房间列表中公开（可关闭后凭房间号加入）",
-            Position = new Vector2(24, 172), Size = new Vector2(312, 36),
         };
-        _createPanel.AddChild(_createSearchable);
-        _createConfirm = PopupButton(_createPanel, "创建", 110, () =>
+
+        if (_createConfirm != null) _createConfirm.Pressed += () =>
         {
             int maxPlayers = 4;
-            string pw = _createPassword.Text.Trim();
-            string playersText = _createPlayers.Text.Trim();
-            bool searchable = _createSearchable.ButtonPressed;
+            string pw = _createPassword?.Text.Trim() ?? "";
+            string playersText = _createPlayers?.Text.Trim() ?? "";
+            bool searchable = _createSearchable?.ButtonPressed ?? true;
             ClosePopup();
             if (playersText.Length > 0 && !int.TryParse(playersText, out maxPlayers))
             {
@@ -299,17 +301,12 @@ public partial class LobbyMenuScreen : Control
             SetBusy(true);
             SetStatus("正在创建房间…");
             Net?.RequestLobbyCreate(maxPlayers, pw, searchable);
-        });
-        PopupButton(_createPanel, "取消", 240, () => ClosePopup());
+        };
 
-        _joinPanel = BuildPopupPanel("JoinIdPanel", new Vector2(320, 210));
-        PopupTitle("按房间号加入", _joinPanel, 22);
-        _joinIdField = PopupField(_joinPanel, "房间号", 84, "6位数字");
-        _joinPwField = PopupField(_joinPanel, "密码", 128, "有密码才填", secret: true);
-        _joinConfirm = PopupButton(_joinPanel, "加入", 70, () =>
+        if (_joinConfirm != null) _joinConfirm.Pressed += () =>
         {
-            string id = _joinIdField.Text.Trim();
-            string pw = _joinPwField.Text.Trim();
+            string id = _joinIdField?.Text.Trim() ?? "";
+            string pw = _joinPwField?.Text.Trim() ?? "";
             ClosePopup();
             if (id.Length != 6 || !IsDigits(id))
             {
@@ -317,8 +314,7 @@ public partial class LobbyMenuScreen : Control
                 return;
             }
             RequestJoin(id, pw);
-        });
-        PopupButton(_joinPanel, "取消", 200, () => ClosePopup());
+        };
     }
 
     private static bool IsDigits(string s)
@@ -327,50 +323,7 @@ public partial class LobbyMenuScreen : Control
         return s.Length > 0;
     }
 
-    private Label PopupTitle(string text, Control panel, float y)
-    {
-        var l = new Label { Text = text, Position = new Vector2(24, y),
-                            Size = new Vector2(panel.Size.X - 48, 40) };
-        l.AddThemeFontSizeOverride("font_size", 18);
-        panel.AddChild(l);
-        return l;
-    }
-
-    private LineEdit PopupField(Control panel, string labelText, float y, string placeholder, bool secret = false)
-    {
-        var row = new HBoxContainer { Position = new Vector2(24, y), Size = new Vector2(panel.Size.X - 48, 36) };
-        var label = new Label { Text = labelText, CustomMinimumSize = new Vector2(96, 0),
-                                VerticalAlignment = VerticalAlignment.Center };
-        row.AddChild(label);
-        var field = new LineEdit { PlaceholderText = placeholder, SizeFlagsHorizontal = SizeFlags.ExpandFill,
-                                   Secret = secret };
-        row.AddChild(field);
-        panel.AddChild(row);
-        return field;
-    }
-
-    private Button PopupButton(Control panel, string text, float x, System.Action onPressed)
-    {
-        var b = new Button { Text = text, Position = new Vector2(x, panel.Size.Y - 64), Size = new Vector2(110, 44) };
-        b.Pressed += onPressed;
-        panel.AddChild(b);
-        return b;
-    }
-
-    private PanelContainer BuildPopupPanel(string name, Vector2 size)
-    {
-        var panel = new PanelContainer
-        {
-            Name = name,
-            Position = new Vector2(240, 150),
-            Size = size,
-            Visible = false,
-        };
-        _popupRoot.AddChild(panel);
-        return panel;
-    }
-
-    private void OpenPopup(PanelContainer panel, Control keyboardFocus, Control padDefault)
+    private void OpenPopup(Panel panel, Control keyboardFocus, Control padDefault)
     {
         _popupRoot.Visible = true;
         panel.Visible = true;
@@ -426,6 +379,10 @@ public partial class LobbyMenuScreen : Control
     {
         if (Browser == null) return;
         Browser.Visible = show;
+        // The connect form and the explain text belong to the pre-connection screen; once the
+        // browser is up they must disappear or they draw over it.
+        GetNodeOrNull<Control>("Form")?.SetVisible(show == false);
+        GetNodeOrNull<Control>("Explain")?.SetVisible(show == false);
         if (show) RefreshButton?.GrabFocus();
     }
 

@@ -236,6 +236,237 @@ offset_right = 154.0
 offset_bottom = -20.0
 text = "返回 (Esc)"
 
+[node name="Popups" type="Control" parent="."]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+
+[node name="Dim" type="ColorRect" parent="Popups"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+color = Color(0, 0, 0, 0.55)
+
+[node name="PasswordPanel" type="Panel" parent="Popups"]
+visible = false
+layout_mode = 0
+offset_left = 260.0
+offset_top = 170.0
+offset_right = 580.0
+offset_bottom = 370.0
+
+[node name="Title" type="Label" parent="Popups/PasswordPanel"]
+layout_mode = 0
+offset_left = 20.0
+offset_top = 16.0
+offset_right = 300.0
+offset_bottom = 52.0
+theme_override_font_sizes/font_size = 18
+text = "该房间有密码"
+
+[node name="Row" type="HBoxContainer" parent="Popups/PasswordPanel"]
+layout_mode = 0
+offset_left = 20.0
+offset_top = 70.0
+offset_right = 300.0
+offset_bottom = 106.0
+theme_override_constants/separation = 10
+
+[node name="Label" type="Label" parent="Popups/PasswordPanel/Row"]
+custom_minimum_size = Vector2(90, 0)
+layout_mode = 2
+text = "密码"
+vertical_alignment = 1
+
+[node name="Field" type="LineEdit" parent="Popups/PasswordPanel/Row"]
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "4位数字"
+secret = true
+
+[node name="Buttons" type="HBoxContainer" parent="Popups/PasswordPanel"]
+layout_mode = 0
+offset_left = 70.0
+offset_top = 132.0
+offset_right = 300.0
+offset_bottom = 176.0
+theme_override_constants/separation = 12
+alignment = 2
+
+[node name="JoinBtn" type="Button" parent="Popups/PasswordPanel/Buttons"]
+custom_minimum_size = Vector2(105, 44)
+layout_mode = 2
+text = "加入"
+
+[node name="CancelBtn" type="Button" parent="Popups/PasswordPanel/Buttons"]
+custom_minimum_size = Vector2(105, 44)
+layout_mode = 2
+text = "取消"
+
+[node name="CreatePanel" type="Panel" parent="Popups"]
+visible = false
+layout_mode = 0
+offset_left = 210.0
+offset_top = 130.0
+offset_right = 590.0
+offset_bottom = 420.0
+
+[node name="Title" type="Label" parent="Popups/CreatePanel"]
+layout_mode = 0
+offset_left = 20.0
+offset_top = 16.0
+offset_right = 360.0
+offset_bottom = 52.0
+theme_override_font_sizes/font_size = 18
+text = "创建房间"
+
+[node name="PlayersRow" type="HBoxContainer" parent="Popups/CreatePanel"]
+layout_mode = 0
+offset_left = 20.0
+offset_top = 68.0
+offset_right = 360.0
+offset_bottom = 104.0
+theme_override_constants/separation = 10
+
+[node name="Label" type="Label" parent="Popups/CreatePanel/PlayersRow"]
+custom_minimum_size = Vector2(90, 0)
+layout_mode = 2
+text = "人数上限"
+vertical_alignment = 1
+
+[node name="Field" type="LineEdit" parent="Popups/CreatePanel/PlayersRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "2–4"
+
+[node name="PasswordRow" type="HBoxContainer" parent="Popups/CreatePanel"]
+layout_mode = 0
+offset_left = 20.0
+offset_top = 112.0
+offset_right = 360.0
+offset_bottom = 148.0
+theme_override_constants/separation = 10
+
+[node name="Label" type="Label" parent="Popups/CreatePanel/PasswordRow"]
+custom_minimum_size = Vector2(90, 0)
+layout_mode = 2
+text = "密码"
+vertical_alignment = 1
+
+[node name="Field" type="LineEdit" parent="Popups/CreatePanel/PasswordRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "4位数字（可留空）"
+secret = true
+
+[node name="Searchable" type="CheckBox" parent="Popups/CreatePanel"]
+layout_mode = 0
+offset_left = 20.0
+offset_top = 156.0
+offset_right = 360.0
+offset_bottom = 192.0
+theme_override_font_sizes/font_size = 14
+text = "在大厅列表中公开（可关闭，仅凭房间号加入）"
+button_pressed = true
+
+[node name="Buttons" type="HBoxContainer" parent="Popups/CreatePanel"]
+layout_mode = 0
+offset_left = 110.0
+offset_top = 220.0
+offset_right = 360.0
+offset_bottom = 264.0
+theme_override_constants/separation = 12
+alignment = 2
+
+[node name="CreateBtn" type="Button" parent="Popups/CreatePanel/Buttons"]
+custom_minimum_size = Vector2(115, 44)
+layout_mode = 2
+text = "创建"
+
+[node name="CancelBtn" type="Button" parent="Popups/CreatePanel/Buttons"]
+custom_minimum_size = Vector2(115, 44)
+layout_mode = 2
+text = "取消"
+
+[node name="JoinIdPanel" type="Panel" parent="Popups"]
+visible = false
+layout_mode = 0
+offset_left = 260.0
+offset_top = 150.0
+offset_right = 580.0
+offset_bottom = 380.0
+
+[node name="Title" type="Label" parent="Popups/JoinIdPanel"]
+layout_mode = 0
+offset_left = 20.0
+offset_top = 16.0
+offset_right = 300.0
+offset_bottom = 52.0
+theme_override_font_sizes/font_size = 18
+text = "按房间号加入"
+
+[node name="IdRow" type="HBoxContainer" parent="Popups/JoinIdPanel"]
+layout_mode = 0
+offset_left = 20.0
+offset_top = 68.0
+offset_right = 300.0
+offset_bottom = 104.0
+theme_override_constants/separation = 10
+
+[node name="Label" type="Label" parent="Popups/JoinIdPanel/IdRow"]
+custom_minimum_size = Vector2(90, 0)
+layout_mode = 2
+text = "房间号"
+vertical_alignment = 1
+
+[node name="Field" type="LineEdit" parent="Popups/JoinIdPanel/IdRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "6位数字"
+
+[node name="PwRow" type="HBoxContainer" parent="Popups/JoinIdPanel"]
+layout_mode = 0
+offset_left = 20.0
+offset_top = 112.0
+offset_right = 300.0
+offset_bottom = 148.0
+theme_override_constants/separation = 10
+
+[node name="Label" type="Label" parent="Popups/JoinIdPanel/PwRow"]
+custom_minimum_size = Vector2(90, 0)
+layout_mode = 2
+text = "密码"
+vertical_alignment = 1
+
+[node name="Field" type="LineEdit" parent="Popups/JoinIdPanel/PwRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "有密码才填"
+secret = true
+
+[node name="Buttons" type="HBoxContainer" parent="Popups/JoinIdPanel"]
+layout_mode = 0
+offset_left = 70.0
+offset_top = 168.0
+offset_right = 300.0
+offset_bottom = 212.0
+theme_override_constants/separation = 12
+alignment = 2
+
+[node name="JoinBtn" type="Button" parent="Popups/JoinIdPanel/Buttons"]
+custom_minimum_size = Vector2(105, 44)
+layout_mode = 2
+text = "加入"
+
+[node name="CancelBtn" type="Button" parent="Popups/JoinIdPanel/Buttons"]
+custom_minimum_size = Vector2(105, 44)
+layout_mode = 2
+text = "取消"
+
 [connection signal="pressed" from="Form/ConnectButton" to="." method="OnConnectPressed"]
 [connection signal="pressed" from="Browser/Paging/PrevPage" to="." method="OnPrevPagePressed"]
 [connection signal="pressed" from="Browser/Paging/NextPage" to="." method="OnNextPagePressed"]
