@@ -17,6 +17,7 @@ using MouseKombat.Sim;
 public partial class NetSeatScreen : Control
 {
     [Export] public string LanMenuScenePath = "res://LanMenu.tscn";
+    [Export] public string LobbyMenuScenePath = "res://LobbyMenu.tscn";
     [Export] public string MainMenuScenePath = "res://MainMenu.tscn";
     [Export] public string MatchScenePath = "res://MFEntry.tscn";
     [Export] public string SpectateScenePath = "res://Spectate.tscn";
@@ -494,7 +495,7 @@ public partial class NetSeatScreen : Control
         GameSession.P2Char = s1.CharacterId;
         GameSession.P1Name = SeatName(room, 0);
         GameSession.P2Name = SeatName(room, 1);
-        GameSession.Mode = ReplayData.ModeLan;
+        GameSession.Mode = net.IsLobby ? ReplayData.ModeLobby : ReplayData.ModeLan;
         GameSession.RoomId = room.RoomId ?? "";
         GameSession.Host = $"{net.HostAddress}:{net.Port}";
 
@@ -560,7 +561,7 @@ public partial class NetSeatScreen : Control
 
         var d = new ReplayData
         {
-            Mode = ReplayData.ModeLan,
+            Mode = Net.IsLobby ? ReplayData.ModeLobby : ReplayData.ModeLan,
             P1Char = cu.Room.Seats[0].CharacterId,
             P2Char = cu.Room.Seats[1].CharacterId,
             P1Name = SeatName(cu.Room, 0),
@@ -578,7 +579,7 @@ public partial class NetSeatScreen : Control
         GameSession.CatchUpData = d;
         GameSession.P1Name = d.P1Name;
         GameSession.P2Name = d.P2Name;
-        GameSession.Mode = ReplayData.ModeLan;
+        GameSession.Mode = Net.IsLobby ? ReplayData.ModeLobby : ReplayData.ModeLan;
         GameSession.RoomId = d.RoomId;
         GameSession.Host = d.Host;
         _pendingSpectate = true;
@@ -594,7 +595,7 @@ public partial class NetSeatScreen : Control
         var room = net.Room;
         var d = new ReplayData
         {
-            Mode = ReplayData.ModeLan,
+            Mode = net.IsLobby ? ReplayData.ModeLobby : ReplayData.ModeLan,
             P1Char = room.Seats[0].CharacterId,
             P2Char = room.Seats[1].CharacterId,
             P1Name = SeatName(room, 0),
@@ -614,7 +615,7 @@ public partial class NetSeatScreen : Control
         GameSession.CatchUpData = d;
         GameSession.P1Name = d.P1Name;
         GameSession.P2Name = d.P2Name;
-        GameSession.Mode = ReplayData.ModeLan;
+        GameSession.Mode = net.IsLobby ? ReplayData.ModeLobby : ReplayData.ModeLan;
         GameSession.RoomId = d.RoomId;
         GameSession.Host = d.Host;
     }
@@ -662,6 +663,16 @@ public partial class NetSeatScreen : Control
     private void LeaveRoom()
     {
         if (Net == null) { GetTree().ChangeSceneToFile(LanMenuScenePath); return; }
+        if (Net.IsLobby)
+        {
+            // Spec: the host player's Esc destroys the room and goes to the MAIN menu (everyone
+            // else gets the disconnect popup); a member just leaves the room and goes back to the
+            // lobby to browse again.
+            bool hostPlayer = Net.IsHost;
+            Net.Leave(hostPlayer ? "主持玩家已离开房间" : "玩家离开了房间");
+            GetTree().ChangeSceneToFile(hostPlayer ? MainMenuScenePath : LobbyMenuScenePath);
+            return;
+        }
         bool wasHost = Net.IsHost;
         Net.Leave(wasHost ? "主机已离开房间" : "玩家离开了房间");
         GetTree().ChangeSceneToFile(wasHost ? MainMenuScenePath : LanMenuScenePath);
@@ -729,9 +740,21 @@ public partial class NetSeatScreen : Control
         }
 
         if (TitleLabel != null)
-            TitleLabel.Text = net.IsHost
-                ? $"局域网房间（主持中） · 端口 {net.Port}"
-                : $"局域网房间 · {net.HostAddress}:{net.Port}";
+        {
+            if (net.IsLobby)
+            {
+                string id = net.Room?.RoomId ?? "";
+                TitleLabel.Text = net.IsHost
+                    ? $"大厅房间（主持中） · 房间号 {id}"
+                    : $"大厅房间 · 房间号 {id}";
+            }
+            else
+            {
+                TitleLabel.Text = net.IsHost
+                    ? $"局域网房间（主持中） · 端口 {net.Port}"
+                    : $"局域网房间 · {net.HostAddress}:{net.Port}";
+            }
+        }
 
         if (RoomIdLabel != null)
         {

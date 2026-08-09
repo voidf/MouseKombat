@@ -116,6 +116,62 @@ internal static partial class Program
             Check(cli.Role == MatchRole.Idle && cli.Problem != null,
                 "plan: a client with no host endpoint refuses rather than guesses");
         }
+
+        // ---- lobby (期3-5): the server is the hub, not the host player ----
+        // G. lobby host player with a seat dials the SERVER like any client.
+        {
+            var room = Room(
+                players: new[] { P(1, "H", host: true, seat: 0), P(2, "C", host: false, seat: 1) },
+                seat0: Human(1, CharacterId.Hamster), seat1: Human(2, CharacterId.Kangaroo));
+            var epServer = new IPEndPoint(IPAddress.Parse("10.0.0.9"), 4954);
+
+            var host = MatchPlan.Build(room, 1, true, epServer, Client, lobby: true);
+            Check(host.Role == MatchRole.Fighter && host.LocalSeat[0] && !host.LocalSeat[1],
+                "lobby plan: the host player drives only its own seat");
+            Check(Equals(host.RemoteEndPoint, epServer),
+                "lobby plan: the host player dials the server, never the other fighter");
+            Check(host.Spectators.Length == 0,
+                "lobby plan: no session spectators in a lobby");
+
+            var cli = MatchPlan.Build(room, 2, false, epServer, null, lobby: true);
+            Check(cli.Role == MatchRole.Fighter && Equals(cli.RemoteEndPoint, epServer),
+                "lobby plan: a client fighter dials the server");
+        }
+
+        // H. lobby host player with no seat: Relay role (catch-up authority) WITHOUT endpoints —
+        // the server relays the UDP, the host player only merges reports and serves the data stream.
+        {
+            var room = Room(
+                players: new[] { P(1, "H", host: true, seat: -1),
+                                 P(2, "A", host: false, seat: 0),
+                                 P(3, "B", host: false, seat: 1) },
+                seat0: Human(2, CharacterId.Hamster), seat1: Human(3, CharacterId.Kangaroo));
+            var host = MatchPlan.Build(room, 1, true, null, Client, lobby: true);
+            Check(host.Role == MatchRole.Relay && host.RelayA == null && host.RelayB == null,
+                "lobby plan: the host player relays by DATA, the server by UDP");
+        }
+
+        // I. a seatless lobby member never dials a spectator session: lobby spectating is the data
+        // stream served by the host player over TCP.
+        {
+            var room = Room(
+                players: new[] { P(1, "H", host: true, seat: 0), P(2, "S", host: false, seat: -1) },
+                seat0: Human(1, CharacterId.Hamster), seat1: Ai(CharacterId.Kangaroo, ""));
+            var spec = MatchPlan.Build(room, 2, false, new IPEndPoint(IPAddress.Loopback, 4954), null, lobby: true);
+            Check(spec.Role == MatchRole.Idle && spec.SpectateHost == null,
+                "lobby plan: a seatless member waits for the data stream, not a session");
+        }
+
+        // J. lobby host player + AI seat: everything local, no peer, no port problem.
+        {
+            var room = Room(
+                players: new[] { P(1, "H", host: true, seat: 0) },
+                seat0: Human(1, CharacterId.Hamster), seat1: Ai(CharacterId.Kangaroo, ""));
+            var host = MatchPlan.Build(room, 1, true, null, Client, lobby: true);
+            Check(host.Role == MatchRole.Fighter && host.LocalSeat[0] && host.LocalSeat[1] && host.AiSeat[1],
+                "lobby plan: the host player drives an AI seat like a LAN host");
+            Check(host.RemoteEndPoint == null, "lobby plan: no peer when every seat is local");
+        }
     }
 
     // ---- the host as a UDP forwarder ----

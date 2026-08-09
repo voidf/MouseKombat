@@ -41,6 +41,27 @@ public partial class NetSession : Node
     public TcpRoomHost Host { get; private set; }
     public TcpRoomClient Client { get; private set; }
 
+    // ---- lobby mode ----
+    // One connection to the lobby server (LobbyRoomClient), which covers BOTH the browse phase
+    // (room list / create / join, driven by the lobby menu) and the room phase (this machine is a
+    // member; the server is the room authority). The room creator is the "host player": it holds
+    // the host-only rights (AI seats, match start, catch-up serving) but is still a client of the
+    // server. See PROTOCOL.md § Lobby.
+    public LobbyRoomClient Lobby { get; private set; }
+    public bool IsLobby => Lobby != null;
+    public bool IsLobbyHostPlayer => Lobby != null && Lobby.IsHostPlayer;
+
+    // The lobby socket wrapper for the CURRENT match, or null (a lobby match with every seat
+    // driven locally has no UDP traffic at all). Created per match in BeginMatch, wraps MatchSocket
+    // with the {roomId, mySeat, otherSeat} envelope (see LobbyMatchSocket).
+    public LobbyMatchSocket LobbySocket { get; private set; }
+
+    // Raised when the lobby server answers a LobbyList page (browse phase; the lobby menu renders
+    // it). Rejected: a lobby-phase refusal that leaves the connection usable (wrong password, full
+    // room, create-form errors) — the menu shows the reason and stays put.
+    public event Action<LobbyRooms> LobbyRoomsReceived;
+    public event Action<string> LobbyRejected;
+
     // ---- match channel ----
     //
     // UDP for the rollback session, on the SAME port number as the room's TCP port (PROTOCOL.md
@@ -65,16 +86,19 @@ public partial class NetSession : Node
     // The plan for the match currently starting / running, or null.
     public MatchPlan Plan { get; private set; }
 
-    public bool IsHost => Host != null;
-    public bool Active => Host != null || Client != null;
+    public bool IsHost => Host != null || IsLobbyHostPlayer;
+    public bool Active => Host != null || Client != null || Lobby != null;
     public string PlayerName { get; private set; } = "玩家";
     public string Mode { get; private set; } = ReplayData.ModeLan;
     public string HostAddress { get; private set; } = "";
     public int Port { get; private set; }
 
-    // Which player WE are. For a host this is its own RoomState entry; for a client it comes from
-    // Welcome.
-    public int LocalPlayerId => IsHost ? Host.HostPlayerId : (Client?.PlayerId ?? 0);
+    // Which player WE are. For a LAN host this is its own RoomState entry; for a client it comes
+    // from Welcome; for a lobby member it is the server-assigned id (the host PLAYER is a member too).
+    public int LocalPlayerId =>
+        Host != null ? Host.HostPlayerId
+        : (Lobby != null ? Lobby.PlayerId
+        : (Client?.PlayerId ?? 0));
 
     public RoomSnapshot Room { get; private set; }
 
@@ -164,6 +188,34 @@ public partial class NetSession : Node
         Client.Connect(host, port, PlayerName, GameVersion, password);
     }
 
+    // Connects to the lobby server for BROWSING. The lobby menu then pages through the room list
+    // and creates or joins a room on this same connection. Like JoinRoom, the match socket is bound
+    // up front: every lobby machine is a client of the server, so every one announces a port.
+    public void ConnectLobby(string host, int port, string playerName)
+    {
+        Leave(null);
+        PlayerName = RoomState.SanitizeName(playerName);
+        Mode = ReplayData.ModeLobby;
+        HostAddress = host;
+        Port = port;
+        try { MatchSocket = MouseKombat.Net.MatchSocket.BindFree(); }
+        catch (Exception e)
+        {
+            GD.PushWarning($"[net] match socket bind failed: {e.Message}");
+            Disconnected?.Invoke($"无法绑定对局用 UDP 端口：{e.Message}");
+            return;
+        }
+        Lobby = new LobbyRoomClient { MatchUdpPort = MatchSocket.Port };
+        Lobby.Connect(host, port, PlayerName, GameVersion);
+    }
+
+    // ---- lobby browse phase (the lobby menu) ----
+    public void RequestLobbyList(int page) => Lobby?.ListRooms(page);
+    public void RequestLobbyCreate(int maxPlayers, string password, bool searchable) =>
+        Lobby?.CreateRoom(maxPlayers, password, searchable);
+    public void RequestLobbyJoin(string roomId, string password) =>
+        Lobby?.JoinRoom(roomId, password);
+
     // reason != null tells the other side why (the host broadcasts Bye, a client sends one).
     public void Leave(string reason)
     {
@@ -174,6 +226,9 @@ public partial class NetSession : Node
         Client?.Disconnect(reason);
         Client?.Dispose();
         Client = null;
+        Lobby?.Disconnect(reason);
+        Lobby?.Dispose();
+        Lobby = null;
         // CloseNow, not Dispose: Dispose is a no-op on MatchSocket (Backdash calls it when a match
         // session ends, and the socket must survive for the next match of the room). The room is
         // ending here, which is the one moment the port is really released.
@@ -191,6 +246,7 @@ public partial class NetSession : Node
     {
         Relay?.Dispose();
         Relay = null;
+        LobbySocket = null;
         Plan = null;
         // Everything match-scoped goes with it. The relay catch-up buffer is refilled by the next
         // match's fighters; PendingStreamInputs is a SHARED buffer (a client's stream batches, a
@@ -214,18 +270,21 @@ public partial class NetSession : Node
 
     public void RequestClaimSeat(int seat)
     {
+        if (Lobby != null) { Lobby.ClaimSeat(seat); return; }
         if (IsHost) { if (Host.Room.ClaimSeat(Host.HostPlayerId, seat)) HostChanged(); }
         else Client?.ClaimSeat(seat);
     }
 
     public void RequestReleaseSeat()
     {
+        if (Lobby != null) { Lobby.ReleaseSeat(); return; }
         if (IsHost) { if (Host.Room.ReleaseSeat(Host.HostPlayerId)) HostChanged(); }
         else Client?.ReleaseSeat();
     }
 
     public void RequestPickCharacter(CharacterId c)
     {
+        if (Lobby != null) { Lobby.PickCharacter((int)c); return; }
         if (IsHost) { if (Host.Room.PickCharacter(Host.HostPlayerId, (int)c)) HostChanged(); }
         else Client?.PickCharacter((int)c);
     }
@@ -235,6 +294,7 @@ public partial class NetSession : Node
     public void RequestAddAi(int seat, CharacterId c, string model)
     {
         if (!IsHost) return;
+        if (Lobby != null) { Lobby.AddAi(seat, model); return; }
         if (Host.Room.AddAi(Host.HostPlayerId, seat, (int)c, model)) HostChanged();
     }
 
@@ -242,12 +302,29 @@ public partial class NetSession : Node
     public void RequestRemoveAi(int seat)
     {
         if (!IsHost) return;
+        if (Lobby != null) { Lobby.RemoveAi(seat); return; }
         if (Host.Room.RemoveAi(Host.HostPlayerId, seat)) HostChanged();
     }
 
     public void RequestStartMatch(StartMatch setup)
     {
         if (!IsHost) return;
+        if (Lobby != null)
+        {
+            // The server decides CanStart (and refuses when a fighter never announced a match
+            // port) and answers with the standard StartMatch broadcast.
+            Lobby.RequestMatchStart(new MatchStart
+            {
+                StageMinX = setup.StageMinX,
+                StageMaxX = setup.StageMaxX,
+                WorldWidth = setup.WorldWidth,
+                P1StartX = setup.P1StartX,
+                P1StartY = setup.P1StartY,
+                P2StartX = setup.P2StartX,
+                P2StartY = setup.P2StartY,
+            });
+            return;
+        }
         if (!Host.Room.BeginMatch()) return;
         setup.Room = Host.Room.Snapshot();
         setup.MatchUdpPort = MatchUdpPort;
@@ -266,9 +343,9 @@ public partial class NetSession : Node
     {
         EndMatchLocal();
         Plan = MatchPlan.Build(setup.Room, LocalPlayerId, IsHost,
-                               HostMatchEndPoint(setup), ClientMatchEndPoint);
+                               HostMatchEndPoint(setup), ClientMatchEndPoint, lobby: IsLobby);
 
-        if (Plan.Role == MatchRole.Relay)
+        if (Plan.Role == MatchRole.Relay && !IsLobby)
         {
             try { Relay = new UdpMatchRelay(Port, Plan.RelayA, Plan.RelayB); }
             catch (Exception e)
@@ -278,16 +355,32 @@ public partial class NetSession : Node
                 Plan.Problem = $"无法在 UDP {Port} 上中转对局：{e.Message}";
             }
         }
+
+        // In a lobby the fighters' UDP goes through the SERVER, so the session's socket has to wrap
+        // every datagram in the {roomId, mySeat, otherSeat} envelope. Exactly one local seat means
+        // the other seat is a remote human fighter (an AI seat would be driven locally too, and then
+        // there is no UDP at all). The envelope never changes over the match.
+        if (IsLobby && Plan.Role == MatchRole.Fighter && Plan.RemoteEndPoint != null)
+        {
+            int mySeat = -1;
+            for (int i = 0; i < RoomState.SeatCount; i++)
+                if (Plan.LocalSeat[i]) { mySeat = i; break; }
+            if (mySeat >= 0 && MatchSocket != null && Room != null
+                && int.TryParse(Room.RoomId, out int roomIdNum))
+            {
+                LobbySocket = new LobbyMatchSocket(MatchSocket, roomIdNum, mySeat, 1 - mySeat);
+            }
+        }
         MatchStarting?.Invoke(setup);
     }
 
-    // Where the host's match traffic goes, from THIS machine's point of view. Null on the host itself
-    // (it does not dial itself). The address is the one the TCP connection actually resolved to, so a
+    // Where the hub's match traffic goes, from THIS machine's point of view. Null on a LAN host (it
+    // does not dial itself). The address is the one the TCP connection actually resolved to, so a
     // hostname with several A records cannot send room traffic one way and match traffic another.
     private IPEndPoint HostMatchEndPoint(StartMatch setup)
     {
-        if (IsHost) return null;
-        var addr = Client?.ConnectedAddress;
+        if (IsHost && !IsLobby) return null;
+        var addr = Client?.ConnectedAddress ?? Lobby?.ConnectedAddress;
         if (addr == null || setup.MatchUdpPort <= 0) return null;
         return new IPEndPoint(addr, setup.MatchUdpPort);
     }
@@ -297,25 +390,31 @@ public partial class NetSession : Node
 
     // What the host's own role WOULD be if the match started right now. Used to refuse "开始对战" with
     // the actual reason instead of starting a match that cannot synchronize — e.g. a client that never
-    // announced a match port, which no amount of waiting fixes.
+    // announced a match port, which no amount of waiting fixes. In a lobby the SERVER owns that
+    // refusal (it knows every announced port), so the preview just reports the role from the server's
+    // snapshot without any endpoint checks.
     public MatchPlan PreviewPlan()
     {
         if (!IsHost || Room == null) return null;
-        return MatchPlan.Build(Room, LocalPlayerId, true, null, ClientMatchEndPoint);
+        return MatchPlan.Build(Room, LocalPlayerId, true, null, ClientMatchEndPoint, lobby: IsLobby);
     }
 
     // A fighter that is NOT the host telling the host the match is over. The host cannot always see the
     // knockout itself (relay configuration), and the room state may only be changed by the host.
     public void ReportMatchResult(int winnerSeat)
     {
+        if (Lobby != null) { Lobby.ReportMatchResult(winnerSeat); return; }
         if (IsHost) return;
         Client?.ReportMatchResult(winnerSeat);
     }
 
     // After a knockout: kick whoever dropped mid-match, clear the seats, tell everyone.
+    // In a lobby the SERVER owns the room state: everyone (including the host player) reports the
+    // knockout with MatchResult, and the server broadcasts MatchEnded + a cleared snapshot back.
     public void RequestEndMatch(int winnerSeat)
     {
         if (!IsHost) return;
+        if (Lobby != null) { Lobby.ReportMatchResult(winnerSeat); return; }
         if (!Host.Room.MatchRunning) return;   // already ended (a second fighter's report)
         int[] dropped = Host.Room.EndMatch();
         foreach (int id in dropped) Host.Kick(id, "本局结束，已断线");
@@ -324,6 +423,22 @@ public partial class NetSession : Node
         EndMatchLocal();
         HostChanged();
         MatchEnded?.Invoke(msg);
+    }
+
+    // Route one catch-up frame to a room member: LAN sends it through the in-process host's socket,
+    // a lobby through the server (HostSendTo). The lobby body must stay the RAW msgpack body, so the
+    // frame is encoded here and only the body travels in HostSendTo.
+    public void SendTo(int playerId, MsgType type, object payload)
+    {
+        if (Lobby != null)
+        {
+            byte[] frame = NetCodec.Encode(type, payload);
+            var body = new byte[frame.Length - NetCodec.HeaderBytes];
+            Buffer.BlockCopy(frame, NetCodec.HeaderBytes, body, 0, body.Length);
+            Lobby.HostSendTo(playerId, type, body);
+            return;
+        }
+        Host?.SendTo(playerId, type, payload);
     }
 
     private void HostChanged()
@@ -339,10 +454,13 @@ public partial class NetSession : Node
     {
         if (Host != null) PollHost();
         if (Client != null) PollClient();
+        if (Lobby != null) PollLobby();
         // Forwarding runs on the game tick like every other transport here. The host is not simulating
         // in this configuration, so this is all it does for the match.
         Relay?.Poll();
-        if (Host != null && Relay != null) StreamRelaySpectators();
+        // Relay-config spectating: a LAN relay host pushes UDP itself AND streams to spectators; a
+        // lobby host player only streams (the server pushes UDP), so the stream runs for either.
+        if ((Host != null && Relay != null) || IsLobby) StreamRelaySpectators();
     }
 
     private void PollHost()
@@ -365,7 +483,7 @@ public partial class NetSession : Node
                     ServeRelayCatchUp(e.PlayerId);
             }
             else if (e.Kind == TcpRoomHost.EventKind.MatchResult) reportedWinner = e.Value;
-            else if (e.Kind == TcpRoomHost.EventKind.InputReport) MergeInputReport(e);
+            else if (e.Kind == TcpRoomHost.EventKind.InputReport) MergeInputReport(e.PlayerId, e.Report);
         }
 
         // A fighter reached the knockout. This is how the match ends when the host is only relaying and
@@ -385,9 +503,11 @@ public partial class NetSession : Node
     // which feeds both the relay host's own spectate screen and the catch-ups it serves to mid-match
     // joiners. Report frames are CONFIRMED by construction — the fighter only reports what its own
     // session confirmed — so nothing here needs the trim the host-session path applies.
-    private void MergeInputReport(TcpRoomHost.HostEvent e)
+    //
+    // playerId is the reporting fighter's id on a LAN (from the host's socket event); a lobby's
+    // forwarded report carries no sender, so it is 0 there — diagnostics only.
+    private void MergeInputReport(int playerId, MatchInputReport r)
     {
-        var r = e.Report;
         if (r == null) return;
         if (!CatchUpReady)
         {
@@ -397,7 +517,7 @@ public partial class NetSession : Node
             CatchUpP1StartX = r.P1StartX; CatchUpP1StartY = r.P1StartY;
             CatchUpP2StartX = r.P2StartX; CatchUpP2StartY = r.P2StartY;
             CatchUpReady = true;
-            GD.Print($"[catchup] relay host: first input report from player {e.PlayerId}, "
+            GD.Print($"[catchup] relay host: first input report from player {playerId}, "
                      + $"{r.P1.Length} frame(s)");
         }
         int n = System.Math.Min(r.P1.Length, r.P2.Length);
@@ -420,7 +540,7 @@ public partial class NetSession : Node
     private void ServeRelayCatchUpToLurkers()
     {
         if (!CatchUpReady || Room == null || !Room.MatchRunning) return;
-        int hostId = Host?.HostPlayerId ?? 0;
+        int hostId = IsLobby ? LocalPlayerId : (Host?.HostPlayerId ?? 0);
         foreach (var p in Room.Players)
         {
             if (p.PlayerId == hostId) continue;
@@ -457,7 +577,7 @@ public partial class NetSession : Node
             P2Inputs = p2,
         };
         _relaySpectatorNextFrame[playerId] = count;
-        Host.SendTo(playerId, MsgType.MatchCatchUp, cu);
+        SendTo(playerId, MsgType.MatchCatchUp, cu);
         GD.Print($"[catchup] relay host sent catch-up to player {playerId}: {count} frames");
     }
 
@@ -484,7 +604,7 @@ public partial class NetSession : Node
                 msg.P1[i] = CatchUpHistory.P1Inputs[start + i];
                 msg.P2[i] = CatchUpHistory.P2Inputs[start + i];
             }
-            Host.SendTo(kv.Key, MsgType.MatchInputs, msg);
+            SendTo(kv.Key, MsgType.MatchInputs, msg);
             _relaySpectatorNextFrame[kv.Key] = upTo + 1;
         }
         foreach (int id in gone) _relaySpectatorNextFrame.Remove(id);
@@ -535,6 +655,69 @@ public partial class NetSession : Node
                     string why = e.Detail ?? Client.LastError ?? "连接已断开";
                     Client.Dispose();
                     Client = null;
+                    Room = null;
+                    Disconnected?.Invoke(why);
+                    return;
+                }
+            }
+        }
+    }
+
+    private void PollLobby()
+    {
+        Lobby.Poll();
+        while (Lobby.TryDequeueEvent(out var e))
+        {
+            switch (e.Kind)
+            {
+                case LobbyRoomClient.EventKind.Connected:
+                case LobbyRoomClient.EventKind.RoomChanged:
+                    Room = Lobby.Room;
+                    RoomChanged?.Invoke();
+                    break;
+                case LobbyRoomClient.EventKind.MatchStarting:
+                    BeginMatch(e.Frame.As<StartMatch>());
+                    break;
+                case LobbyRoomClient.EventKind.MatchEnded:
+                    EndMatchLocal();
+                    PendingCatchUp = null;
+                    PendingStreamInputs.Clear();
+                    MatchEnded?.Invoke(e.Frame.As<MatchEnded>());
+                    break;
+                case LobbyRoomClient.EventKind.MatchCatchUp:
+                    PendingCatchUp = e.Frame.As<MatchCatchUp>();
+                    CatchUpReceived?.Invoke(PendingCatchUp);
+                    break;
+                case LobbyRoomClient.EventKind.MatchInputs:
+                {
+                    var m = e.Frame.As<MatchInputs>();
+                    PendingStreamInputs.Add(m);
+                    InputsReceived?.Invoke(m);
+                    break;
+                }
+                case LobbyRoomClient.EventKind.LobbyPlayerJoined:
+                    // The server's analogue of the LAN host's PlayerJoined: the host player's match
+                    // director serves the newcomer a catch-up (GameManager.OnHostPlayerJoined).
+                    PlayerJoined?.Invoke(e.Frame.As<LobbyPlayerJoined>().PlayerId);
+                    break;
+                case LobbyRoomClient.EventKind.InputReport:
+                    // A fighter's report the server forwarded to the host player (relay
+                    // configuration). playerId is 0 — the forwarded frame carries no sender.
+                    if (Room != null && Room.MatchRunning)
+                        MergeInputReport(0, e.Frame.As<MatchInputReport>());
+                    break;
+                case LobbyRoomClient.EventKind.LobbyRooms:
+                    LobbyRoomsReceived?.Invoke(e.Frame.As<LobbyRooms>());
+                    break;
+                case LobbyRoomClient.EventKind.Rejected:
+                    // Non-fatal: the lobby menu shows the reason and stays put.
+                    LobbyRejected?.Invoke(e.Detail ?? "操作被拒绝");
+                    break;
+                case LobbyRoomClient.EventKind.Disconnected:
+                {
+                    string why = e.Detail ?? Lobby.LastError ?? "与服务器的连接已断开";
+                    Lobby.Dispose();
+                    Lobby = null;
                     Room = null;
                     Disconnected?.Invoke(why);
                     return;

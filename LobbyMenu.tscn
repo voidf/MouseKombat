@@ -1,0 +1,245 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://LobbyMenuScreen.cs" id="1_lobby"]
+
+[node name="LobbyMenu" type="Control" node_paths=PackedStringArray("NameField", "HostField", "PortField", "ConnectButton", "StatusLabel", "Browser", "RoomList", "PageLabel", "PrevPageButton", "NextPageButton", "RefreshButton", "CreateButton", "JoinIdButton")]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("1_lobby")
+NameField = NodePath("Form/Name/Field")
+HostField = NodePath("Form/Host/Field")
+PortField = NodePath("Form/Port/Field")
+ConnectButton = NodePath("Form/ConnectButton")
+StatusLabel = NodePath("Status")
+Browser = NodePath("Browser")
+RoomList = NodePath("Browser/RoomScroll/RoomList")
+PageLabel = NodePath("Browser/Paging/PageLabel")
+PrevPageButton = NodePath("Browser/Paging/PrevPage")
+NextPageButton = NodePath("Browser/Paging/NextPage")
+RefreshButton = NodePath("Browser/Actions/Refresh")
+CreateButton = NodePath("Browser/Actions/Create")
+JoinIdButton = NodePath("Browser/Actions/JoinId")
+
+[node name="BG" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+color = Color(0.07, 0.075, 0.1, 1)
+
+[node name="Title" type="Label" parent="."]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_top = 36.0
+offset_bottom = 80.0
+theme_override_font_sizes/font_size = 30
+text = "大厅联机"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Explain" type="Label" parent="."]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_left = 90.0
+offset_top = 92.0
+offset_right = -90.0
+offset_bottom = 152.0
+theme_override_colors/font_color = Color(0.72, 0.76, 0.85, 1)
+theme_override_font_sizes/font_size = 15
+text = "连接到官方大厅：浏览玩家公开的房间并加入，或自己创建一间房等人来。房间支持密码，一个房间最多 4 人。"
+autowrap_mode = 2
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Form" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -240.0
+offset_top = -140.0
+offset_right = 240.0
+offset_bottom = -16.0
+theme_override_constants/separation = 12
+
+[node name="Name" type="HBoxContainer" parent="Form"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="Label" type="Label" parent="Form/Name"]
+custom_minimum_size = Vector2(110, 0)
+layout_mode = 2
+text = "玩家名字"
+vertical_alignment = 1
+
+[node name="Field" type="LineEdit" parent="Form/Name"]
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "局内头顶显示用，最多 16 字节"
+
+[node name="Host" type="HBoxContainer" parent="Form"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="Label" type="Label" parent="Form/Host"]
+custom_minimum_size = Vector2(110, 0)
+layout_mode = 2
+text = "大厅地址"
+vertical_alignment = 1
+
+[node name="Field" type="LineEdit" parent="Form/Host"]
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "官方大厅：4kr.top（域名 / IPv4 / IPv6 均可）"
+
+[node name="Port" type="HBoxContainer" parent="Form"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="Label" type="Label" parent="Form/Port"]
+custom_minimum_size = Vector2(110, 0)
+layout_mode = 2
+text = "端口"
+vertical_alignment = 1
+
+[node name="Field" type="LineEdit" parent="Form/Port"]
+custom_minimum_size = Vector2(120, 0)
+layout_mode = 2
+
+[node name="ConnectButton" type="Button" parent="Form"]
+layout_mode = 2
+custom_minimum_size = Vector2(0, 44)
+theme_override_font_sizes/font_size = 20
+text = "连接大厅"
+
+[node name="Browser" type="Control" parent="."]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="RoomHeader" type="Label" parent="Browser"]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_left = 80.0
+offset_top = 168.0
+offset_right = -80.0
+offset_bottom = 200.0
+theme_override_colors/font_color = Color(0.6, 0.63, 0.72, 1)
+theme_override_font_sizes/font_size = 14
+text = "房主 · 房间号 · 密码 · 人数"
+horizontal_alignment = 1
+
+[node name="RoomScroll" type="ScrollContainer" parent="Browser"]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_left = 120.0
+offset_top = 204.0
+offset_right = -120.0
+offset_bottom = 392.0
+horizontal_scroll_mode = 0
+
+[node name="RoomList" type="VBoxContainer" parent="Browser/RoomScroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 6
+
+[node name="Paging" type="HBoxContainer" parent="Browser"]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_left = 140.0
+offset_top = 400.0
+offset_right = -140.0
+offset_bottom = 440.0
+theme_override_constants/separation = 14
+alignment = 1
+
+[node name="PrevPage" type="Button" parent="Browser/Paging"]
+custom_minimum_size = Vector2(96, 36)
+layout_mode = 2
+text = "上一页"
+
+[node name="PageLabel" type="Label" parent="Browser/Paging"]
+custom_minimum_size = Vector2(120, 0)
+layout_mode = 2
+text = "第 1 / 1 页"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="NextPage" type="Button" parent="Browser/Paging"]
+custom_minimum_size = Vector2(96, 36)
+layout_mode = 2
+text = "下一页"
+
+[node name="Actions" type="HBoxContainer" parent="Browser"]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_left = 140.0
+offset_top = 452.0
+offset_right = -140.0
+offset_bottom = 500.0
+theme_override_constants/separation = 16
+alignment = 1
+
+[node name="Refresh" type="Button" parent="Browser/Actions"]
+custom_minimum_size = Vector2(140, 44)
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "刷新列表"
+
+[node name="Create" type="Button" parent="Browser/Actions"]
+custom_minimum_size = Vector2(140, 44)
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "创建房间"
+
+[node name="JoinId" type="Button" parent="Browser/Actions"]
+custom_minimum_size = Vector2(180, 44)
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "按房间号加入"
+
+[node name="Status" type="Label" parent="."]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_left = 60.0
+offset_top = 512.0
+offset_right = -60.0
+offset_bottom = 560.0
+theme_override_colors/font_color = Color(0.75, 0.8, 0.9, 1)
+theme_override_font_sizes/font_size = 15
+autowrap_mode = 2
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Back" type="Button" parent="."]
+custom_minimum_size = Vector2(130, 36)
+layout_mode = 1
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 24.0
+offset_top = -56.0
+offset_right = 154.0
+offset_bottom = -20.0
+text = "返回 (Esc)"
+
+[connection signal="pressed" from="Form/ConnectButton" to="." method="OnConnectPressed"]
+[connection signal="pressed" from="Browser/Paging/PrevPage" to="." method="OnPrevPagePressed"]
+[connection signal="pressed" from="Browser/Paging/NextPage" to="." method="OnNextPagePressed"]
+[connection signal="pressed" from="Browser/Actions/Refresh" to="." method="OnRefreshPressed"]
+[connection signal="pressed" from="Browser/Actions/Create" to="." method="OnCreatePressed"]
+[connection signal="pressed" from="Browser/Actions/JoinId" to="." method="OnJoinIdPressed"]
+[connection signal="pressed" from="Back" to="." method="OnBackPressed"]

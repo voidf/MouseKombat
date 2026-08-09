@@ -144,12 +144,149 @@ internal static partial class Program
         try
         {
             RunLobbyScenarios(port, Ver);
+            LobbyEnvelopeTests();
+            RunLobbyClientScenario(port, Ver);
         }
         finally
         {
             try { proc.Kill(entireProcessTree: true); } catch { }
             try { proc.WaitForExit(3000); } catch { }
         }
+    }
+
+    // The match-channel envelope (PROTOCOL.md § Relay): pure byte contract, no sockets.
+    private static void LobbyEnvelopeTests()
+    {
+        byte[] env = LobbyEnvelope.Pack(482275, 0, 1, new byte[] { 9, 8, 7 });
+        Check(env.Length == 9, "lobby envelope: 6 header + 3 payload bytes");
+        Check(BitConverter.IsLittleEndian && BitConverter.ToInt32(env, 0) == 482275,
+            "lobby envelope: room id is the little-endian u32");
+        Check(env[4] == 0 && env[5] == 1, "lobby envelope: src/dst slots in the right places");
+
+        bool ok = LobbyEnvelope.TryUnpack(env, out int rid, out int src, out int dst,
+                                          out ReadOnlySpan<byte> payload);
+        Check(ok && rid == 482275 && src == 0 && dst == 1 && payload.Length == 3 && payload[2] == 7,
+            "lobby envelope: unpack round-trips the envelope");
+        Check(!LobbyEnvelope.TryUnpack(new byte[] { 1, 2, 3 }, out _, out _, out _, out _),
+            "lobby envelope: a foreign short datagram is refused, not crashed on");
+    }
+
+    // The REAL client class (LobbyRoomClient) against the live server: browse, create, join, seats,
+    // match start, the catch-up routing and the end. The raw-probe scenario above pins the wire
+    // bytes; this one pins the client's behaviour on top of them.
+    private static void RunLobbyClientScenario(int port, string ver)
+    {
+        static bool Wait(LobbyRoomClient c, LobbyRoomClient.EventKind kind,
+                         Func<NetFrame, bool> ok = null, int timeoutMs = 6000)
+        {
+            long deadline = Environment.TickCount64 + timeoutMs;
+            while (Environment.TickCount64 < deadline)
+            {
+                c.Poll();
+                while (c.TryDequeueEvent(out var e))
+                {
+                    if (e.Kind != kind) continue;
+                    if (ok == null) return true;
+                    // A frame-less event (e.g. RoomChanged right after Welcome) cannot satisfy a
+                    // frame predicate; skip it and keep waiting for the one that carries a frame.
+                    if (e.Frame.Body == null) continue;
+                    if (ok(e.Frame)) return true;
+                }
+                Thread.Sleep(1);
+            }
+            return false;
+        }
+
+        // browse: one connection pages through the room list
+        using (var browser = new LobbyRoomClient { MatchUdpPort = 0 })
+        {
+            browser.Connect("127.0.0.1", port, "浏览者", ver);
+            browser.ListRooms(0);
+            Check(Wait(browser, LobbyRoomClient.EventKind.LobbyRooms,
+                       f => f.As<LobbyRooms>().Page == 0),
+                "lobby client: browses the room list page");
+        }
+
+        // create: this connection becomes the host player
+        using var host = new LobbyRoomClient { MatchUdpPort = 46000 };
+        host.Connect("127.0.0.1", port, "房主", ver);
+        host.CreateRoom(4, "", true);
+        Check(Wait(host, LobbyRoomClient.EventKind.Connected), "lobby client: create lands in the room");
+        Check(host.IsHostPlayer, "lobby client: the creator is the host player");
+        string roomId = host.Room.RoomId;
+        Check(roomId.Length == 6, "lobby client: the room id is 6 digits");
+
+        // join: a second connection becomes a member, and the host player is told who it is
+        using var mem = new LobbyRoomClient { MatchUdpPort = 46001 };
+        mem.Connect("127.0.0.1", port, "玩家乙", ver);
+        mem.JoinRoom(roomId, "");
+        Check(Wait(mem, LobbyRoomClient.EventKind.Connected) && !mem.IsHostPlayer,
+            "lobby client: a member joins as a non-host");
+        Check(Wait(host, LobbyRoomClient.EventKind.LobbyPlayerJoined,
+                   f => f.As<LobbyPlayerJoined>().PlayerId == mem.PlayerId),
+            "lobby client: the host player is told who joined");
+
+        // seats + characters + match start
+        host.ClaimSeat(0);
+        mem.ClaimSeat(1);
+        Wait(host, LobbyRoomClient.EventKind.RoomChanged,
+             f => f.As<RoomSnapshot>().Seats[0].OccupantPlayerId == host.PlayerId);
+        Wait(mem, LobbyRoomClient.EventKind.RoomChanged,
+             f => f.As<RoomSnapshot>().Seats[1].OccupantPlayerId == mem.PlayerId);
+        host.PickCharacter(0);
+        mem.PickCharacter(1);
+        Wait(host, LobbyRoomClient.EventKind.RoomChanged,
+             f => f.As<RoomSnapshot>().Seats[0].Ready && f.As<RoomSnapshot>().Seats[1].Ready);
+        host.RequestMatchStart(new MatchStart { P2StartX = 651f });
+        Check(Wait(mem, LobbyRoomClient.EventKind.MatchStarting,
+                   f => f.As<StartMatch>().P2StartX == 651f),
+            "lobby client: StartMatch arrives with the host player's geometry");
+        Wait(mem, LobbyRoomClient.EventKind.RoomChanged, f => f.As<RoomSnapshot>().MatchRunning);
+
+        // UDP relay with the envelope bytes the match socket actually produces
+        bool relayOk = false;
+        using (var ua = new UdpClient(new IPEndPoint(IPAddress.Loopback, 46000)))
+        using (var ub = new UdpClient(new IPEndPoint(IPAddress.Loopback, 46001)))
+        {
+            ua.Client.ReceiveTimeout = ub.Client.ReceiveTimeout = 4000;
+            var from = new IPEndPoint(IPAddress.Any, 0);
+            byte[] pa = { 1, 2, 3, 4 };
+            ua.Send(LobbyEnvelope.Pack(int.Parse(roomId), 0, 1, pa), 6 + pa.Length, "127.0.0.1", port);
+            try { relayOk = ub.Receive(ref from).Length == pa.Length; } catch (SocketException) { }
+        }
+        Check(relayOk, "lobby client: the server relays the enveloped datagram");
+
+        // catch-up routing: the host player streams a MatchInputs frame to the member via HostSendTo
+        var inputs = new MatchInputs { StartFrame = 7, P1 = new ushort[] { 1 }, P2 = new ushort[] { 2 } };
+        byte[] frame = NetCodec.Encode(MsgType.MatchInputs, inputs);
+        var body = new byte[frame.Length - NetCodec.HeaderBytes];
+        Buffer.BlockCopy(frame, NetCodec.HeaderBytes, body, 0, body.Length);
+        host.HostSendTo(mem.PlayerId, MsgType.MatchInputs, body);
+        Check(Wait(mem, LobbyRoomClient.EventKind.MatchInputs,
+                   f => f.As<MatchInputs>().StartFrame == 7),
+            "lobby client: HostSendTo delivers the stream frame");
+
+        // the fighter's report reaches the host player through the server
+        var rep = new MatchInputReport { StartFrame = 3, P1 = new ushort[] { 5 }, P2 = new ushort[] { 6 } };
+        mem.Send(MsgType.MatchInputReport, rep);
+        Check(Wait(host, LobbyRoomClient.EventKind.InputReport,
+                   f => f.As<MatchInputReport>().StartFrame == 3),
+            "lobby client: the host player receives the fighter's report");
+
+        // MatchResult ends the match and clears the seats
+        host.ReportMatchResult(0);
+        Check(Wait(mem, LobbyRoomClient.EventKind.MatchEnded,
+                   f => f.As<MatchEnded>().WinnerSeat == 0),
+            "lobby client: MatchResult ends the match");
+        Check(Wait(mem, LobbyRoomClient.EventKind.RoomChanged,
+                   f => !f.As<RoomSnapshot>().MatchRunning
+                        && f.As<RoomSnapshot>().Seats[0].OccupantPlayerId == 0),
+            "lobby client: seats cleared after the match");
+
+        // the host player leaving destroys the room
+        host.Disconnect("房主离开");
+        Check(Wait(mem, LobbyRoomClient.EventKind.Disconnected),
+            "lobby client: the member is told when the host player leaves");
     }
 
     private static void RunLobbyScenarios(int port, string ver)
@@ -216,15 +353,8 @@ internal static partial class Program
         int roomIdNum = int.Parse(roomId);
 
         // ---- UDP relay: fighter A -> B -> A through the server ----
-        byte[] Wrap(int src, int dst, byte[] payload)
-        {
-            var b = new byte[6 + payload.Length];
-            b[0] = (byte)roomIdNum; b[1] = (byte)(roomIdNum >> 8);
-            b[2] = (byte)(roomIdNum >> 16); b[3] = (byte)(roomIdNum >> 24);
-            b[4] = (byte)src; b[5] = (byte)dst;
-            Buffer.BlockCopy(payload, 0, b, 6, payload.Length);
-            return b;
-        }
+        // The envelope is the REAL LobbyEnvelope bytes the match socket wraps around every datagram.
+        byte[] Wrap(int src, int dst, byte[] payload) => LobbyEnvelope.Pack(roomIdNum, src, dst, payload);
 
         bool roundtripOk = false;
         var ua = host.Udp;

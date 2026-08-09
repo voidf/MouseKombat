@@ -13,6 +13,7 @@ StatusLabel = NodePath("Layout/Status")
 ReadyScenePath = "res://ReadyScreen.tscn"
 ReplayScenePath = "res://ReplayList.tscn"
 LanScenePath = "res://LanMenu.tscn"
+LobbyScenePath = "res://LobbyMenu.tscn"
 
 [node name="BG" type="TextureRect" parent="."]
 layout_mode = 1

@@ -7,10 +7,11 @@ places in the same commit: this document, the C# messages, the Python handlers.
 ## Design in one paragraph
 
 One protocol, two hosts. A LAN game's host runs a mini room server in-process; a lobby game's rooms
-live on the public Python server. Both speak exactly the same messages, so the client code is
-identical and only the endpoint differs. Room membership, seat claims and character picks go over a
-**reliable ordered** channel (TCP). Once a match starts, per-frame inputs go over an **unreliable**
-channel (UDP) driven by the rollback library, which has its own framing and is not described here.
+live on the public Python server (`server/lobby_server.py`), and the client's transport class is
+`LobbyRoomClient` instead of `TcpRoomClient` — everything else (messages, framing, room rules) is
+the same. Room membership, seat claims and character picks go over a **reliable ordered** channel
+(TCP). Once a match starts, per-frame inputs go over an **unreliable** channel (UDP) driven by the
+rollback library, which has its own framing and is not described here.
 
 ## Transports
 
@@ -31,7 +32,8 @@ second listener for spectator traffic: lobby spectators never dial UDP at all (�
 The lobby server (`server/lobby_server.py`) is the public host. One protocol, two hosts: a LAN
 game's host runs a mini room server in-process (`TcpRoomHost`); a lobby game's rooms live on the
 server, which implements the same rules by hand (its `room.py` is the RoomState port). The client
-code is identical and only the endpoint differs.
+side differs only in the transport: a LAN member is a `TcpRoomClient`, a lobby member a
+`LobbyRoomClient` — the room messages are the same and only the endpoint differs.
 
 ### Connection flow
 

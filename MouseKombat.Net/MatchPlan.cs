@@ -58,11 +58,15 @@ public sealed class MatchPlan
     //
     //   room             the authoritative snapshot the match started from
     //   localPlayerId    who we are
-    //   isHost           whether we own the room
+    //   isHost           whether we own the room (in a lobby: the host PLAYER)
     //   hostMatchEp      the host's match endpoint, as this machine should dial it (clients only)
     //   clientMatchEp    playerId -> that client's match endpoint (host only; null elsewhere)
+    //   lobby            lobby game: the server is the hub. The host player then dials the server
+    //                    like any client, the host never relays locally (the server does), and
+    //                    nobody joins a spectator session (lobby spectating is the data stream).
     public static MatchPlan Build(RoomSnapshot room, int localPlayerId, bool isHost,
-                                  IPEndPoint hostMatchEp, Func<int, IPEndPoint> clientMatchEp)
+                                  IPEndPoint hostMatchEp, Func<int, IPEndPoint> clientMatchEp,
+                                  bool lobby = false)
     {
         var plan = new MatchPlan();
         if (room == null) { plan.Role = MatchRole.Idle; plan.Problem = "房间状态缺失"; return plan; }
@@ -90,9 +94,9 @@ public sealed class MatchPlan
             {
                 if (plan.LocalSeat[seat]) continue;
                 var s = room.Seats[seat];
-                if (isHost)
+                if (isHost && !lobby)
                 {
-                    // The host talks to that client directly — it already knows the address.
+                    // LAN: the host talks to that client directly — it already knows the address.
                     plan.RemoteEndPoint = clientMatchEp?.Invoke(s.OccupantPlayerId);
                     if (plan.RemoteEndPoint == null)
                     {
@@ -102,20 +106,20 @@ public sealed class MatchPlan
                 }
                 else
                 {
-                    // A client ALWAYS dials the host, even when the other fighter is another client:
-                    // the host relays (spec: 走房主中转，不做 P2P). So no client ever learns another
-                    // client's address.
+                    // A client always dials the hub — the host on a LAN, the SERVER in a lobby
+                    // (spec: 走房主中转，不做 P2P; the lobby server relays). So no client ever
+                    // learns another client's address.
                     plan.RemoteEndPoint = hostMatchEp;
                     if (plan.RemoteEndPoint == null)
                     {
                         plan.Role = MatchRole.Idle;
-                        plan.Problem = "缺少主机的对局端口";
+                        plan.Problem = "缺少对局端口";
                     }
                 }
                 break;
             }
 
-            if (isHost && plan.Role == MatchRole.Fighter)
+            if (isHost && !lobby && plan.Role == MatchRole.Fighter)
                 plan.Spectators = SpectatorEndPoints(room, hostId, clientMatchEp);
             return plan;
         }
@@ -123,6 +127,14 @@ public sealed class MatchPlan
         // We drive nothing. Either we relay (host, both seats are clients) or we watch.
         if (isHost)
         {
+            // LAN: the host forwards between the two clients. Lobby: the SERVER forwards, but the
+            // host player is still the catch-up authority — it merges the fighters' reports and
+            // serves the data stream, so the Relay role (minus the local UDP relay) is the same.
+            if (lobby)
+            {
+                plan.Role = MatchRole.Relay;
+                return plan;
+            }
             var a = clientMatchEp?.Invoke(room.Seats[0].OccupantPlayerId);
             var b = clientMatchEp?.Invoke(room.Seats[1].OccupantPlayerId);
             if (a == null || b == null)
@@ -152,6 +164,15 @@ public sealed class MatchPlan
         {
             plan.Role = MatchRole.Idle;
             plan.Problem = "缺少主机的对局端口";
+            return plan;
+        }
+        if (lobby)
+        {
+            // Lobby spectating is DATA, not a session (PROTOCOL.md § Lobby): a seatless member is
+            // told "wait for the stream" and the host player's machine serves it a catch-up over
+            // TCP. Dialing a spectator session would point at the server, which has no session.
+            plan.Role = MatchRole.Idle;
+            plan.Problem = "正在获取对局数据…";
             return plan;
         }
         plan.Role = MatchRole.Spectator;

@@ -207,7 +207,11 @@ public partial class GameManager : Node2D, IMatchPresenter
             SpectateHost = _plan.SpectateHost,
             // A client hands over the socket it bound during the handshake (its port was announced in
             // Hello and must not change); the host just names the room port and lets Backdash bind it.
-            Socket = net != null && !net.IsHost ? net.MatchSocket : null,
+            // In a lobby EVERY machine is a client of the server, and the session's socket is the
+            // envelope wrapper (see LobbyMatchSocket) — except an all-local lobby match, which has no
+            // UDP traffic at all and passes null like the LAN host.
+            Socket = net != null && net.IsLobby ? net.LobbySocket
+                  : (net != null && !net.IsHost ? net.MatchSocket : null),
             Port = net?.MatchUdpPort ?? 0,
             InputDelayFrames = NetInputDelayFrames,
             FrameRate = Engine.PhysicsTicksPerSecond,
@@ -466,6 +470,7 @@ public partial class GameManager : Node2D, IMatchPresenter
             return;
         }
         if (_stalledTicks > 0) { _stalledTicks = 0; SetNetStatus(""); }
+        ServeLobbySpectators();
         StreamCatchUpSpectators();
         ReportConfirmedFrames();
 
@@ -490,7 +495,7 @@ public partial class GameManager : Node2D, IMatchPresenter
     {
         if (_plan == null || _plan.Role != MatchRole.Fighter) return;
         var net = NetSession.Instance;
-        if (net?.Client == null || net.IsHost) return;
+        if (net == null || net.IsHost) return;   // the host player has its own history
         int upTo = System.Math.Min(_netMatch.ConfirmedFrame + 1, _netHistory.FrameCount);
         if (upTo <= _reportedUpTo) return;
         int count = upTo - _reportedUpTo;
@@ -512,7 +517,9 @@ public partial class GameManager : Node2D, IMatchPresenter
             rep.P1[i] = _netHistory.P1Inputs[_reportedUpTo + i];
             rep.P2[i] = _netHistory.P2Inputs[_reportedUpTo + i];
         }
-        net.Client.Send(MsgType.MatchInputReport, rep);
+        // LAN: straight to the host. Lobby: to the server, which forwards it to the host player.
+        if (net.Lobby != null) net.Lobby.Send(MsgType.MatchInputReport, rep);
+        else net.Client?.Send(MsgType.MatchInputReport, rep);
         _reportedUpTo = upTo;
     }
 
@@ -524,7 +531,7 @@ public partial class GameManager : Node2D, IMatchPresenter
     {
         if (_spectatorNextFrame.Count == 0 || !IsHostNetMatch) return;
         var net = NetSession.Instance;
-        if (net?.Host == null) return;
+        if (net == null) return;
         // Belt and braces under the RollbackMatch clamp: never read past the recorded history, even
         // if a future change makes ConfirmedFrame lie again — an out-of-range crash inside a poll
         // would take the whole match down.
@@ -547,7 +554,7 @@ public partial class GameManager : Node2D, IMatchPresenter
                 msg.P1[i] = _netHistory.P1Inputs[start + i];
                 msg.P2[i] = _netHistory.P2Inputs[start + i];
             }
-            net.Host.SendTo(kv.Key, MsgType.MatchInputs, msg);
+            net.SendTo(kv.Key, MsgType.MatchInputs, msg);
             _spectatorNextFrame[kv.Key] = upTo + 1;
             if (_streamNotified.Add(kv.Key))
                 GD.Print($"[catchup] host stream to player {kv.Key}: first batch frames {start}..{upTo}");
@@ -570,7 +577,7 @@ public partial class GameManager : Node2D, IMatchPresenter
     {
         if (!IsHostNetMatch || playerId <= 0) return;
         var net = NetSession.Instance;
-        if (net?.Host == null || net.Room == null || !net.Room.MatchRunning) return;
+        if (net == null || net.Room == null || !net.Room.MatchRunning) return;
 
         // The speculative tail of the history (frames newer than the confirmed point) is not sent:
         // the joiner must land on a state nothing can take back. If the session has not confirmed
@@ -599,8 +606,26 @@ public partial class GameManager : Node2D, IMatchPresenter
             P2Inputs = p2,
         };
         _spectatorNextFrame[playerId] = count;
-        net.Host.SendTo(playerId, MsgType.MatchCatchUp, cu);
+        net.SendTo(playerId, MsgType.MatchCatchUp, cu);
         GD.Print($"[catchup] host sent catch-up to player {playerId}: {count} frames");
+    }
+
+    // A lobby's spectators all watch the DATA stream (PROTOCOL.md § Lobby): the host player serves a
+    // catch-up to EVERY seatless member, not just those who joined mid-match. Runs once per tick;
+    // anyone without a cursor yet is treated exactly like a fresh joiner, so a spectator who was
+    // already in the room when the match started gets the same package as one who joined after.
+    private void ServeLobbySpectators()
+    {
+        var net = NetSession.Instance;
+        if (net == null || !net.IsLobby || !net.IsHost || net.Room == null
+            || !net.Room.MatchRunning || _netMatch == null) return;
+        foreach (var p in net.Room.Players)
+        {
+            if (p.PlayerId == net.LocalPlayerId) continue;   // the host player, not a watcher
+            if (p.Seat >= 0 || !p.Connected) continue;       // fighters watch their own match
+            if (_spectatorNextFrame.ContainsKey(p.PlayerId)) continue;
+            OnHostPlayerJoined(p.PlayerId);
+        }
     }
 
     private bool IsHostNetMatch => _netMatch != null && NetSession.Instance?.IsHost == true;

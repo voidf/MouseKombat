@@ -10,9 +10,9 @@ using Godot;
 public partial class MainMenu : Control
 {
     [Export] public string ReadyScenePath = "res://ReadyScreen.tscn";
-    [Export] public string LanScenePath = "";      // 期3-4
-    [Export] public string LobbyScenePath = "";    // 期3-5
-    [Export] public string ReplayScenePath = "";   // 期3-3
+    [Export] public string LanScenePath = "res://LanMenu.tscn";
+    [Export] public string LobbyScenePath = "res://LobbyMenu.tscn";
+    [Export] public string ReplayScenePath = "res://ReplayList.tscn";
 
     [Export] public Label StatusLabel;   // transient "not built yet" line under the buttons
 
