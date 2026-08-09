@@ -527,9 +527,21 @@ public partial class GameManager : Node2D, IMatchPresenter
 
         // How long the knockout has stood. A rollback that erases it clears MatchOver on the sim, which
         // is exactly what this reads — no second copy of the fact to get out of step.
-        if (res.MatchOverWinner >= 0) { _pendingNetWinner = res.MatchOverWinner; _koHeldFrames = 0; }
+        //
+        // The sim reports the winner on EVERY frame from the knockout on (a dead player stays Dead, so
+        // CheckKO keeps re-setting MatchOverWinner), so a bare "res.MatchOverWinner >= 0" reset the
+        // counter to 0 every frame and the KO was never confirmed — the match hung in Fighting with the
+        // loser frozen and the winner free to act. Start the count on the first such frame, increment it
+        // on the live frames that follow, and count nothing for re-simulated (predicted) frames: those
+        // are exactly the ones that can still be taken back.
+        if (res.MatchOverWinner >= 0)
+        {
+            _pendingNetWinner = res.MatchOverWinner;
+            if (_koHeldFrames < 0) _koHeldFrames = 0;
+            else if (!rollback) _koHeldFrames++;
+        }
         else if (!_sim.MatchOver) { _pendingNetWinner = -1; _koHeldFrames = -1; }
-        else if (_koHeldFrames >= 0) _koHeldFrames++;
+        else if (_koHeldFrames >= 0 && !rollback) _koHeldFrames++;
     }
 
     public void OnRollbackBegin(int frame) => _inRollback = true;
