@@ -149,7 +149,7 @@ class LobbyServer:
 
     async def shutdown(self):
         for room in list(self.rooms.values()):
-            self._destroy_room(room, "服务器已关闭")
+            self._destroy_room(room, "服务器已关闭", close=True)
         if self._tcp_server is not None:
             self._tcp_server.close()
             await self._tcp_server.wait_closed()
@@ -237,8 +237,12 @@ class LobbyServer:
         entries = []
         for r in rooms[start:start + PAGE_SIZE]:
             host = r.state.find(r.state.host_player_id)
+            # The displayed count must be the one the CAPACITY CHECK uses (RoomState.add_player counts
+            # players, not live connections), or the browser advertises a free slot the join then
+            # refuses with 房间已满 — which is exactly what a mid-match fighter's reserved slot looked
+            # like ("2/4 人" on a room nobody could enter).
             entries.append([r.state.room_id, host.name if host else "?",
-                            bool(r.password), len(r.members), r.state.max_players])
+                            bool(r.password), len(r.state.players), r.state.max_players])
         self._send_raw(m, encode_frame(MSG_LOBBY_ROOMS, [page, total_pages, entries]))
 
     def _on_create(self, m: Member, body):
@@ -301,7 +305,7 @@ class LobbyServer:
         if host is not None and host.player_id != player.player_id:
             self._send_raw(host, encode_frame(MSG_LOBBY_PLAYER_JOINED, [player.player_id]))
         log.info("%r joined room %s (%d/%d)", m.name, room.state.room_id,
-                 len(room.members), room.state.max_players)
+                 len(room.state.players), room.state.max_players)
 
     # ---- room phase ----
 
@@ -446,34 +450,38 @@ class LobbyServer:
         self._close_member(m)
 
     def _leave_room(self, m: Member, reason: str):
-        """A member leaving (Bye). The room dies with its host player, but NO leaver's connection
-        does: the leaver returns to the browse phase — the same lobby connection keeps working for
-        LobbyList/Create/Join, which is what lets the client show the browser again without
-        reconnecting (spec: ESC 退出房间后回到选房界面，不断开大厅连接; the host player's ESC closes
-        the room and lands on the same browser). The OTHER members of a destroyed room are still
-        told with Bye and dropped."""
+        """A member leaving (Bye). The room dies with its host player, but NO connection does — not
+        the leaver's, and not the other members' either: everyone returns to the browse phase, where
+        the same lobby connection keeps working for LobbyList/Create/Join. That is what lets a client
+        show the room browser again without reconnecting (spec: ESC 退出房间后回到选房界面，不断开大厅
+        连接; 主持玩家退房后其它玩家保持连接回到选房界面). The other members of a destroyed room are
+        still TOLD with Bye — they just are not disconnected by it."""
         room = m.room
         if room is None:
             m.phase = "closed"
             return
         if m.is_host:
             log.info("room %s destroyed: host %r left (%s)", room.state.room_id, m.name, reason)
-            # Out of the member table FIRST, so _destroy_room does not close our own connection
-            # along with everyone else's.
+            # Out of the member table FIRST, so _destroy_room does not hand our own connection the
+            # Bye we are the cause of.
             room.members.pop(m.player_id, None)
             self._destroy_room(room, reason)
             self._to_browse(m)
             return
         room.members.pop(m.player_id, None)
         state = room.state
-        if state.match_running:
+        # The mid-match reserve rule is about FIGHTERS: the opponent is still simulating against that
+        # seat, so it stays claimed and the player is kicked at match end. A SEATLESS watcher changes
+        # nothing about the match, so its human slot is freed the instant it leaves — reserving it too
+        # is what left a room advertising "2/4 人" while refusing every joiner with 房间已满.
+        if state.match_running and state.holds_seat(m.player_id):
             state.mark_disconnected(m.player_id)   # kicked at match end, seat kept mid-round
         else:
             state.remove_player(m.player_id)
         self._to_browse(m)                         # back to browse: the connection stays open
         self._broadcast_room(room)
         log.info("%r left room %s (%d/%d), connection kept for browsing", m.name,
-                 state.room_id, len(room.members), state.max_players)
+                 state.room_id, len(state.players), state.max_players)
 
     def _to_browse(self, m: Member):
         """Back to the browse phase on the SAME connection. Every room-scoped field goes with the
@@ -487,18 +495,30 @@ class LobbyServer:
         m.udp_endpoint = None
         m.udp_last_rx = 0.0
 
-    def _destroy_room(self, room: Room, reason: str):
+    def _destroy_room(self, room: Room, reason: str, close: bool = False):
+        """The room is gone (its host player left). Every remaining member is told with Bye and then
+        returned to the BROWSE phase on the same connection — a destroyed room must not cost a player
+        its lobby connection, or the client is thrown back to the main menu and has to retype the whole
+        lobby form (spec: 主持玩家退房后其它玩家保持连接回到选房界面刷新房间列表).
+
+        close=True is the server SHUTTING DOWN: there is no browse phase left to return to."""
         frame = encode_frame(MSG_BYE, [reason])
         for m in room.members.values():
             self._send_raw(m, frame)
-            self._close_member(m)
+            if close:
+                self._close_member(m)
+            else:
+                self._to_browse(m)
+        room.members.clear()
         self.rooms.pop(room.id_int, None)
 
     def _on_conn_lost(self, m: Member):
         """EOF, protocol error or explicit close. A room member is removed (or the room is
         destroyed, for the host player); a lobby-phase browser is just dropped."""
         if m.phase == "room":
-            self._leave_room(m, "连接断开")
+            # The reason is what the OTHER members are shown for a host player, so name the event
+            # from their side: their own connection is fine, the host's is not.
+            self._leave_room(m, "主持玩家已断开连接" if m.is_host else "连接断开")
         elif m.phase == "op":
             log.info("lobby browser %s disconnected", m.tcp_ip)
         m.phase = "closed"

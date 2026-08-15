@@ -128,6 +128,7 @@ public partial class GameManager : Node2D, IMatchPresenter
 
     private Label _netStatus;
     private AcceptDialog _netDropPopup;
+    private string _netDropTarget;        // scene the drop popup lands on when confirmed
     private bool _leavingNetMatch;
 
     private GameSim _sim;
@@ -196,6 +197,7 @@ public partial class GameManager : Node2D, IMatchPresenter
         {
             net.MatchEnded += OnNetMatchEnded;
             net.Disconnected += OnNetDisconnected;
+            net.LobbyRoomClosed += OnNetRoomClosed;
             net.PlayerJoined += OnHostPlayerJoined;
         }
 
@@ -369,6 +371,7 @@ public partial class GameManager : Node2D, IMatchPresenter
 
     [Export] public string ReadyScenePath = "res://ReadyScreen.tscn";
     [Export] public string MainMenuScenePath = "res://MainMenu.tscn";
+    [Export] public string LobbyMenuScenePath = "res://LobbyMenu.tscn";
 
     // Esc bails out of the match and returns to the ready screen so devices can be re-bound.
     public override void _UnhandledInput(InputEvent @event)
@@ -763,8 +766,23 @@ public partial class GameManager : Node2D, IMatchPresenter
     {
         if (_leavingNetMatch) return;
         _recording = null;   // half a round with no result is not a replay
-        ShowNetDrop(string.IsNullOrEmpty(reason) ? "与房间的连接已断开。" : reason);
+        ShowNetDrop(string.IsNullOrEmpty(reason) ? "与房间的连接已断开。" : reason,
+                    IsLobbyGame() ? LobbyMenuScenePath : MainMenuScenePath);
     }
+
+    // The lobby ROOM closed under a running match (its host player left / quit). The lobby CONNECTION
+    // survives, so this is not a disconnect: the match is over for us either way, but the player lands
+    // on the room browser with the connection intact instead of back at the main menu. Without this the
+    // match would simply hang — the server's Bye no longer means "connection lost".
+    private void OnNetRoomClosed(string reason)
+    {
+        if (_leavingNetMatch) return;
+        _recording = null;
+        ShowNetDrop(string.IsNullOrEmpty(reason) ? "房间已关闭。" : reason, LobbyMenuScenePath);
+    }
+
+    private bool IsLobbyGame() =>
+        NetSession.Instance != null && NetSession.Instance.Mode == ReplayData.ModeLobby;
 
     private void ReturnToSeatScreen()
     {
@@ -816,15 +834,31 @@ public partial class GameManager : Node2D, IMatchPresenter
     {
         _netDropPopup = new AcceptDialog { Title = "对局中断", OkButtonText = "确定", Exclusive = true };
         AddChild(_netDropPopup);
-        _netDropPopup.Confirmed += LeaveToMainMenu;
-        _netDropPopup.Canceled += LeaveToMainMenu;
+        _netDropPopup.Confirmed += LeaveToDropTarget;
+        _netDropPopup.Canceled += LeaveToDropTarget;
     }
 
-    private void ShowNetDrop(string text)
+    private void ShowNetDrop(string text, string target = null)
     {
+        _netDropTarget = target;
         if (_netDropPopup == null || _netDropPopup.Visible) return;
         _netDropPopup.DialogText = text;
         _netDropPopup.PopupCentered();
+    }
+
+    // A closed lobby room keeps the connection (the room browser re-lists on it); anything else tears
+    // the session down on the way to the main menu.
+    private void LeaveToDropTarget()
+    {
+        if (string.IsNullOrEmpty(_netDropTarget) || _netDropTarget == MainMenuScenePath)
+        {
+            LeaveToMainMenu();
+            return;
+        }
+        if (_leavingNetMatch) return;
+        _leavingNetMatch = true;
+        GameSession.Clear();
+        GetTree().ChangeSceneToFile(_netDropTarget);
     }
 
     private void LeaveToMainMenu()
@@ -843,6 +877,7 @@ public partial class GameManager : Node2D, IMatchPresenter
         {
             net.MatchEnded -= OnNetMatchEnded;
             net.Disconnected -= OnNetDisconnected;
+            net.LobbyRoomClosed -= OnNetRoomClosed;
             net.PlayerJoined -= OnHostPlayerJoined;
         }
         _netMatch?.Dispose();

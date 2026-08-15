@@ -46,6 +46,7 @@ public partial class SpectateScreen : Control
 
     private Label _p1Tag, _p2Tag;
     private AcceptDialog _dropPopup;
+    private string _dropTarget;               // scene the drop popup lands on when confirmed
     private bool _leaving;
 
     private NetSession Net => NetSession.Instance;
@@ -100,6 +101,7 @@ public partial class SpectateScreen : Control
             Net.InputsReceived += OnInputsReceived;
             Net.MatchEnded += OnMatchEnded;
             Net.Disconnected += OnDisconnected;
+            Net.LobbyRoomClosed += OnLobbyRoomClosed;
             Net.RoomChanged += OnRoomChanged;
         }
 
@@ -229,8 +231,27 @@ public partial class SpectateScreen : Control
     private void OnDisconnected(string reason)
     {
         if (_leaving) return;
+        ShowDrop("连接断开", string.IsNullOrEmpty(reason) ? "与房间的连接已断开。" : reason,
+                 IsLobbyGame() ? LobbyMenuScenePath : MainMenuScenePath);
+    }
+
+    // The host player closed the room while we were watching. The lobby connection is untouched, so
+    // this is not a disconnect: acknowledge and go back to the room browser.
+    private void OnLobbyRoomClosed(string reason)
+    {
+        if (_leaving) return;
+        ShowDrop("房间已关闭", string.IsNullOrEmpty(reason) ? "房间已关闭。" : reason,
+                 LobbyMenuScenePath);
+    }
+
+    private bool IsLobbyGame() => Net != null && Net.Mode == ReplayData.ModeLobby;
+
+    private void ShowDrop(string title, string text, string target)
+    {
+        _dropTarget = target;
         if (_dropPopup == null || _dropPopup.Visible) return;
-        _dropPopup.DialogText = string.IsNullOrEmpty(reason) ? "与房间的连接已断开。" : reason;
+        _dropPopup.Title = title;
+        _dropPopup.DialogText = text;
         _dropPopup.PopupCentered();
     }
 
@@ -289,12 +310,28 @@ public partial class SpectateScreen : Control
         GetTree().ChangeSceneToFile(MainMenuScenePath);
     }
 
+    // Where the drop popup lands. A closed ROOM keeps the lobby connection (the browser re-lists on
+    // it), so only a genuine drop tears the session down.
+    private void LeaveToDropTarget()
+    {
+        if (_leaving) return;
+        if (string.IsNullOrEmpty(_dropTarget) || _dropTarget == MainMenuScenePath)
+        {
+            LeaveToMainMenu();
+            return;
+        }
+        _leaving = true;
+        GameSession.CatchUpData = null;
+        GameSession.Clear();
+        GetTree().ChangeSceneToFile(_dropTarget);
+    }
+
     private void BuildDropPopup()
     {
         _dropPopup = new AcceptDialog { Title = "连接断开", OkButtonText = "确定", Exclusive = true };
         AddChild(_dropPopup);
-        _dropPopup.Confirmed += LeaveToMainMenu;
-        _dropPopup.Canceled += LeaveToMainMenu;
+        _dropPopup.Confirmed += LeaveToDropTarget;
+        _dropPopup.Canceled += LeaveToDropTarget;
     }
 
     private void SetStatus(string text)
@@ -313,6 +350,7 @@ public partial class SpectateScreen : Control
             Net.InputsReceived -= OnInputsReceived;
             Net.MatchEnded -= OnMatchEnded;
             Net.Disconnected -= OnDisconnected;
+            Net.LobbyRoomClosed -= OnLobbyRoomClosed;
             Net.RoomChanged -= OnRoomChanged;
         }
     }

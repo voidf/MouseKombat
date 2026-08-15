@@ -71,6 +71,7 @@ public partial class NetSeatScreen : Control
     private readonly List<(string name, bool isOnnx, string path)> _aiItems = new();
 
     private AcceptDialog _dropPopup;
+    private string _dropTarget;                 // scene the drop popup lands on when confirmed
     private AcceptDialog _padBusyPopup;
     private System.Threading.Mutex _padMutex;   // OS pad lock while OUR seat is driven by a pad
 
@@ -111,6 +112,7 @@ public partial class NetSeatScreen : Control
         {
             Net.RoomChanged += Render;
             Net.Disconnected += OnDisconnected;
+            Net.LobbyRoomClosed += OnLobbyRoomClosed;
             Net.MatchStarting += OnMatchStarting;
             Net.MatchEnded += OnMatchEnded;
             Net.CatchUpReceived += OnCatchUpReceived;
@@ -132,6 +134,7 @@ public partial class NetSeatScreen : Control
         if (Net == null) return;
         Net.RoomChanged -= Render;
         Net.Disconnected -= OnDisconnected;
+        Net.LobbyRoomClosed -= OnLobbyRoomClosed;
         Net.MatchStarting -= OnMatchStarting;
         Net.MatchEnded -= OnMatchEnded;
         Net.CatchUpReceived -= OnCatchUpReceived;
@@ -634,19 +637,46 @@ public partial class NetSeatScreen : Control
 
     private void OnDisconnected(string reason)
     {
-        // Spec: when the host leaves, everyone else gets a popup and returns to the main menu on
-        // confirm. Same treatment for any drop — the player needs to know it was not their own doing.
-        _dropPopup.DialogText = string.IsNullOrEmpty(reason) ? "与房间的连接已断开。" : reason;
-        _dropPopup.PopupCentered();
+        // Spec: when the host leaves, everyone else gets a popup — and the player needs to know a drop
+        // was not their own doing. In a LOBBY game the lobby form is worth keeping, so the landing spot
+        // is the room browser: it re-lists on a live connection and falls back to the connect form
+        // (with the remembered name/address/port) when the connection really is gone.
+        ShowDrop("连接断开", string.IsNullOrEmpty(reason) ? "与房间的连接已断开。" : reason,
+                 IsLobbyGame() ? LobbyMenuScenePath : MainMenuScenePath);
     }
+
+    // The ROOM ended (its host player left) while our lobby connection kept working: say why, then go
+    // back to the room browser — NOT the main menu, which is what used to make everyone in the room
+    // retype the whole lobby form after the host pressed Esc.
+    private void OnLobbyRoomClosed(string reason)
+    {
+        ShowDrop("房间已关闭", string.IsNullOrEmpty(reason) ? "房间已关闭。" : reason,
+                 LobbyMenuScenePath);
+    }
+
+    // Mode rather than IsLobby: a real drop has already torn the lobby client down by the time this
+    // runs, and the question is which menu this GAME belongs to.
+    private bool IsLobbyGame() => Net != null && Net.Mode == ReplayData.ModeLobby;
 
     private void BuildDropPopup()
     {
         _dropPopup = new AcceptDialog { Title = "连接断开", OkButtonText = "确定", Exclusive = true };
         AddChild(_dropPopup);
-        _dropPopup.Confirmed += () => GetTree().ChangeSceneToFile(MainMenuScenePath);
-        _dropPopup.Canceled += () => GetTree().ChangeSceneToFile(MainMenuScenePath);
+        _dropPopup.Confirmed += LeaveToDropTarget;
+        _dropPopup.Canceled += LeaveToDropTarget;
     }
+
+    private void ShowDrop(string title, string text, string target)
+    {
+        _dropTarget = target;
+        if (_dropPopup == null || _dropPopup.Visible) return;   // a second reason changes only the target
+        _dropPopup.Title = title;
+        _dropPopup.DialogText = text;
+        _dropPopup.PopupCentered();
+    }
+
+    private void LeaveToDropTarget() =>
+        GetTree().ChangeSceneToFile(string.IsNullOrEmpty(_dropTarget) ? MainMenuScenePath : _dropTarget);
 
     private void BuildPadBusyPopup()
     {

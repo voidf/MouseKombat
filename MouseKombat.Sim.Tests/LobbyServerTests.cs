@@ -170,6 +170,7 @@ internal static partial class Program
             LobbyRelayMatchTest(port, Ver);
             LobbyAiVsHumanRelayTest(port, Ver);
             LobbyRematchRelayTest(port, Ver);
+            LobbyWatcherSlotTest(port, Ver);
         }
         catch (Exception e)
         {
@@ -196,6 +197,70 @@ internal static partial class Program
                 try { proc.WaitForExit(3000); } catch { }
             }
         }
+    }
+
+    // A seatless WATCHER that leaves mid-match must free its human slot. Reserving it (the rule that
+    // belongs to FIGHTERS, whose seat the opponent is still simulating against) is what left a room
+    // advertising free space while refusing every joiner with 房间已满 — and every watcher that came
+    // and went leaked one more slot. Driven through the real LobbyRoomClient against the real server.
+    private static void LobbyWatcherSlotTest(int port, string ver)
+    {
+        using var host = new LobbyRoomClient { MatchUdpPort = 46010 };
+        host.Connect("127.0.0.1", port, "看客房主", ver);
+        host.CreateRoom(3, "", true);        // 3 humans: host + fighter + exactly one watcher
+        Check(LobbyWait(host, LobbyRoomClient.EventKind.Connected),
+            "watcher slot: room created with a 3-human cap");
+        string roomId = host.Room.RoomId;
+
+        using var fighter = new LobbyRoomClient { MatchUdpPort = 46011 };
+        fighter.Connect("127.0.0.1", port, "拳手", ver);
+        fighter.JoinRoom(roomId, "");
+        Check(LobbyWait(fighter, LobbyRoomClient.EventKind.Connected), "watcher slot: the fighter joined");
+
+        host.ClaimSeat(0);
+        fighter.ClaimSeat(1);
+        LobbyWait(host, LobbyRoomClient.EventKind.RoomChanged,
+            f => f.As<RoomSnapshot>().Seats[1].OccupantPlayerId == fighter.PlayerId);
+        host.PickCharacter(0);
+        fighter.PickCharacter(1);
+        LobbyWait(host, LobbyRoomClient.EventKind.RoomChanged,
+            f => f.As<RoomSnapshot>().Seats[0].Ready && f.As<RoomSnapshot>().Seats[1].Ready);
+        host.RequestMatchStart(new MatchStart());
+        Check(LobbyWait(host, LobbyRoomClient.EventKind.RoomChanged,
+                   f => f.As<RoomSnapshot>().MatchRunning),
+            "watcher slot: the match is running");
+
+        // the third human joins MID-MATCH as a watcher, which fills the room
+        using var watcher = new LobbyRoomClient { MatchUdpPort = 46012 };
+        watcher.Connect("127.0.0.1", port, "观战者", ver);
+        watcher.JoinRoom(roomId, "");
+        Check(LobbyWait(watcher, LobbyRoomClient.EventKind.Connected),
+            "watcher slot: the watcher joined mid-match");
+        int watcherId = watcher.PlayerId;
+        using var latecomer = new LobbyRoomClient { MatchUdpPort = 46013 };
+        latecomer.Connect("127.0.0.1", port, "迟到者", ver);
+        latecomer.JoinRoom(roomId, "");
+        Check(LobbyWait(latecomer, LobbyRoomClient.EventKind.Rejected, null, 3000),
+            "watcher slot: a full room refuses the next joiner");
+
+        // ESC on the spectate screen: leave mid-match, holding no seat
+        watcher.LeaveRoom("玩家离开了房间");
+        Check(LobbyWait(host, LobbyRoomClient.EventKind.RoomChanged,
+                   f => Array.Find(f.As<RoomSnapshot>().Players, p => p.PlayerId == watcherId) == null),
+            "watcher slot: the watcher is removed from the room, not reserved");
+        Check(host.Room != null && host.Room.Seats[1].OccupantPlayerId == fighter.PlayerId
+              && host.Room.MatchRunning,
+            "watcher slot: the FIGHTER still holds its seat while the match runs");
+        latecomer.JoinRoom(roomId, "");
+        Check(LobbyWait(latecomer, LobbyRoomClient.EventKind.Connected),
+            "watcher slot: the freed slot lets another player in to watch");
+
+        // closing the room mid-match reaches the fighter as a ROOM event, not a lost connection
+        host.LeaveRoom("主持玩家已离开房间");
+        Check(LobbyWait(fighter, LobbyRoomClient.EventKind.RoomClosed),
+            "watcher slot: closing the room mid-match tells the fighter why");
+        Check(fighter.IsConnected && !fighter.IsInRoom,
+            "watcher slot: the fighter's lobby connection survives the room");
     }
 
     // The match-channel envelope (PROTOCOL.md § Relay): pure byte contract, no sockets.
@@ -699,12 +764,19 @@ internal static partial class Program
         Check(LobbyWait(mem, LobbyRoomClient.EventKind.Connected) && !mem.IsHostPlayer,
             "lobby client: the same connection can re-join a room");
 
-        // the host player leaving destroys the room — but KEEPS its own lobby connection, in the
-        // browse phase (spec: 建房后 ESC 保持大厅连接、回到选房界面). Closing it would send the host
-        // back to the main menu and make it retype the whole lobby form.
+        // the host player leaving destroys the room — but KEEPS every connection, its own and the
+        // members', all of them in the browse phase (spec: 建房后 ESC 保持大厅连接、回到选房界面;
+        // 主持玩家退房后其它玩家保持连接回到选房界面). Closing them would send everyone back to the main
+        // menu and make them retype the whole lobby form.
         host.LeaveRoom("主持玩家已离开房间");
-        Check(LobbyWait(mem, LobbyRoomClient.EventKind.Disconnected),
-            "lobby client: the member is told when the host player leaves");
+        Check(LobbyWait(mem, LobbyRoomClient.EventKind.RoomClosed),
+            "lobby client: the member is told the ROOM closed when the host player leaves");
+        Check(mem.IsConnected && !mem.IsInRoom && mem.Room == null && mem.PlayerId == 0,
+            "lobby client: that member keeps a browsable connection and no room identity");
+        mem.ListRooms(0);
+        Check(LobbyWait(mem, LobbyRoomClient.EventKind.LobbyRooms,
+                   f => Array.TrueForAll(f.As<LobbyRooms>().Entries, e => e.RoomId != roomId)),
+            "lobby client: it re-lists on the same socket and the dead room is gone");
         Check(!host.IsHostPlayer && host.Room == null && host.PlayerId == 0,
             "lobby client: a host player that left keeps no room identity");
         host.ListRooms(0);
@@ -839,19 +911,20 @@ internal static partial class Program
         Check(entry != null && entry.HostName == "房主" && entry.Players == 2 && entry.MaxPlayers == 4,
             "lobby: the room appears with host name / player counts");
 
-        // ---- host player leaving destroys the room ----
+        // ---- host player leaving destroys the room, but NOT the members' connections ----
+        // Bye ends the ROOM (spec: 主持玩家退房后其它玩家保持连接回到选房界面刷新房间列表). Closing the
+        // member's socket is what used to throw everyone back to the main menu with the lobby form to
+        // retype.
         host.Send(MsgType.Bye, new Bye { Reason = "房主离开" });
         var bye = mem.Wait<Bye>(MsgType.Bye);
-        Check(bye.Body != null, "lobby: host leaving broadcasts Bye to members");
-        bool eof = false;
-        long deadline = Environment.TickCount64 + 3000;
-        while (!eof && Environment.TickCount64 < deadline)
-        {
-            mem.Poll();
-            eof = mem.Dead;
-            if (!eof) Thread.Sleep(10);
-        }
-        Check(eof, "lobby: the server closes the member's connection");
+        Check(bye.Body != null && bye.As<Bye>().Reason == "房主离开",
+            "lobby: host leaving broadcasts Bye to members, with the reason");
+        mem.Send(MsgType.LobbyList, new LobbyList { Page = 0 });
+        var afterBye = mem.Wait<LobbyRooms>(MsgType.LobbyRooms);
+        Check(afterBye.Body != null && !mem.Dead,
+            "lobby: the member keeps its connection and browses again after the room died");
+        Check(Array.TrueForAll(afterBye.As<LobbyRooms>().Entries, e => e.RoomId != roomId),
+            "lobby: the destroyed room is gone from the list");
     }
 
     private static string FindPython()

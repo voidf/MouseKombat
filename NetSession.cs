@@ -62,6 +62,12 @@ public partial class NetSession : Node
     public event Action<LobbyRooms> LobbyRoomsReceived;
     public event Action<string> LobbyRejected;
 
+    // The lobby ROOM ended under us (its host player left, or we were kicked) while the lobby
+    // CONNECTION stayed alive. Every screen that shows a room listens: it tells the player why and
+    // returns to the room browser, which still has a live connection to page (PROTOCOL.md § Lobby).
+    // Never raised for a real drop — that is Disconnected.
+    public event Action<string> LobbyRoomClosed;
+
     // ---- match channel ----
     //
     // UDP for the rollback session, on the SAME port number as the room's TCP port (PROTOCOL.md
@@ -739,6 +745,17 @@ public partial class NetSession : Node
                 case LobbyRoomClient.EventKind.Rejected:
                     // Non-fatal: the lobby menu shows the reason and stays put.
                     LobbyRejected?.Invoke(e.Detail ?? "操作被拒绝");
+                    break;
+                case LobbyRoomClient.EventKind.RoomClosed:
+                    // The room died, the connection did not. Drop everything room- and match-scoped
+                    // (the client already dropped the room identity) and let the screens land on the
+                    // browser — the same clean-up LeaveLobbyRoom does, minus the Bye we did not send.
+                    EndMatchLocal();
+                    Room = null;
+                    PendingCatchUp = null;
+                    PendingStreamInputs.Clear();
+                    _lockedDevices.Clear();
+                    LobbyRoomClosed?.Invoke(e.Detail ?? "房间已关闭");
                     break;
                 case LobbyRoomClient.EventKind.Disconnected:
                 {

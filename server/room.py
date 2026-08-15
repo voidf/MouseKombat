@@ -13,6 +13,8 @@ Seat/player/member rules (PROTOCOL.md § Room state):
   holds itself. The AI runs on the host player's machine and consumes no player slot.
 * A match may start only when both seats are occupied and each has a character.
 * MaxPlayers counts HUMANS (AI seats are driven by the host player, so they consume no slot).
+* A mid-match drop reserves the player's slot ONLY while they hold a fighting seat (holds_seat);
+  a seatless watcher frees its slot the moment it leaves.
 """
 
 from __future__ import annotations
@@ -90,11 +92,19 @@ class RoomState:
             self.host_player_id = 0
 
     def mark_disconnected(self, player_id: int) -> None:
-        """Mid-match drop. The seat is NOT freed and the player is NOT removed: their inputs
-        are treated as neutral for the rest of the round, and the kick happens at match end."""
+        """Mid-match drop of a FIGHTER (see holds_seat). The seat is NOT freed and the player is NOT
+        removed: their inputs are treated as neutral for the rest of the round, and the kick happens
+        at match end."""
         p = self._players.get(player_id)
         if p is not None:
             p.connected = False
+
+    def holds_seat(self, player_id: int) -> bool:
+        """Does this player occupy a fighting seat? Only a seat holder gets the mid-match reserve
+        treatment: the opponent is simulating against that seat. A seatless watcher leaving mid-match
+        changes nothing about the match, so its human slot is freed immediately."""
+        p = self._players.get(player_id)
+        return p is not None and p.seat >= 0
 
     @property
     def disconnected_ids(self):

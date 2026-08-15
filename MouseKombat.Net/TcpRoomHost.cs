@@ -361,10 +361,11 @@ public sealed class TcpRoomHost : IDisposable
             _conns.RemoveAt(i);
 
             if (pid == 0) continue;
-            if (Room.MatchRunning)
+            if (Room.MatchRunning && Room.HoldsSeat(pid))
             {
                 // Mid-match: keep the seat and the player, mark them dropped. The opponent is still
-                // simulating against that seat, so freeing it now would change the match.
+                // simulating against that seat, so freeing it now would change the match. A SEATLESS
+                // watcher gets no such reserve — it leaves the room outright (see RoomState.HoldsSeat).
                 Room.MarkDisconnected(pid);
             }
             else

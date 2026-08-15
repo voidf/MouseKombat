@@ -285,24 +285,96 @@ async def run_scenarios(host, port, udp_port):
     check(f is not None and f[1] == report,
           "catchup: fighter's MatchInputReport reaches the host player")
 
-    # ---- mid-match member drop: marked disconnected, kicked at match end ----
-    drop = FakeClient(host, port, "掉线者", udp_port=40002)
-    await drop.connect()
-    await drop.hello()
-    w = await drop.join(hostc.room_id)
-    drop_id = w[0]
+    # ---- mid-match WATCHER leaves: its human slot is freed at once ----
+    # The reserve-the-slot rule is for FIGHTERS (the opponent simulates against their seat). A seatless
+    # watcher that walks out mid-match must free its slot immediately, or the room advertises "2/4 人"
+    # and answers every joiner with 房间已满 — and each leave/re-join cycle leaks one more slot.
+    watcher = FakeClient(host, port, "观战者", udp_port=40002)
+    await watcher.connect()
+    await watcher.hello()
+    w = await watcher.join(hostc.room_id)
+    watcher_id = w[0]
     await hostc.recv_until(MSG_LOBBY_PLAYER_JOINED)
-    drop.close()   # abrupt disconnect mid-match
-    f = await hostc.wait_room_state(
-        lambda s: drop_id in [p[0] for p in s[0]]
-                  and {p[0]: p[4] for p in s[0]}[drop_id] is False)
-    check(f is not None, "drop: mid-match disconnect marks Connected=false, keeps the player")
-    await hostc.send(MSG_MATCH_RESULT, [0])
-    f = await mem.recv_until(MSG_MATCH_ENDED)
-    check(f is not None and f[1][1] == [drop_id], "drop: match end kicks the dropped player")
-    f = await mem.wait_room_state(
+    await watcher.send(MSG_BYE, ["玩家离开了房间"])
+    f = await hostc.wait_room_state(lambda s: watcher_id not in [p[0] for p in s[0]])
+    check(f is not None, "spectate: a mid-match watcher leaving is removed from the room")
+    watcher.close()
+    # Same for an abrupt drop, and the freed slot really is re-usable: fill the room to its cap with
+    # watchers that come and go, then prove a fresh client still gets in.
+    ghosts_ok = True
+    for i in range(3):
+        ghost = FakeClient(host, port, f"幽灵{i}", udp_port=40200 + i)
+        await ghost.connect()
+        await ghost.hello()
+        ghosts_ok = ghosts_ok and await ghost.join(hostc.room_id) is not None
+        await hostc.recv_until(MSG_LOBBY_PLAYER_JOINED)
+        ghost.close()          # abrupt mid-match disconnect, no seat held
+        await hostc.wait_room_state(lambda s: len(s[0]) == 2)
+    check(ghosts_ok, "spectate: each watcher can join while the match runs")
+    late = FakeClient(host, port, "迟到观战", udp_port=40203)
+    await late.connect()
+    await late.hello()
+    check(await late.join(hostc.room_id) is not None,
+          "spectate: watchers coming and going mid-match leak no slots (room still joinable)")
+    await hostc.recv_until(MSG_LOBBY_PLAYER_JOINED)
+    # The browser's count is the one the capacity check uses, so a listed free slot is a real one.
+    lc = FakeClient(host, port, "数人头", udp_port=40204)
+    await lc.connect()
+    await lc.hello()
+    await lc.send(MSG_LOBBY_LIST, [0])
+    f = await lc.recv_until(MSG_LOBBY_ROOMS)
+    entry = next((e for e in f[1][2] if e[0] == hostc.room_id), None) if f else None
+    check(entry is not None and entry[3] == 3,
+          "list: the advertised player count matches the room's real occupancy")
+    lc.close()
+    await late.send(MSG_BYE, ["玩家离开了房间"])
+    await hostc.wait_room_state(lambda s: late.player_id not in [p[0] for p in s[0]])
+    late.close()
+
+    # ---- mid-match FIGHTER drop: seat reserved, kicked at match end ----
+    # A separate room so the running match above is not disturbed.
+    fr_host = FakeClient(host, port, "掉线房主", udp_port=40210)
+    await fr_host.connect()
+    await fr_host.hello()
+    await fr_host.create(4)
+    fr_mem = FakeClient(host, port, "掉线拳手", udp_port=40211)
+    await fr_mem.connect()
+    await fr_mem.hello()
+    await fr_mem.join(fr_host.room_id)
+    await fr_host.recv_until(MSG_LOBBY_PLAYER_JOINED)
+    await fr_host.claim(0)
+    await fr_mem.claim(1)
+    await fr_host.wait_room_state(
+        lambda s: s[1][0][0] == fr_host.player_id and s[1][1][0] == fr_mem.player_id)
+    await fr_host.pick(0)
+    await fr_mem.pick(1)
+    await fr_host.wait_room_state(lambda s: s[1][0][1] == 0 and s[1][1][1] == 1)
+    await fr_host.send(MSG_MATCH_START, [40.0, 760.0, 800.0, 120.0, 560.0, 650.0, 560.0])
+    await fr_host.recv_until(MSG_START_MATCH)
+    fr_mem_id = fr_mem.player_id
+    fr_mem.close()   # abrupt disconnect mid-match, holding seat 1
+    f = await fr_host.wait_room_state(
+        lambda s: fr_mem_id in [p[0] for p in s[0]]
+                  and {p[0]: p[4] for p in s[0]}[fr_mem_id] is False
+                  and s[1][1][0] == fr_mem_id)
+    check(f is not None,
+          "drop: a mid-match fighter keeps its seat and is marked Connected=false")
+    await fr_host.send(MSG_MATCH_RESULT, [0])
+    f = await fr_host.recv_until(MSG_MATCH_ENDED)
+    check(f is not None and f[1][1] == [fr_mem_id], "drop: match end kicks the dropped fighter")
+    f = await fr_host.wait_room_state(
         lambda s: s[4] is False and all(x[0] == 0 and not x[2] for x in s[1]))
     check(f is not None, "drop: seats cleared after the match")
+    await fr_host.send(MSG_BYE, ["主持玩家已离开房间"])
+    fr_host.close()
+
+    # ---- back to the first room: end its match so the seats are free again ----
+    await hostc.send(MSG_MATCH_RESULT, [0])
+    f = await mem.recv_until(MSG_MATCH_ENDED)
+    check(f is not None, "match: MatchResult ends the first room's match")
+    f = await mem.wait_room_state(
+        lambda s: s[4] is False and all(x[0] == 0 and not x[2] for x in s[1]))
+    check(f is not None, "match: seats cleared after the match")
 
     # ---- re-pick after the match, second match starts ----
     await hostc.claim(0)
@@ -396,6 +468,19 @@ async def run_scenarios(host, port, udp_port):
     f = await guest.recv_until(MSG_BYE)
     check(f is not None and f[1][0] == "主持玩家已离开房间",
           "host leave: the room is destroyed and the members are told why")
+    # The GUEST's connection must survive the room it was in (spec: 主持玩家退房后其它玩家保持连接回到
+    # 选房界面刷新房间列表). Closing it threw every member back to the main menu with the lobby form to
+    # retype — the whole point of the Bye is to explain the ROOM ending, not the connection.
+    await guest.send(MSG_LOBBY_LIST, [0])
+    f = await guest.recv_until(MSG_LOBBY_ROOMS)
+    check(f is not None and doomed_room not in [e[0] for e in f[1][2]],
+          "host leave: a member keeps its connection and browses again (the room is gone)")
+    w = await guest.join(hostc.room_id)
+    check(w is not None and w[1] is False,
+          "host leave: that member re-joins another room on the same connection")
+    await hostc.recv_until(MSG_LOBBY_PLAYER_JOINED)
+    await guest.send(MSG_BYE, ["玩家离开了房间"])
+    await hostc.wait_room_state(lambda s: guest.player_id not in [p[0] for p in s[0]])
     await byehost.send(MSG_LOBBY_LIST, [0])
     f = await byehost.recv_until(MSG_LOBBY_ROOMS)
     check(f is not None and doomed_room not in [e[0] for e in f[1][2]],
@@ -409,16 +494,18 @@ async def run_scenarios(host, port, udp_port):
     byehost.close()
     guest.close()
 
-    # ---- host player DISCONNECTS -> room destroyed, members told ----
+    # ---- host player DISCONNECTS -> room destroyed, members told, their connections KEPT ----
     hostc.close()
     f = await mem.recv_until(MSG_BYE)
-    check(f is not None and f[1][0] == "连接断开",
-          "destroy: host leaving broadcasts Bye to members")
-    try:
-        await mem.recv(timeout=1.0)
-        check(False, "destroy: member connection closed by the server")
-    except ConnectionError:
-        check(True, "destroy: member connection closed by the server")
+    check(f is not None and f[1][0] == "主持玩家已断开连接",
+          "destroy: a host player dropping tells the members why (from THEIR point of view)")
+    await mem.send(MSG_LOBBY_LIST, [0])
+    f = await mem.recv_until(MSG_LOBBY_ROOMS)
+    check(f is not None, "destroy: the member's connection survives the destroyed room")
+    await mem.create(4, "", False)   # and it is a plain browser again: it can host its own room
+    check(mem.player_id != 0, "destroy: the former member can create a room on the same connection")
+    await mem.send(MSG_BYE, ["主持玩家已离开房间"])
+    mem.close()
 
     # ---- list paging + searchable + password + full room ----
     # Keep every creator alive: GC of the client object closes its connection, and a host

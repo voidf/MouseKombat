@@ -31,6 +31,10 @@ public sealed class LobbyRoomClient : IDisposable
         LobbyRooms,        // a LobbyList page arrived (browse phase)
         LobbyPlayerJoined, // the server tells the HOST PLAYER someone joined (catch-up hook)
         InputReport,       // the server forwards a fighter's MatchInputReport to the HOST PLAYER
+        // The room we were in is gone (its host player left / we were kicked) but the CONNECTION is
+        // alive and back in the browse phase. Distinct from Disconnected on purpose: the screens
+        // return to the room browser instead of the main menu, and nothing has to reconnect.
+        RoomClosed,
     }
 
     public readonly struct ClientEvent
@@ -265,10 +269,28 @@ public sealed class LobbyRoomClient : IDisposable
                     Emit(EventKind.InputReport, null, frame);
                     break;
                 case MsgType.Bye:
-                    LastError = frame.As<Bye>().Reason;
-                    Emit(EventKind.Disconnected, LastError);
+                {
+                    string why = frame.As<Bye>().Reason;
+                    if (_stage == Stage.Room)
+                    {
+                        // The ROOM is gone (its host player left, or we were kicked) — the CONNECTION
+                        // is not: the server keeps this socket in the browse phase, so the caller
+                        // lands back on the room browser without reconnecting (PROTOCOL.md § Lobby).
+                        // Every scrap of room identity goes with the room, exactly as in LeaveRoom: a
+                        // stale IsHostPlayer would hand host rights in the next room we join.
+                        _stage = Stage.Lobby;
+                        IsHostPlayer = false;
+                        PlayerId = 0;
+                        Room = null;
+                        Emit(EventKind.RoomClosed, why);
+                        break;
+                    }
+                    // Outside a room a Bye is the server saying goodbye for good.
+                    LastError = why;
+                    Emit(EventKind.Disconnected, why);
                     Shutdown();
                     return;
+                }
             }
         }
 

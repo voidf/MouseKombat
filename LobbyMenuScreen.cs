@@ -80,23 +80,27 @@ public partial class LobbyMenuScreen : Control
         SetStatus("");
 
         BuildPopups();
-        ShowBrowser(false);
-        SetStatus("");
 
-        // Came back from a room (ESC on the seat or spectate screen): the lobby connection is STILL
-        // ALIVE — the server keeps it in the browse phase — so the browser just asks for the first
-        // page again and reappears.
+        // Came back from a room (ESC on the seat or spectate screen, or the host closed the room): the
+        // lobby connection is STILL ALIVE — the server keeps it in the browse phase — so this screen
+        // opens DIRECTLY on the browser and refreshes it in place. Showing the connect form first and
+        // swapping it for the browser when the answer arrived is what made ESC flash "连接大厅" for a
+        // whole round-trip before the room list appeared.
         //
         // NOTHING here ever dials the server. A dead connection means the player went out through the
         // main menu (or the link dropped), and re-entering this screen must land on the FORM with the
         // last values filled in, waiting for the button — reconnecting on its own took the choice of
         // name/address/port away from the player.
         var net = NetSession.Instance;
-        if (net != null && net.Active && net.IsLobby)
+        bool connected = net != null && net.Active && net.IsLobby;
+        ShowBrowser(connected);
+        if (connected)
         {
-            SetStatus("");
+            SetStatus("正在刷新房间列表…");
+            ShowLoadingList();
             net.RequestLobbyList(0);
         }
+        else SetStatus("");
 
         if (Net != null)
         {
@@ -246,6 +250,21 @@ public partial class LobbyMenuScreen : Control
     public void OnPrevPagePressed() => ListPage(_page - 1);
     public void OnNextPagePressed() => ListPage(_page + 1);
     public void OnRefreshPressed() => ListPage(_page);
+
+    // The browser panel before its first answer. ESC out of a room shows the panel INSTANTLY while the
+    // list is still a round-trip away, so it needs to say what it is doing instead of being an empty box.
+    private void ShowLoadingList()
+    {
+        if (RoomList == null) return;
+        foreach (var c in RoomList.GetChildren()) c.QueueFree();
+        var l = new Label { Text = "正在刷新房间列表…" };
+        l.AddThemeFontSizeOverride("font_size", 14);
+        l.AddThemeColorOverride("font_color", new Color(0.6f, 0.63f, 0.72f));
+        RoomList.AddChild(l);
+        if (PageLabel != null) PageLabel.Text = $"第 1 / {Mathf.Max(1, _totalPages)} 页";
+        if (PrevPageButton != null) PrevPageButton.Disabled = true;
+        if (NextPageButton != null) NextPageButton.Disabled = true;
+    }
 
     private void ListPage(int page)
     {
@@ -434,6 +453,9 @@ public partial class LobbyMenuScreen : Control
         // browser is up they must disappear or they draw over it.
         GetNodeOrNull<Control>("Form")?.SetVisible(show == false);
         GetNodeOrNull<Control>("Explain")?.SetVisible(show == false);
+        // The pad's A fallback presses DefaultFocus, so it must follow whichever panel is on screen —
+        // pointing at the hidden connect button would fire a connect from the browser.
+        if (_menuPad != null) _menuPad.DefaultFocus = show ? RefreshButton : ConnectButton;
         if (show) RefreshButton?.GrabFocus();
     }
 

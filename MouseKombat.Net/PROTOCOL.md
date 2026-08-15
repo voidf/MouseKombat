@@ -59,7 +59,9 @@ Directory rules:
   slot, matching § Room state); the hard cap is 4 humans regardless of the configured limit.
 * `LobbyList{page}` returns `LobbyRooms{page, totalPages, entries}` with entries
   `[roomId, hostName, hasPassword, players, maxPlayers]` — **searchable rooms only**, sorted newest
-  first, 10 per page.
+  first, 10 per page. `players` is the count the capacity check uses (room players, which includes a
+  mid-match fighter's reserved slot), never the count of live connections: an entry that advertises a
+  free slot must be joinable.
 * Room id: 6 random digits, shown in the seat screen (`RoomSnapshot.RoomId`) and on the wire in the
   UDP envelope as the numeric u32.
 * A room with a password can only be joined with the exact 4-digit password.
@@ -100,12 +102,19 @@ routes:
   can serve a catch-up to the newcomer (the LAN `PlayerJoined` event, on the wire).
 
 A host player that disconnects (or quits) destroys the room: the OTHER members are told with `Bye`
-and their connections close (spec: 主持玩家 ESC/强退时其它玩家弹窗提示连接断开). The leaver's own
-connection is never one of them — **every leaver, host player or not, returns to the browse phase**
-with the room's identity dropped (player id, host rights, learned match endpoint), so the same socket
-pages the room list and creates/joins again. That is what lets a client show the browser after ESC
-without reconnecting (spec: ESC 退出房间后回到选房界面; 建房后 ESC 保持大厅连接). A non-host member
-disconnecting mid-match is marked disconnected and kicked at match end, exactly like LAN (§ Ending).
+(spec: 主持玩家 ESC/强退时其它玩家弹窗提示) — but **`Bye` ends the ROOM, never the connection**. Every
+member of a destroyed room, and every leaver whether host player or not, **returns to the browse
+phase** with the room's identity dropped (player id, host rights, learned match endpoint), so the same
+socket pages the room list and creates/joins again. That is what lets a client show the browser after
+ESC or after the host closed the room, without reconnecting and without retyping the lobby form (spec:
+ESC 退出房间后回到选房界面; 建房后 ESC 保持大厅连接; 主持玩家退房后其它玩家保持连接回到选房界面).
+The one `Bye` that does close a connection is the server shutting down.
+
+A member leaving mid-match keeps its slot reserved **only while it holds a fighting seat**: the
+opponent is still simulating against that seat, so the seat stays claimed, the player stays in the
+snapshot as `Connected=false`, and the kick happens at match end (§ Ending, same as LAN). A
+**seatless watcher** changes nothing about the match, so it is removed outright and its human slot is
+free at once — reserving it left rooms advertising `2/4 人` that refused every joiner with 房间已满.
 
 ## Relay (lobby only)
 
@@ -316,9 +325,11 @@ be a race with every other process on the machine.
 ### Ending
 
 After a knockout the host sends `MatchEnded`; everyone returns to seat select and the seat/character
-state is cleared, so the room re-picks. A player who dropped during the match is kicked at that
+state is cleared, so the room re-picks. A **fighter** who dropped during the match is kicked at that
 point, not mid-round: mid-round their inputs are simply treated as neutral (the rollback session
 derives that from its own `Disconnected` flag, so both machines substitute neutral on the same frames).
+A dropped member that held **no seat** is not kept at all — it leaves the room the moment it goes, so
+its human slot is free immediately (`RoomState.HoldsSeat` / `room.py holds_seat` decide which is which).
 
 In-match `Esc` is disabled: one player walking out mid-round would leave the other simulating against
 a seat nobody drives, and the rules above already decide when a match ends.

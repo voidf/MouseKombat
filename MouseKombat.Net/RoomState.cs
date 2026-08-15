@@ -60,13 +60,21 @@ public sealed class RoomState
         if (HostPlayerId == playerId) HostPlayerId = 0;
     }
 
-    // Mid-match drop. The seat is NOT freed and the player is NOT removed: their inputs are treated
-    // as neutral for the rest of the round, and the kick happens when the match ends. Freeing the
-    // seat mid-round would change what the other side is simulating against.
+    // Mid-match drop of a FIGHTER (see HoldsSeat). The seat is NOT freed and the player is NOT
+    // removed: their inputs are treated as neutral for the rest of the round, and the kick happens
+    // when the match ends. Freeing the seat mid-round would change what the other side is simulating
+    // against.
     public void MarkDisconnected(int playerId)
     {
         if (_players.TryGetValue(playerId, out var p)) p.Connected = false;
     }
+
+    // Does this player occupy a fighting seat? Only a seat holder gets the mid-match reserve above:
+    // a seatless watcher leaving changes nothing about the match, so it must be removed outright —
+    // reserving its slot is what left a lobby room advertising free space while refusing every joiner
+    // with 房间已满.
+    public bool HoldsSeat(int playerId) =>
+        _players.TryGetValue(playerId, out var p) && p.Seat >= 0;
 
     public IEnumerable<int> DisconnectedPlayerIds =>
         _players.Values.Where(p => !p.Connected).Select(p => p.PlayerId).ToArray();
