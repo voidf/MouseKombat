@@ -172,6 +172,18 @@ internal static partial class Program
                 "lobby plan: the host player drives an AI seat like a LAN host");
             Check(host.RemoteEndPoint == null, "lobby plan: no peer when every seat is local");
         }
+
+        // K. the seat screen's PREVIEW of a lobby start: it has no StartMatch yet, so no hub
+        // endpoint — but the server owns that refusal. The preview must report the real role
+        // (Fighter), not an Idle that blocks "开始对战".
+        {
+            var room = Room(
+                players: new[] { P(1, "H", host: true, seat: 0), P(2, "C", host: false, seat: 1) },
+                seat0: Human(1, CharacterId.Hamster), seat1: Human(2, CharacterId.Kangaroo));
+            var preview = MatchPlan.Build(room, 1, true, null, null, lobby: true);
+            Check(preview.Role == MatchRole.Fighter,
+                "lobby plan: a hub-less preview of a lobby start is still a Fighter");
+        }
     }
 
     // ---- the host as a UDP forwarder ----

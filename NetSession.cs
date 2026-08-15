@@ -371,6 +371,14 @@ public partial class NetSession : Node
                 LobbySocket = new LobbyMatchSocket(MatchSocket, roomIdNum, mySeat, 1 - mySeat);
             }
         }
+        // Belt and braces for the one path a lobby fighter has no hub endpoint: a StartMatch that
+        // failed to carry the server's match port. Nothing to dial and no envelope — refusing here
+        // beats letting Backdash bind an arbitrary port that nobody is listening on.
+        if (IsLobby && Plan.Role == MatchRole.Fighter && Plan.RemoteEndPoint == null && !Plan.DrivesAnySeat)
+        {
+            Plan.Role = MatchRole.Idle;
+            Plan.Problem = "服务器未提供对局端口";
+        }
         MatchStarting?.Invoke(setup);
     }
 

@@ -81,6 +81,20 @@ public partial class LobbyMenuScreen : Control
 
         BuildPopups();
         ShowBrowser(false);
+        SetStatus("");
+
+        // Came back from a room (the seat screen's Esc on a lobby member): the room connection is
+        // gone — leaving a room closes the lobby connection by protocol — but the player expects
+        // to land back in the BROWSER, not at the connect form. Reconnect to the same lobby
+        // automatically; the browser panel appears when the first page answers.
+        var net = NetSession.Instance;
+        if (net != null && !net.Active && net.Mode == ReplayData.ModeLobby
+            && !string.IsNullOrEmpty(net.HostAddress))
+        {
+            SetStatus($"正在重新连接大厅 {net.HostAddress}:{net.Port}…");
+            net.ConnectLobby(net.HostAddress, net.Port, net.PlayerName);
+            net.RequestLobbyList(0);
+        }
 
         if (Net != null)
         {
@@ -153,10 +167,12 @@ public partial class LobbyMenuScreen : Control
 
     // The browse connection is established asynchronously (DNS + TCP); the FIRST list page is
     // requested right after the connect call, so it is answered the moment the server sees us.
-    // Once the server answers LobbyRooms the browser panel shows.
+    // Once the server answers LobbyRooms the browser panel shows — and the "正在连接/加载…" status
+    // text is cleared, it has served its purpose.
     private void OnLobbyRooms(LobbyRooms rooms)
     {
         SetBusy(false);
+        SetStatus("");
         _page = rooms.Page;
         _totalPages = Mathf.Max(1, rooms.TotalPages);
         ShowBrowser(true);

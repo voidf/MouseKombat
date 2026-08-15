@@ -110,7 +110,10 @@ public sealed class MatchPlan
                     // (spec: 走房主中转，不做 P2P; the lobby server relays). So no client ever
                     // learns another client's address.
                     plan.RemoteEndPoint = hostMatchEp;
-                    if (plan.RemoteEndPoint == null)
+                    // In a lobby a null hub endpoint only ever appears on the seat screen's
+                    // PREVIEW (the real StartMatch always carries the server's match port); the
+                    // server owns the announced-port refusal, so a preview must stay a Fighter.
+                    if (plan.RemoteEndPoint == null && !lobby)
                     {
                         plan.Role = MatchRole.Idle;
                         plan.Problem = "缺少对局端口";

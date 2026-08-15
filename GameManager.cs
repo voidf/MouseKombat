@@ -225,7 +225,12 @@ public partial class GameManager : Node2D, IMatchPresenter
         }
         catch (System.Exception e)
         {
+            // Keep the full picture in the log: which socket/port the session was handed decides
+            // whether a lobby match can even start, and a null socket with a leftover LAN port is
+            // exactly the kind of mismatch that shows up only in a real room.
             GD.PushError($"[GameManager] rollback session failed: {e}");
+            GD.PushError($"[GameManager] setup: role={_plan?.Role} lobbySocket={net?.LobbySocket?.GetType().Name}" +
+                         $" port={net?.MatchUdpPort} remote={_plan?.RemoteEndPoint}");
             SetNetStatus($"无法建立对局同步：{e.Message}");
             _recording = null;
             ShowNetDrop($"无法建立对局同步：{e.Message}");
