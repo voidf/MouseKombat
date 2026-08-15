@@ -65,10 +65,6 @@ public sealed class LobbyMatchSocket : IPeerSocket, IDisposable
 
     private readonly IPeerSocket _inner;
     private readonly byte[] _envelope = new byte[LobbyEnvelope.HeaderBytes];
-    // Receive scratch only. Sends allocate a fresh buffer per datagram: Backdash's socket may keep
-    // a reference to the handed buffer past the SendToAsync call (it runs its own IO thread), so a
-    // shared send buffer could be overwritten by the next frame before the bytes actually went out.
-    private readonly byte[] _rx = new byte[ScratchSize];
 
     public LobbyMatchSocket(IPeerSocket inner, int roomId, int srcSlot, int dstSlot)
     {
@@ -87,15 +83,17 @@ public sealed class LobbyMatchSocket : IPeerSocket, IDisposable
     // six bytes out of every frame (16-byte handshake packets became 10 and never synchronized).
     public async ValueTask<SocketReceiveFromResult> ReceiveAsync(Memory<byte> buffer, CancellationToken ct)
     {
-        var res = await _inner.ReceiveAsync(_rx, ct);
-        _rx.AsSpan(0, res.ReceivedBytes).CopyTo(buffer.Span);
+        byte[] scratch = new byte[ScratchSize];   // per call: concurrent receives must not share
+        var res = await _inner.ReceiveAsync(scratch, ct);
+        scratch.AsSpan(0, res.ReceivedBytes).CopyTo(buffer.Span);
         return new SocketReceiveFromResult { ReceivedBytes = res.ReceivedBytes, RemoteEndPoint = res.RemoteEndPoint };
     }
 
     public async ValueTask<int> ReceiveFromAsync(Memory<byte> buffer, SocketAddress address, CancellationToken ct)
     {
-        int n = await _inner.ReceiveFromAsync(_rx, address, ct);
-        _rx.AsSpan(0, n).CopyTo(buffer.Span);
+        byte[] scratch = new byte[ScratchSize];   // per call: concurrent receives must not share
+        int n = await _inner.ReceiveFromAsync(scratch, address, ct);
+        scratch.AsSpan(0, n).CopyTo(buffer.Span);
         return n;
     }
 

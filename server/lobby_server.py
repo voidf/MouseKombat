@@ -511,15 +511,26 @@ class LobbyServer:
     # ---- UDP (match relay) ----
 
     def _handle_udp(self, data: bytes, addr):
+        # Belt and braces: an exception here would kill the whole UDP protocol (asyncio does not
+        # catch datagram_received errors), taking every match in every room down with it. UDP
+        # traffic is best-effort by design; drop the datagram, keep the server alive.
+        try:
+            self._handle_udp_inner(data, addr)
+        except Exception as e:  # noqa: BLE001
+            log.warning("udp handler error: %s", e)
+
+    def _handle_udp_inner(self, data: bytes, addr):
         if len(data) < 6:
             return
         room_id = int.from_bytes(data[0:4], "little")
         src, dst = data[4], data[5]
         room = self.rooms.get(room_id)
         if room is None:
+            log.warning("udp drop: room %d not found (from %s)", room_id, addr)
             return
         state = room.state
         if not state.match_running:
+            log.warning("udp drop: room %d not running (from %s)", room_id, addr)
             return   # only match traffic travels on UDP
         if src not in (0, 1) or dst not in (0, 1) or src == dst:
             return
@@ -542,6 +553,8 @@ class LobbyServer:
         # port — that is the cross-member injection hole (two members behind one NAT share an IP).
         learned = (ip, addr[1])
         if msrc.udp_endpoint is not None and msrc.udp_endpoint != learned:
+            log.warning("udp drop: pinned endpoint mismatch room %d seat %d (learned %s, got %s)",
+                        room_id, src, msrc.udp_endpoint, learned)
             return
         msrc.udp_endpoint = learned
         if mdst.udp_endpoint is not None:
@@ -549,6 +562,7 @@ class LobbyServer:
         else:
             target = (mdst.tcp_ip, mdst.announced_udp_port)   # initial guess
         if target[1] <= 0:
+            log.warning("udp drop: dst %s has no port (room %d)", mdst.name, room_id)
             return
         try:
             self._udp_transport.sendto(data[6:], target)

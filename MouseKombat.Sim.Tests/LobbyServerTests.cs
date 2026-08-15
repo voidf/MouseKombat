@@ -122,6 +122,24 @@ internal static partial class Program
             CreateNoWindow = true,
         };
         using var proc = Process.Start(psi);
+        // Drain the server's output CONTINUOUSLY on a background thread. Python's logging blocks
+        // once the redirected pipe's buffer fills (8 KB), which freezes the asyncio event loop —
+        // the server then silently stops accepting connections and the lobby "hangs" for every
+        // following client. The queue also preserves the log for the failure dump.
+        var serverLog = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        void Drain(TextReader r)
+        {
+            try
+            {
+                string line;
+                while ((line = r.ReadLine()) != null) serverLog.Enqueue(line);
+            }
+            catch { }
+        }
+        var drainErr = new Thread(() => Drain(proc.StandardError)) { IsBackground = true };
+        var drainOut = new Thread(() => Drain(proc.StandardOutput)) { IsBackground = true };
+        drainErr.Start();
+        drainOut.Start();
 
         // Wait until the TCP listener accepts, or the process dies on us (bad import etc.).
         bool ready = false;
@@ -149,6 +167,14 @@ internal static partial class Program
             LobbyEnvelopeTests();
             RunLobbyClientScenario(port, Ver);
             LobbyRelayMatchTest(port, Ver);
+            LobbyRematchRelayTest(port, Ver);
+        }
+        catch (Exception e)
+        {
+            // A crash inside a scenario must still kill the server: an NRE leaked a python process
+            // (and its port) on every failing run before this guard existed.
+            Console.WriteLine($"FAIL lobby scenario crashed: {e.Message}");
+            _fail++;
         }
         finally
         {
@@ -159,13 +185,8 @@ internal static partial class Program
             {
                 try { proc.Kill(entireProcessTree: true); } catch { }
                 try { proc.WaitForExit(2000); } catch { }
-                try
-                {
-                    Console.WriteLine("--- lobby server log ---");
-                    Console.WriteLine(proc.StandardError.ReadToEnd());
-                    Console.WriteLine(proc.StandardOutput.ReadToEnd());
-                }
-                catch { }
+                Console.WriteLine("--- lobby server log ---");
+                foreach (string line in serverLog) Console.WriteLine(line);
             }
             else
             {
@@ -298,6 +319,125 @@ internal static partial class Program
             "lobby relay: side B matches a never-rewound run" + whyB);
         DrainEvents(a, "lobby relay A");
         DrainEvents(b, "lobby relay B");
+    }
+
+    // The user's exact lobby rematch scenario: a first match driven ENTIRELY by the host player
+    // (its own seat + an AI seat — a Local session with no UDP and no socket at all), then a second
+    // match against a human in the same room. The second match must synchronize through the server
+    // exactly like a fresh one; any leftover state from the Local first match would freeze it at
+    // "等待对方同步".
+    private static void LobbyRematchRelayTest(int port, string ver)
+    {
+        const int delay = 2;
+        using var sockA = BindUdp();
+        using var sockB = BindUdp();
+
+        using var host = new LobbyRoomClient { MatchUdpPort = sockA.Port };
+        host.Connect("127.0.0.1", port, "房主", ver);
+        host.CreateRoom(4, "", true);
+        Check(LobbyWait(host, LobbyRoomClient.EventKind.Connected), "lobby rematch: room created");
+        string roomId = host.Room.RoomId;
+
+        using var mem = new LobbyRoomClient { MatchUdpPort = sockB.Port };
+        mem.Connect("127.0.0.1", port, "玩家乙", ver);
+        mem.JoinRoom(roomId, "");
+        LobbyWait(mem, LobbyRoomClient.EventKind.Connected);
+
+        // ---- first match: host + AI, a Local session (no UDP, no socket) ----
+        host.ClaimSeat(0);
+        LobbyWait(host, LobbyRoomClient.EventKind.RoomChanged,
+            f => f.As<RoomSnapshot>().Seats[0].OccupantPlayerId == host.PlayerId);
+        host.PickCharacter(0);                    // the real seat screen always picks first
+        LobbyWait(host, LobbyRoomClient.EventKind.RoomChanged,
+            f => f.As<RoomSnapshot>().Seats[0].Ready);
+        host.AddAi(1, 0, "");
+        LobbyWait(host, LobbyRoomClient.EventKind.RoomChanged,
+            f => f.As<RoomSnapshot>().Seats[1].IsAi);
+        host.RequestMatchStart(new MatchStart());
+        Check(LobbyWait(host, LobbyRoomClient.EventKind.MatchStarting),
+            "lobby rematch: the host+AI first match starts");
+
+        var simL = MakeSim(240, 520);
+        var viewL = new TestPresenter(simL, NetScript);
+        using (var local = RollbackMatch.Create(simL, viewL, new MatchNetSetup
+        {
+            LocalSeat = new[] { true, true },
+            Socket = null,
+            InputDelayFrames = delay,
+        }))
+        {
+            for (int i = 0; i < 200 && local.Frame < 60; i++)
+            {
+                viewL.SetLocalFrame(local.Frame);
+                local.Tick();
+                Thread.Yield();
+            }
+            Check(local.Frame >= 60,
+                $"lobby rematch: the host+AI first match runs (frames={local.Frame})");
+        }
+        host.ReportMatchResult(0);
+        LobbyWait(mem, LobbyRoomClient.EventKind.MatchEnded);
+        LobbyWait(mem, LobbyRoomClient.EventKind.RoomChanged,
+            f => !f.As<RoomSnapshot>().MatchRunning && f.As<RoomSnapshot>().Seats[0].OccupantPlayerId == 0);
+
+        // ---- second match: host + HUMAN, Remote sessions through the server ----
+        // The sockets are the SAME ones the first match would have used (sockA/sockB): the real
+        // game reuses its ONE MatchSocket for every match of the room (see MatchSocket /
+        // NetSession), so this is the exact reuse pattern. The first match was Local (host + AI,
+        // no socket at all), which is the user's scenario: any leftover Backdash state would
+        // freeze this second match at "等待对方同步".
+        host.ClaimSeat(0);
+        mem.ClaimSeat(1);
+        LobbyWait(host, LobbyRoomClient.EventKind.RoomChanged,
+            f => f.As<RoomSnapshot>().Seats[0].OccupantPlayerId == host.PlayerId
+                 && f.As<RoomSnapshot>().Seats[1].OccupantPlayerId == mem.PlayerId);
+        host.PickCharacter(1);
+        mem.PickCharacter(2);
+        LobbyWait(host, LobbyRoomClient.EventKind.RoomChanged,
+            f => f.As<RoomSnapshot>().Seats[0].Ready && f.As<RoomSnapshot>().Seats[1].Ready);
+        host.RequestMatchStart(new MatchStart());
+        Console.WriteLine($"[dbg] first-match MatchStarting wait: "+
+            LobbyWait(host, LobbyRoomClient.EventKind.MatchStarting));
+        LobbyWait(mem, LobbyRoomClient.EventKind.MatchStarting);
+
+        int roomIdNum = int.Parse(roomId);
+        var epServer = new IPEndPoint(IPAddress.Loopback, port);
+        var simA = MakeSim(240, 520);
+        var simB = MakeSim(240, 520);
+        var viewA = new TestPresenter(simA, NetScript);
+        var viewB = new TestPresenter(simB, NetScript);
+        using var a = RollbackMatch.Create(simA, viewA, new MatchNetSetup
+        {
+            LocalSeat = new[] { true, false },
+            RemoteEndPoint = epServer,
+            Socket = new LobbyMatchSocket(sockA, roomIdNum, 0, 1),
+            InputDelayFrames = delay,
+        });
+        using var b = RollbackMatch.Create(simB, viewB, new MatchNetSetup
+        {
+            LocalSeat = new[] { false, true },
+            RemoteEndPoint = epServer,
+            Socket = new LobbyMatchSocket(sockB, roomIdNum, 1, 0),
+            InputDelayFrames = delay,
+        });
+
+        int target = NetFrames + NetOvershoot;
+        var sw = Stopwatch.StartNew();
+        bool ok = false;
+        while (sw.Elapsed < TimeSpan.FromSeconds(30))
+        {
+            host.Poll();
+            mem.Poll();
+            viewA.SetLocalFrame(a.Frame); a.Tick();
+            viewB.SetLocalFrame(b.Frame); b.Tick();
+            if (a.Frame >= target && b.Frame >= target) { ok = true; break; }
+            Thread.Yield();
+        }
+        Check(ok, $"lobby rematch: the second (human vs human) match synchronizes (A={a.Frame} B={b.Frame})");
+        Check(a.Synchronized && b.Synchronized,
+            "lobby rematch: the second match synchronized through the server");
+        DrainEvents(a, "lobby rematch A");
+        DrainEvents(b, "lobby rematch B");
     }
 
     // The REAL client class (LobbyRoomClient) against the live server: browse, create, join, seats,
