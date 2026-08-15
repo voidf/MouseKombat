@@ -71,36 +71,31 @@ public partial class LobbyMenuScreen : Control
 
         if (NameField != null)
         {
-            NameField.Text = DefaultPlayerName();
+            NameField.Text = RememberedName();
             NameField.MaxLength = NameMaxBytes;
             NameField.TextChanged += OnNameChanged;
         }
-        if (HostField != null) HostField.Text = DefaultHost;
-        if (PortField != null) PortField.Text = DefaultPort.ToString();
+        if (HostField != null) HostField.Text = RememberedHost();
+        if (PortField != null) PortField.Text = RememberedPort().ToString();
         SetStatus("");
 
         BuildPopups();
         ShowBrowser(false);
         SetStatus("");
 
-        // Came back from a room (the seat screen's Esc on a lobby member): the lobby connection is
-        // STILL ALIVE — the server keeps it in the browse phase — so the browser just asks for the
-        // first page again and reappears. If the connection was dropped meanwhile (server restart,
-        // idle timeout), reconnect to the same lobby instead.
+        // Came back from a room (ESC on the seat or spectate screen): the lobby connection is STILL
+        // ALIVE — the server keeps it in the browse phase — so the browser just asks for the first
+        // page again and reappears.
+        //
+        // NOTHING here ever dials the server. A dead connection means the player went out through the
+        // main menu (or the link dropped), and re-entering this screen must land on the FORM with the
+        // last values filled in, waiting for the button — reconnecting on its own took the choice of
+        // name/address/port away from the player.
         var net = NetSession.Instance;
-        if (net != null && net.Mode == ReplayData.ModeLobby && !string.IsNullOrEmpty(net.HostAddress))
+        if (net != null && net.Active && net.IsLobby)
         {
-            if (net.Active)
-            {
-                SetStatus("");
-                net.RequestLobbyList(0);
-            }
-            else
-            {
-                SetStatus($"正在重新连接大厅 {net.HostAddress}:{net.Port}…");
-                net.ConnectLobby(net.HostAddress, net.Port, net.PlayerName);
-                net.RequestLobbyList(0);
-            }
+            SetStatus("");
+            net.RequestLobbyList(0);
         }
 
         if (Net != null)
@@ -127,6 +122,36 @@ public partial class LobbyMenuScreen : Control
         string n = OS.GetEnvironment("USERNAME");
         if (string.IsNullOrWhiteSpace(n)) n = "玩家";
         return RoomState.SanitizeName(n, NameMaxBytes);
+    }
+
+    // The form remembers the last CONNECT (persisted in settings.cfg), falling back to the live
+    // session and then to the defaults. A player who typed a server address once should never have to
+    // type it again — that convenience is the whole job of the removed auto-connect.
+    private static string RememberedName()
+    {
+        string saved = AppSettings.Instance?.LobbyName;
+        if (!string.IsNullOrWhiteSpace(saved)) return RoomState.SanitizeName(saved, NameMaxBytes);
+        string live = NetSession.Instance?.PlayerName;
+        if (!string.IsNullOrWhiteSpace(live)) return RoomState.SanitizeName(live, NameMaxBytes);
+        return DefaultPlayerName();
+    }
+
+    private static string RememberedHost()
+    {
+        string saved = AppSettings.Instance?.LobbyHost;
+        if (!string.IsNullOrWhiteSpace(saved)) return saved;
+        var net = NetSession.Instance;
+        if (net != null && net.IsLobby && !string.IsNullOrWhiteSpace(net.HostAddress)) return net.HostAddress;
+        return DefaultHost;
+    }
+
+    private static int RememberedPort()
+    {
+        int saved = AppSettings.Instance?.LobbyPort ?? 0;
+        if (saved > 0) return saved;
+        var net = NetSession.Instance;
+        if (net != null && net.IsLobby && net.Port > 0) return net.Port;
+        return DefaultPort;
     }
 
     private void OnNameChanged(string text)
@@ -165,6 +190,9 @@ public partial class LobbyMenuScreen : Control
 
         SetStatus($"正在连接大厅 {host}:{port}…");
         SetBusy(true);
+        // Remembered for the NEXT visit to this screen, so nothing has to reconnect by itself to
+        // spare the player the retyping.
+        AppSettings.Instance?.RememberLobbyForm(NameField?.Text ?? "", host, port);
         net.ConnectLobby(host, port, NameField.Text);
         // The FIRST page rides along on the connect: LobbyRoomClient parks the op until the socket
         // exists and flushes it right after the Hello, so the browser panel opens the moment the

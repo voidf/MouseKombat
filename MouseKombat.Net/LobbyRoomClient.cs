@@ -205,6 +205,14 @@ public sealed class LobbyRoomClient : IDisposable
 
         while (_reader.TryRead(out var frame))
         {
+            // Frames that belong to a ROOM are ignored unless we are in one. After LeaveRoom the
+            // server may still have a RoomState (or a stream batch) in flight for the room we just
+            // left; accepting it would repopulate Room and bounce the player straight back into the
+            // room screen they pressed ESC out of.
+            if (_stage != Stage.Room && frame.Type is MsgType.RoomState or MsgType.StartMatch
+                    or MsgType.MatchEnded or MsgType.MatchCatchUp or MsgType.MatchInputs
+                    or MsgType.MatchInputReport or MsgType.LobbyPlayerJoined)
+                continue;
             switch (frame.Type)
             {
                 case MsgType.Welcome:
@@ -342,10 +350,19 @@ public sealed class LobbyRoomClient : IDisposable
 
     // Leave the room but KEEP the connection: the server returns it to the browse phase, so the
     // caller can page the room list and create/join again on the same socket (spec: ESC 退出房间
-    // 后回到选房界面，不断开大厅连接).
+    // 后回到选房界面，不断开大厅连接). The HOST PLAYER may use this too — the room is destroyed and
+    // the other members are dropped, but this connection survives and lands on the browser.
     public void LeaveRoom(string reason)
     {
-        if (_stage == Stage.Room && reason != null) Send(MsgType.Bye, new Bye { Reason = reason });
+        if (_stage != Stage.Room) return;
+        if (reason != null) Send(MsgType.Bye, new Bye { Reason = reason });
+        // Back to the browse phase locally as well, and with none of the room's identity left: a
+        // stale IsHostPlayer would make the screens believe this connection still owns a room (it
+        // would offer AI seats and the start button in the NEXT room it joined as a member).
+        _stage = Stage.Lobby;
+        IsHostPlayer = false;
+        PlayerId = 0;
+        Room = null;
     }
 
     private void Fail(string why)

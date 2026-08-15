@@ -221,7 +221,13 @@ public partial class GameManager : Node2D, IMatchPresenter
         try
         {
             _netMatch = RollbackMatch.Create(_sim, this, setup);
-            SetNetStatus(_plan.Role == MatchRole.Spectator ? "正在连接对局…" : "正在与对方同步…");
+            // Nothing to wait for in a session with no peer (this machine drives both seats: host +
+            // AI, or AI vs AI). Backdash emits no Synchronizing/Synchronized for a Local session, so
+            // a "正在与对方同步…" set here would never be cleared and would sit on screen for the
+            // whole match — which is exactly what the AI-vs-AI lobby round showed.
+            SetNetStatus(!_netMatch.HasRemotePeer ? ""
+                       : _plan.Role == MatchRole.Spectator ? "正在连接对局…"
+                       : "正在与对方同步…");
         }
         catch (System.Exception e)
         {
@@ -652,6 +658,19 @@ public partial class GameManager : Node2D, IMatchPresenter
                 case MatchEventKind.Synchronized:
                     SetNetStatus("");
                     break;
+                case MatchEventKind.SyncFailed:
+                    // The handshake never completed, and Backdash does not retry after this. Every
+                    // machine in the room would otherwise sit there forever — the fighters frozen on
+                    // frame 0 with "同步失败", the spectators on "正在获取对局数据…", and the room
+                    // stuck in MatchRunning with ESC disabled. So END the match: the host clears the
+                    // room state, a client reports the result, and everyone lands back on the seat
+                    // screen where the round can be started again.
+                    GD.PushWarning($"[net] {e.Text} — aborting the match back to seat select");
+                    SetNetStatus(e.Text);
+                    _pendingNetWinner = -1;
+                    _recording = null;
+                    if (_phase != Phase.Win) ReturnToSeatScreen();
+                    return;
                 default:
                     SetNetStatus(e.Text);
                     break;

@@ -1,9 +1,39 @@
-# Godot MCP 接入说明（DSH / opencode）
+# Godot MCP 接入说明（DSH / opencode / Claude Code）
 
 本文档记录本项目中 Godot-MCP-Native 插件的接入方法、正确配置格式与已踩过的坑，
 避免其它会话（DSH、Claude Code、opencode 等）重复排查。
 
 > 状态：**已跑通**（2026-08-15 验证）。DSH 会话中 Godot 工具以 `mcp__godot__<toolName>` 形式可用。
+
+---
+
+## 0. Claude Code 配置（项目级 `.mcp.json`）
+
+```json
+{
+  "mcpServers": {
+    "godot": { "type": "http", "url": "http://localhost:9080/mcp" }
+  }
+}
+```
+
+已提交在仓库根目录。**当前会话不会生效**：Claude Code 只在启动时读取 `.mcp.json`，
+下次启动会提示信任该项目级服务器，同意后工具以 `mcp__godot__*` 出现。前提同第 2 节
+（编辑器开着 + MCP 面板点了 Start）。
+
+### 拿不到游戏客户端日志
+
+`get_editor_logs` 返回的是**编辑器自身**的日志（插件消息、脚本报错），不含独立运行的
+游戏进程输出。要看客户端日志直接读文件：
+
+```
+%APPDATA%\Godot\app_userdata\MouseKombat\logs\godot.log
+```
+
+（Godot 的 `user://logs`，同机多开会共写这一个文件。2026-08-15 卡死现场就是从这里
+取到 `[spectate] input stream gap: have frame 1, host sent 3736` 和
+`backdash: Fail to sync {RemotePlayer: 2} after 64 retries` 两条决定性证据的。）
+
 
 ---
 

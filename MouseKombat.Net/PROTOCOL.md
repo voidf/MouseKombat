@@ -99,11 +99,12 @@ routes:
 * server → host player: `LobbyPlayerJoined{playerId}` whenever a member joins, so the match director
   can serve a catch-up to the newcomer (the LAN `PlayerJoined` event, on the wire).
 
-A host player that disconnects (or quits) destroys the room: everyone is told with `Bye` and the
-connection closes (spec: 主持玩家 ESC/强退时其它玩家弹窗提示连接断开). A non-host member leaving
-(`Bye`) is removed from the room, and its connection **stays open and returns to the browse phase**
-— the same socket pages the room list and creates/joins again, which is what lets the client show
-the browser after ESC without reconnecting (spec: ESC 退出房间后回到选房界面). A non-host member
+A host player that disconnects (or quits) destroys the room: the OTHER members are told with `Bye`
+and their connections close (spec: 主持玩家 ESC/强退时其它玩家弹窗提示连接断开). The leaver's own
+connection is never one of them — **every leaver, host player or not, returns to the browse phase**
+with the room's identity dropped (player id, host rights, learned match endpoint), so the same socket
+pages the room list and creates/joins again. That is what lets a client show the browser after ESC
+without reconnecting (spec: ESC 退出房间后回到选房界面; 建房后 ESC 保持大厅连接). A non-host member
 disconnecting mid-match is marked disconnected and kicked at match end, exactly like LAN (§ Ending).
 
 ## Relay (lobby only)
@@ -123,11 +124,18 @@ payload** — it is a dumb forwarder for match traffic and only understands room
 Endpoints: at handshake the server pairs the TCP source address with `Hello.MatchUdpPort`, but that
 port is a LOCAL port; behind a NAT the public UDP port differs. So the first datagram from a member
 is trusted by IP + seat claim, its observed source endpoint becomes the member's public match
-endpoint, and **the member is then pinned to that endpoint** — a datagram claiming the same seat
-from another port is dropped. That pin is what prevents a member behind the same NAT from injecting
-frames for another member's seat (IPs are shared there, so IP alone cannot disambiguate). It also
-means a mid-match NAT remap (which UDP mappings do not normally do at 60 fps) would drop traffic;
-accepted trade-off.
+endpoint, and **the member is then pinned to that endpoint for the rest of the match** — a datagram
+claiming the same seat from another port is dropped. That pin is what prevents a member behind the
+same NAT from injecting frames for another member's seat (IPs are shared there, so IP alone cannot
+disambiguate).
+
+The pin is **per match, not per connection**, and it yields to a new source once the pinned endpoint
+has gone silent (`ENDPOINT_REPIN_AFTER`, 2 s — a fighter sends ~60 datagrams a second, so a pin that
+quiet is a dead NAT mapping). Both are needed because a client keeps ONE local match socket for the
+whole room (its port was announced in `Hello`) while the server only ever sees a NAT *mapping* of it:
+a mapping that goes quiet between matches is re-allocated to a different public port, and pinning
+across matches dropped every datagram of the next match (`udp drop: pinned endpoint mismatch ...
+learned ('x', 3766), got ('x', 3768)`), which froze the room at 等待对方同步 / 同步失败.
 
 ## Framing
 

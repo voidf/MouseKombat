@@ -109,6 +109,12 @@ public partial class NetSession : Node
     public MatchCatchUp PendingCatchUp { get; private set; }
     public readonly List<MatchInputs> PendingStreamInputs = new();
 
+    // The buffer is a HAND-OFF, not a record of the match: once a screen has turned the package into
+    // a spectate view it must go, or the next screen that checks it (the seat screen, when the
+    // spectator comes back mid-match) replays the SAME package from frame 0 and then rejects every
+    // live batch as a stream gap — the "ESC 回到本场战斗的第一帧然后卡住" freeze.
+    public void ClearPendingCatchUp() => PendingCatchUp = null;
+
     // ---- relay-config spectating: the host's catch-up authority ----
     //
     // When both fighters are clients the host runs NO session and has no simulation of its own, so it

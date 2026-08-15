@@ -151,6 +151,13 @@ public sealed class RollbackMatch : INetcodeSessionHandler, IDisposable
 
     public SessionMode Mode { get; }
 
+    // Is there anyone on the other end at all? A Local session (this machine drives BOTH seats and
+    // nobody is watching over UDP — host + AI, or AI vs AI) has no peer, so it never reports
+    // Synchronizing/Synchronized and never stalls. A UI that shows "正在与对方同步…" until the
+    // Synchronized event arrives would leave that text on screen for the whole match (the user's
+    // AI-vs-AI lobby round), so the caller must ask this before saying anything about a peer.
+    public bool HasRemotePeer => Mode != SessionMode.Local;
+
     // Diagnostics. The handler callbacks (SaveState/LoadState/AdvanceFrame) are expected to run on
     // the thread that calls Tick, because that is the thread driving the session — but "expected" is
     // not "verified", so count violations instead of assuming. The test asserts this stays 0.

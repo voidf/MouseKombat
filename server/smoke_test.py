@@ -22,7 +22,7 @@ from protocol import (
     MSG_SEAT_RELEASE, MSG_START_MATCH, MSG_WELCOME, PROTOCOL, FrameReader, decode_body,
     encode_frame,
 )
-from lobby_server import LobbyServer
+from lobby_server import ENDPOINT_REPIN_AFTER, LobbyServer
 
 GAME_VERSION = "0.0.7"
 _fail = 0
@@ -315,6 +315,30 @@ async def run_scenarios(host, port, udp_port):
     await hostc.send(MSG_MATCH_START, [40.0, 760.0, 800.0, 120.0, 560.0, 650.0, 560.0])
     f = await mem.recv_until(MSG_START_MATCH)
     check(f is not None, "rematch: a room can start a second match")
+    await hostc.recv_until(MSG_START_MATCH)      # drain the host player's own copy
+
+    # ---- the second match's endpoints are RE-LEARNED (the user's frozen room) ----
+    # Both fighters kept the same local socket (the game binds one per room), but the NAT mapping the
+    # server saw in the first match went quiet between matches and the router handed the socket a
+    # different public port. If the server kept the first match's pin, every datagram of this match is
+    # dropped ("pinned endpoint mismatch ... learned ('x', 3766), got ('x', 3768)") and both sides
+    # freeze at 同步失败. New source ports here stand in for the remap.
+    #
+    # Deliberately IMPATIENT: the whole exchange has to finish well inside ENDPOINT_REPIN_AFTER, or a
+    # pass would only prove the silent-pin takeover below, not the match-start reset.
+    ok = await udp_remapped_relay_ok(host, udp_port, int(hostc.room_id), 40010, 40011,
+                                     keep_bound=(hostc.udp_port, mem.udp_port),
+                                     attempts=3, per_try=0.25)
+    check(ok, "rematch: the relay re-learns both fighters' endpoints for the new match")
+
+    # ---- a remap MID-match is recovered once the pinned mapping goes silent ----
+    # The pin is what stops a member behind the same NAT from injecting frames for another seat, so it
+    # only yields to a new source after the old endpoint has delivered nothing for a whole match's
+    # worth of frames. Without this a mid-match remap would end the match for good.
+    await asyncio.sleep(ENDPOINT_REPIN_AFTER + 0.2)
+    ok = await udp_remapped_relay_ok(host, udp_port, int(hostc.room_id), 40012, 40013,
+                                     keep_bound=(hostc.udp_port, mem.udp_port, 40010, 40011))
+    check(ok, "rematch: a silent pinned endpoint is taken over by the member's new source port")
 
     # ---- AI placement carries its character (the seat was never PickCharacter'd) ----
     # End the second match first so both seats are free again.
@@ -354,7 +378,38 @@ async def run_scenarios(host, port, udp_port):
           "leave: the member can re-join a room on the same connection")
     await hostc.recv_until(MSG_LOBBY_PLAYER_JOINED)
 
-    # ---- host player leaves -> room destroyed, members told ----
+    # ---- host player leaves BY Bye: room destroyed, members told, the HOST keeps browsing ----
+    # (spec: 建房后 ESC 保持大厅连接、回到选房界面). The host's own socket must come back as a plain
+    # browser with NO host rights left over, or the next room it joins as a member would hand it
+    # AddAi/MatchStart.
+    byehost = FakeClient(host, port, "闪退房主", udp_port=40009)
+    await byehost.connect()
+    await byehost.hello()
+    await byehost.create(4, "", True)
+    doomed_room = byehost.room_id
+    guest = FakeClient(host, port, "被赶客", udp_port=40010)
+    await guest.connect()
+    await guest.hello()
+    await guest.join(doomed_room)
+    await byehost.recv_until(MSG_LOBBY_PLAYER_JOINED)
+    await byehost.send(MSG_BYE, ["主持玩家已离开房间"])
+    f = await guest.recv_until(MSG_BYE)
+    check(f is not None and f[1][0] == "主持玩家已离开房间",
+          "host leave: the room is destroyed and the members are told why")
+    await byehost.send(MSG_LOBBY_LIST, [0])
+    f = await byehost.recv_until(MSG_LOBBY_ROOMS)
+    check(f is not None and doomed_room not in [e[0] for e in f[1][2]],
+          "host leave: the host keeps browsing on the same connection, its room is gone")
+    w = await byehost.join(hostc.room_id)
+    check(w is not None and w[1] is False,
+          "host leave: the former host re-joins as a plain member (no host rights kept)")
+    await hostc.recv_until(MSG_LOBBY_PLAYER_JOINED)
+    await byehost.send(MSG_BYE, ["玩家离开了房间"])
+    await hostc.wait_room_state(lambda s: byehost.player_id not in [p[0] for p in s[0]])
+    byehost.close()
+    guest.close()
+
+    # ---- host player DISCONNECTS -> room destroyed, members told ----
     hostc.close()
     f = await mem.recv_until(MSG_BYE)
     check(f is not None and f[1][0] == "连接断开",
@@ -491,6 +546,59 @@ async def udp_relay_sinks(host, udp_port, a_client, b_client):
 
 def envelope(room_id, src, dst, payload):
     return room_id.to_bytes(4, "little") + bytes([src, dst]) + payload
+
+
+async def udp_remapped_relay_ok(host, udp_port, room_id, port_a, port_b,
+                                keep_bound=(), attempts=5, per_try=1.0):
+    """Both fighters of a RUNNING match send from source ports the server has never seen (a NAT
+    remap). Returns True when the relay forwards in both directions.
+
+    Order matters: seat 1 goes first, so seat 0's endpoint is learned before anything has to be
+    delivered to it. Seat 1's first datagram goes to whatever seat 0 is currently pinned to (or its
+    announced port, which is only ever the initial guess) — so every port the server might still aim
+    at must be passed in keep_bound and stay OPEN. That is also what the real client does (it owns its
+    match socket for the whole room); an unbound one answers ICMP port-unreachable, and on Windows
+    that kills the server's UDP transport until it rebinds (see LobbyServer._udp_died), losing exactly
+    the datagrams under test."""
+
+    class Sink(asyncio.DatagramProtocol):
+        def __init__(self):
+            self.q = asyncio.Queue()
+
+        def datagram_received(self, data, addr):
+            self.q.put_nowait(bytes(data))
+
+    loop = asyncio.get_running_loop()
+    transports = []
+    try:
+        for p in keep_bound:
+            t, _ = await loop.create_datagram_endpoint(lambda: Sink(), local_addr=("127.0.0.1", p))
+            transports.append(t)
+        ta, pa = await loop.create_datagram_endpoint(lambda: Sink(), local_addr=("127.0.0.1", port_a))
+        transports.append(ta)
+        tb, pb = await loop.create_datagram_endpoint(lambda: Sink(), local_addr=("127.0.0.1", port_b))
+        transports.append(tb)
+
+        payload_a = b"remapped-A-001"
+        payload_b = b"remapped-B-002"
+        # UDP: retry rather than fail on a single lost datagram.
+        for _ in range(attempts):
+            tb.sendto(envelope(room_id, 1, 0, b"remapped-B-000"), (host, udp_port))
+            ta.sendto(envelope(room_id, 0, 1, payload_a), (host, udp_port))
+            try:
+                if await asyncio.wait_for(pb.q.get(), per_try) != payload_a:
+                    return False
+            except asyncio.TimeoutError:
+                continue
+            tb.sendto(envelope(room_id, 1, 0, payload_b), (host, udp_port))
+            try:
+                return await asyncio.wait_for(pa.q.get(), per_try) == payload_b
+            except asyncio.TimeoutError:
+                continue
+        return False
+    finally:
+        for t in transports:
+            t.close()
 
 
 if __name__ == "__main__":

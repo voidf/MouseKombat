@@ -583,6 +583,11 @@ public partial class NetSeatScreen : Control
         GameSession.RoomId = d.RoomId;
         GameSession.Host = d.Host;
         _pendingSpectate = true;
+        // Consumed: the package is now GameSession.CatchUpData and the spectate screen owns it. Left
+        // in the autoload it would be re-consumed the next time this screen loads (a spectator
+        // pressing ESC, or a match that has since moved thousands of frames on) and replay the match
+        // from frame 0 forever.
+        Net.ClearPendingCatchUp();
     }
 
     // Package the relay host's accumulated catch-up state (fighters' reports, geometry) into
@@ -665,19 +670,12 @@ public partial class NetSeatScreen : Control
         if (Net == null) { GetTree().ChangeSceneToFile(LanMenuScenePath); return; }
         if (Net.IsLobby)
         {
-            // Spec: the host player's Esc destroys the room and goes to the MAIN menu (everyone
-            // else gets the disconnect popup). A member just leaves the room — the LOBBY connection
-            // stays up and the browser reappears when the lobby menu asks for the first page.
-            if (Net.IsHost)
-            {
-                Net.Leave("主持玩家已离开房间");
-                GetTree().ChangeSceneToFile(MainMenuScenePath);
-            }
-            else
-            {
-                Net.LeaveLobbyRoom("玩家离开了房间");
-                GetTree().ChangeSceneToFile(LobbyMenuScenePath);
-            }
+            // The room dies with its host player and everyone else is told (spec: 主持玩家 ESC/强退
+            // 时其它玩家弹窗提示连接断开) — but THIS connection is not the room, and closing it would
+            // throw the host back to the main menu and make it retype the whole lobby form. Both host
+            // and member therefore keep the lobby connection and land on the room browser.
+            Net.LeaveLobbyRoom(Net.IsHost ? "主持玩家已离开房间" : "玩家离开了房间");
+            GetTree().ChangeSceneToFile(LobbyMenuScenePath);
             return;
         }
         bool wasHost = Net.IsHost;

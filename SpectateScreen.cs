@@ -17,6 +17,8 @@ using MouseKombat.Sim;
 public partial class SpectateScreen : Control
 {
     [Export] public string SeatScenePath = "res://NetSeat.tscn";
+    [Export] public string LobbyMenuScenePath = "res://LobbyMenu.tscn";
+    [Export] public string LanMenuScenePath = "res://LanMenu.tscn";
     [Export] public string MainMenuScenePath = "res://MainMenu.tscn";
 
     [Export] public Node2D World;             // fighters are parented here (identity transform)
@@ -232,21 +234,49 @@ public partial class SpectateScreen : Control
         _dropPopup.PopupCentered();
     }
 
-    // Esc = back to the seat screen: unlike the fighters (whose Esc is disabled mid-round by spec),
-    // a spectator can leave the view freely — it changes nothing about the match.
+    // Esc = leave the room: unlike the fighters (whose Esc is disabled mid-round by spec), a
+    // spectator can walk out freely — it changes nothing about the match. It does NOT go back to the
+    // seat screen: the seats are frozen while the match runs, so there is nothing to do there, and
+    // the room's own catch-up package would put us straight back here (that re-entry is what froze
+    // the view on frame 1 with an endless "input stream gap" stream). A lobby spectator therefore
+    // lands on the room BROWSER with the lobby connection intact; a LAN one on the LAN menu.
     public override void _UnhandledInput(InputEvent @event)
     {
         if (@event is InputEventKey k && k.Pressed && !k.Echo && k.Keycode == Key.Escape)
         {
             GetViewport().SetInputAsHandled();
-            ReturnToSeats();
+            LeaveRoom();
         }
+    }
+
+    private void LeaveRoom()
+    {
+        if (_leaving) return;
+        var net = Net;
+        if (net == null) { ReturnToSeats(); return; }
+        _leaving = true;
+        GameSession.CatchUpData = null;
+        if (net.IsLobby)
+        {
+            // Host player or member: the lobby CONNECTION survives either way (the room dies with
+            // its host, the connection does not — see PROTOCOL.md § Lobby), so both land on the
+            // browser and see the refreshed room list.
+            net.LeaveLobbyRoom(net.IsHost ? "主持玩家已离开房间" : "玩家离开了房间");
+            GetTree().ChangeSceneToFile(LobbyMenuScenePath);
+            return;
+        }
+        bool wasHost = net.IsHost;
+        net.Leave(wasHost ? "主机已离开房间" : "玩家离开了房间");
+        GetTree().ChangeSceneToFile(wasHost ? MainMenuScenePath : LanMenuScenePath);
     }
 
     private void ReturnToSeats()
     {
         if (_leaving) return;
         _leaving = true;
+        // The package belonged to the match that just ended; leaving it set would offer this screen a
+        // finished match to replay the next time something checks it.
+        GameSession.CatchUpData = null;
         GetTree().ChangeSceneToFile(SeatScenePath);
     }
 

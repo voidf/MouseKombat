@@ -699,10 +699,22 @@ internal static partial class Program
         Check(LobbyWait(mem, LobbyRoomClient.EventKind.Connected) && !mem.IsHostPlayer,
             "lobby client: the same connection can re-join a room");
 
-        // the host player leaving destroys the room
-        host.Disconnect("房主离开");
+        // the host player leaving destroys the room — but KEEPS its own lobby connection, in the
+        // browse phase (spec: 建房后 ESC 保持大厅连接、回到选房界面). Closing it would send the host
+        // back to the main menu and make it retype the whole lobby form.
+        host.LeaveRoom("主持玩家已离开房间");
         Check(LobbyWait(mem, LobbyRoomClient.EventKind.Disconnected),
             "lobby client: the member is told when the host player leaves");
+        Check(!host.IsHostPlayer && host.Room == null && host.PlayerId == 0,
+            "lobby client: a host player that left keeps no room identity");
+        host.ListRooms(0);
+        Check(LobbyWait(host, LobbyRoomClient.EventKind.LobbyRooms,
+                   f => f.As<LobbyRooms>().Page == 0),
+            "lobby client: the host player browses again on the same connection");
+        host.CreateRoom(4, "", true);
+        Check(LobbyWait(host, LobbyRoomClient.EventKind.Connected) && host.IsHostPlayer,
+            "lobby client: and can host another room without reconnecting");
+        host.Disconnect("测试结束");
     }
 
     private static void RunLobbyScenarios(int port, string ver)

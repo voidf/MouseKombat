@@ -24,6 +24,22 @@ public partial class AppSettings : Node
     private float _sfxVolume = 1f;
     private int _replayMax = DefaultReplayMax;
 
+    // Last lobby form the player CONNECTED with, remembered across runs. Entering the lobby menu
+    // must never dial anything by itself (that is the player's button press), so the form is
+    // pre-filled from here instead — retyping the server address every session is the only reason
+    // the auto-connect existed.
+    public string LobbyName { get; private set; } = "";
+    public string LobbyHost { get; private set; } = "";
+    public int LobbyPort { get; private set; }
+
+    public void RememberLobbyForm(string name, string host, int port)
+    {
+        LobbyName = name ?? "";
+        LobbyHost = host ?? "";
+        LobbyPort = port > 0 && port <= 65535 ? port : 0;
+        Save();
+    }
+
     // 0..1, linear. Setting either one applies it immediately and saves.
     public float BgmVolume
     {
@@ -91,6 +107,9 @@ public partial class AppSettings : Node
         _bgmVolume = Mathf.Clamp((float)cfg.GetValue("audio", "bgm_volume", 1f), 0f, 1f);
         _sfxVolume = Mathf.Clamp((float)cfg.GetValue("audio", "sfx_volume", 1f), 0f, 1f);
         _replayMax = Mathf.Clamp((int)cfg.GetValue("replay", "max_per_mode", DefaultReplayMax), 1, 999);
+        LobbyName = (string)cfg.GetValue("lobby", "name", "");
+        LobbyHost = (string)cfg.GetValue("lobby", "host", "");
+        LobbyPort = (int)cfg.GetValue("lobby", "port", 0);
     }
 
     public void Save()
@@ -99,6 +118,9 @@ public partial class AppSettings : Node
         cfg.SetValue("audio", "bgm_volume", _bgmVolume);
         cfg.SetValue("audio", "sfx_volume", _sfxVolume);
         cfg.SetValue("replay", "max_per_mode", _replayMax);
+        cfg.SetValue("lobby", "name", LobbyName);
+        cfg.SetValue("lobby", "host", LobbyHost);
+        cfg.SetValue("lobby", "port", LobbyPort);
         var err = cfg.Save(SettingsPath);
         if (err != Error.Ok) GD.PushWarning($"[AppSettings] could not save {SettingsPath}: {err}");
     }

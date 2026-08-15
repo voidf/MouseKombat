@@ -50,6 +50,13 @@ from room import RoomState, SEAT_COUNT
 
 log = logging.getLogger("lobby")
 
+# How long a pinned match endpoint may stay SILENT before another source from the same IP is allowed
+# to take the pin over. The pin exists to stop a member behind the same NAT from injecting frames for
+# another member's seat, and inside a running match a fighter sends ~60 datagrams a second — so a pin
+# that has heard nothing for this long is a dead NAT mapping, not a live fighter. Without this a
+# mid-match remap would kill the rest of the match. See _handle_udp_inner.
+ENDPOINT_REPIN_AFTER = 2.0
+
 
 # --------------------------------------------------------------------------- models
 
@@ -57,7 +64,8 @@ class Member:
     """One TCP connection. In lobby phase it is a browser; after create/join it is a room member."""
 
     __slots__ = ("player_id", "name", "is_host", "reader", "writer", "tcp_ip",
-                 "announced_udp_port", "udp_endpoint", "phase", "last_activity", "room")
+                 "announced_udp_port", "udp_endpoint", "udp_last_rx", "phase", "last_activity",
+                 "room")
 
     def __init__(self, writer):
         self.player_id = 0
@@ -71,6 +79,7 @@ class Member:
         # replaces it (udp_endpoint). See handle_udp.
         self.announced_udp_port = 0
         self.udp_endpoint = None
+        self.udp_last_rx = 0.0      # monotonic time of the last datagram accepted from udp_endpoint
         self.phase = "hello"        # "hello" -> "op" -> "room" -> "closed"
         self.last_activity = time.monotonic()
         self.room = None
@@ -116,6 +125,7 @@ class LobbyServer:
         self.idle_timeout = idle_timeout
         self.max_rooms = max_rooms
         self.rooms = {}             # int room id -> Room
+        self.conns = set()          # every live connection, room member or browser (see _reaper_loop)
         self._udp_transport = None
         self._udp_rebinding = False
         self._tcp_server = None
@@ -148,6 +158,7 @@ class LobbyServer:
 
     async def _handle_conn(self, reader, writer):
         m = Member(writer)
+        self.conns.add(m)
         try:
             while True:
                 data = await reader.read(8192)
@@ -168,6 +179,7 @@ class LobbyServer:
                      (m.writer.get_extra_info("peername") or (0,))[1], e)
         finally:
             self._on_conn_lost(m)
+            self.conns.discard(m)
             try:
                 writer.close()
             except Exception:
@@ -368,6 +380,7 @@ class LobbyServer:
                     return
         if not state.begin_match():
             return   # both seats not ready; silent like the LAN host
+        self._forget_match_endpoints(room)
         geo = body if isinstance(body, list) and len(body) >= 7 else [40.0, 760.0, 800.0,
                                                                       120.0, 560.0, 650.0, 560.0]
         start = [state.snapshot(),
@@ -383,12 +396,27 @@ class LobbyServer:
     def _end_match(self, room: Room, winner_seat: int):
         state = room.state
         dropped = state.end_match()
+        self._forget_match_endpoints(room)
         for pid in dropped:
             self._kick(room, pid, "本局结束，已断线")
         self._broadcast(room, MSG_MATCH_ENDED, [winner_seat, dropped])
         self._broadcast_room(room)
         log.info("room %s match ended (winner seat %d, kicked %r)",
                  state.room_id, winner_seat, dropped)
+
+    def _forget_match_endpoints(self, room: Room):
+        """Match endpoints are learned PER MATCH, never once per connection.
+
+        A client keeps ONE local UDP socket for the whole room (its port was announced in Hello and
+        rebinding it between matches is a race — see MatchSocket), but what the server sees is a NAT
+        MAPPING of that socket, and a mapping that goes quiet between matches is re-allocated by the
+        router to a different public port. Pinning across matches therefore dropped every datagram of
+        the next match ("udp drop: pinned endpoint mismatch ... learned ('x', 3766), got ('x', 3768)")
+        and froze the room at 等待对方同步 / 同步失败. Forgetting the pins at both ends of a match makes
+        each match learn the endpoints exactly like the first one did."""
+        for m in room.members.values():
+            m.udp_endpoint = None
+            m.udp_last_rx = 0.0
 
     # ---- membership changes ----
 
@@ -418,18 +446,23 @@ class LobbyServer:
         self._close_member(m)
 
     def _leave_room(self, m: Member, reason: str):
-        """A member leaving (Bye). The host player leaving kills the room; a regular member's
-        connection SURVIVES and returns to the browse phase — the same lobby connection keeps
-        working for LobbyList/Create/Join, which is what lets the client show the browser again
-        without reconnecting (spec: ESC 退出房间后回到选房界面，不断开大厅连接)."""
+        """A member leaving (Bye). The room dies with its host player, but NO leaver's connection
+        does: the leaver returns to the browse phase — the same lobby connection keeps working for
+        LobbyList/Create/Join, which is what lets the client show the browser again without
+        reconnecting (spec: ESC 退出房间后回到选房界面，不断开大厅连接; the host player's ESC closes
+        the room and lands on the same browser). The OTHER members of a destroyed room are still
+        told with Bye and dropped."""
         room = m.room
         if room is None:
             m.phase = "closed"
             return
         if m.is_host:
             log.info("room %s destroyed: host %r left (%s)", room.state.room_id, m.name, reason)
+            # Out of the member table FIRST, so _destroy_room does not close our own connection
+            # along with everyone else's.
+            room.members.pop(m.player_id, None)
             self._destroy_room(room, reason)
-            m.phase = "closed"
+            self._to_browse(m)
             return
         room.members.pop(m.player_id, None)
         state = room.state
@@ -437,10 +470,22 @@ class LobbyServer:
             state.mark_disconnected(m.player_id)   # kicked at match end, seat kept mid-round
         else:
             state.remove_player(m.player_id)
-        m.phase = "op"                             # back to browse: the connection stays open
+        self._to_browse(m)                         # back to browse: the connection stays open
         self._broadcast_room(room)
         log.info("%r left room %s (%d/%d), connection kept for browsing", m.name,
                  state.room_id, len(room.members), state.max_players)
+
+    def _to_browse(self, m: Member):
+        """Back to the browse phase on the SAME connection. Every room-scoped field goes with the
+        room: a stale is_host would hand host rights (AddAi/MatchStart/HostSendTo) in the NEXT room
+        this connection joins, and a stale udp_endpoint would pin a match endpoint learned in
+        another room."""
+        m.phase = "op"
+        m.room = None
+        m.player_id = 0
+        m.is_host = False
+        m.udp_endpoint = None
+        m.udp_last_rx = 0.0
 
     def _destroy_room(self, room: Room, reason: str):
         frame = encode_frame(MSG_BYE, [reason])
@@ -535,15 +580,21 @@ class LobbyServer:
         while True:
             await asyncio.sleep(30)
             now = time.monotonic()
-            for m in list(self._conns()):
-                if m.phase in ("hello", "op") and now - m.last_activity > self.idle_timeout:
-                    log.info("idle lobby connection %s timed out", m.tcp_ip)
+            for m in self._conns():
+                # A connection that never finished the handshake is dead weight and goes on the
+                # configured timeout. A BROWSER (past Hello, in no room) is a player looking at the
+                # room list, so it gets a much longer grace — dropping an AFK player after five
+                # minutes of reading the list would read as "the lobby disconnected me".
+                limit = self.idle_timeout if m.phase == "hello" else self.idle_timeout * 4
+                if m.phase in ("hello", "op") and now - m.last_activity > limit:
+                    log.info("idle lobby connection %s timed out (phase %s)", m.tcp_ip, m.phase)
                     m.phase = "closed"
                     self._close_member(m)
 
     def _conns(self):
-        for room in list(self.rooms.values()):
-            yield from room.members.values()
+        # Every connection, not just room members: a browser (phase "op" — never joined a room, or
+        # left one) is exactly what the idle timeout is for, and it lives in no room's member table.
+        return list(self.conns)
 
     # ---- UDP (match relay) ----
 
@@ -567,7 +618,8 @@ class LobbyServer:
             return
         state = room.state
         if not state.match_running:
-            log.warning("udp drop: room %d not running (from %s)", room_id, addr)
+            # Normal noise: the fighters' last in-flight datagrams arrive after the match ended.
+            log.debug("udp drop: room %d not running (from %s)", room_id, addr)
             return   # only match traffic travels on UDP
         if src not in (0, 1) or dst not in (0, 1) or src == dst:
             return
@@ -595,14 +647,25 @@ class LobbyServer:
         # Learn the member's PUBLIC match endpoint from what it actually sends: the announced
         # port is a LOCAL port, and behind a NAT the public UDP port differs. The FIRST datagram
         # (or any from the announced endpoint) is trusted by IP + seat claim; after that the
-        # endpoint is pinned, so a member can never claim another seat from a different source
-        # port — that is the cross-member injection hole (two members behind one NAT share an IP).
+        # endpoint is pinned FOR THIS MATCH, so a member can never claim another seat from a
+        # different source port — that is the cross-member injection hole (two members behind one
+        # NAT share an IP). The pins are dropped at every match boundary (_forget_match_endpoints)
+        # and a pin that stopped delivering can be taken over (below), so neither a NAT remap
+        # between matches nor one mid-match kills the room any more.
         learned = (ip, addr[1])
+        now = time.monotonic()
         if msrc.udp_endpoint is not None and msrc.udp_endpoint != learned:
-            log.warning("udp drop: pinned endpoint mismatch room %d seat %d (learned %s, got %s)",
-                        room_id, src, msrc.udp_endpoint, learned)
-            return
+            silent = now - msrc.udp_last_rx
+            if silent < ENDPOINT_REPIN_AFTER:
+                log.warning("udp drop: pinned endpoint mismatch room %d seat %d (learned %s, got %s)",
+                            room_id, src, msrc.udp_endpoint, learned)
+                return
+            # The pinned mapping has heard nothing for a whole match's worth of frames: it is dead
+            # (a NAT remap), and refusing the new source would end the match for good.
+            log.info("udp re-pin: room %d seat %d %s -> %s (old endpoint silent %.1fs)",
+                     room_id, src, msrc.udp_endpoint, learned, silent)
         msrc.udp_endpoint = learned
+        msrc.udp_last_rx = now
         if mdst.udp_endpoint is not None:
             target = mdst.udp_endpoint
         else:
