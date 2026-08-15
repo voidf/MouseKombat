@@ -307,10 +307,15 @@ class LobbyServer:
             char = body[0] if isinstance(body, list) and body else -1
             self._apply(room, state.pick_character(m.player_id, char))
         elif msg_type == MSG_ADD_AI:
-            # Host-only, enforced by RoomState. A client asking for it is refused silently.
+            # Host-only, enforced by RoomState. The character travels WITH the message (the AI flow
+            # never PickCharacter'd the seat — it belongs to nobody yet); -1 or a missing field means
+            # "whatever the seat already holds" (old-build compatibility).
             seat = body[0] if isinstance(body, list) and body else -1
             model = body[1] if isinstance(body, list) and len(body) > 1 else ""
-            self._apply(room, state.add_ai(m.player_id, seat, state.seat(seat).character, model))
+            character = body[2] if isinstance(body, list) and len(body) > 2 else -1
+            if character < 0:
+                character = state.seat(seat).character
+            self._apply(room, state.add_ai(m.player_id, seat, character, model))
         elif msg_type == MSG_REMOVE_AI:
             seat = body[0] if isinstance(body, list) and body else -1
             self._apply(room, state.remove_ai(m.player_id, seat))
@@ -412,7 +417,10 @@ class LobbyServer:
         self._close_member(m)
 
     def _leave_room(self, m: Member, reason: str):
-        """A member leaving on purpose (Bye). The host player leaving kills the room."""
+        """A member leaving (Bye). The host player leaving kills the room; a regular member's
+        connection SURVIVES and returns to the browse phase — the same lobby connection keeps
+        working for LobbyList/Create/Join, which is what lets the client show the browser again
+        without reconnecting (spec: ESC 退出房间后回到选房界面，不断开大厅连接)."""
         room = m.room
         if room is None:
             m.phase = "closed"
@@ -428,10 +436,10 @@ class LobbyServer:
             state.mark_disconnected(m.player_id)   # kicked at match end, seat kept mid-round
         else:
             state.remove_player(m.player_id)
-        m.phase = "closed"
+        m.phase = "op"                             # back to browse: the connection stays open
         self._broadcast_room(room)
-        log.info("%r left room %s (%d/%d)", m.name, state.room_id,
-                 len(room.members), state.max_players)
+        log.info("%r left room %s (%d/%d), connection kept for browsing", m.name,
+                 state.room_id, len(room.members), state.max_players)
 
     def _destroy_room(self, room: Room, reason: str):
         frame = encode_frame(MSG_BYE, [reason])

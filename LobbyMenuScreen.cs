@@ -83,17 +83,24 @@ public partial class LobbyMenuScreen : Control
         ShowBrowser(false);
         SetStatus("");
 
-        // Came back from a room (the seat screen's Esc on a lobby member): the room connection is
-        // gone — leaving a room closes the lobby connection by protocol — but the player expects
-        // to land back in the BROWSER, not at the connect form. Reconnect to the same lobby
-        // automatically; the browser panel appears when the first page answers.
+        // Came back from a room (the seat screen's Esc on a lobby member): the lobby connection is
+        // STILL ALIVE — the server keeps it in the browse phase — so the browser just asks for the
+        // first page again and reappears. If the connection was dropped meanwhile (server restart,
+        // idle timeout), reconnect to the same lobby instead.
         var net = NetSession.Instance;
-        if (net != null && !net.Active && net.Mode == ReplayData.ModeLobby
-            && !string.IsNullOrEmpty(net.HostAddress))
+        if (net != null && net.Mode == ReplayData.ModeLobby && !string.IsNullOrEmpty(net.HostAddress))
         {
-            SetStatus($"正在重新连接大厅 {net.HostAddress}:{net.Port}…");
-            net.ConnectLobby(net.HostAddress, net.Port, net.PlayerName);
-            net.RequestLobbyList(0);
+            if (net.Active)
+            {
+                SetStatus("");
+                net.RequestLobbyList(0);
+            }
+            else
+            {
+                SetStatus($"正在重新连接大厅 {net.HostAddress}:{net.Port}…");
+                net.ConnectLobby(net.HostAddress, net.Port, net.PlayerName);
+                net.RequestLobbyList(0);
+            }
         }
 
         if (Net != null)

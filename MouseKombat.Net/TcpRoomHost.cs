@@ -187,7 +187,10 @@ public sealed class TcpRoomHost : IDisposable
                 var m = frame.As<AddAi>();
                 // Host-only, enforced by RoomState. A client asking for it is refused silently rather
                 // than disconnected: a stale UI could send it after losing host status.
-                Apply(Room.AddAi(c.PlayerId, m.Seat, Room.Seat(m.Seat).Character, m.AiModel));
+                // Character: the message carries it explicitly (the AI flow never PickCharacter'd the
+                // seat); -1 means "whatever the seat already holds" (old-build compatibility).
+                Apply(Room.AddAi(c.PlayerId, m.Seat,
+                    m.Character >= 0 ? m.Character : Room.Seat(m.Seat).Character, m.AiModel));
                 break;
             }
             case MsgType.RemoveAi:

@@ -100,7 +100,10 @@ routes:
   can serve a catch-up to the newcomer (the LAN `PlayerJoined` event, on the wire).
 
 A host player that disconnects (or quits) destroys the room: everyone is told with `Bye` and the
-connection closes (spec: 主持玩家 ESC/强退时其它玩家弹窗提示连接断开). A non-host member
+connection closes (spec: 主持玩家 ESC/强退时其它玩家弹窗提示连接断开). A non-host member leaving
+(`Bye`) is removed from the room, and its connection **stays open and returns to the browse phase**
+— the same socket pages the room list and creates/joins again, which is what lets the client show
+the browser after ESC without reconnecting (spec: ESC 退出房间后回到选房界面). A non-host member
 disconnecting mid-match is marked disconnected and kicked at match end, exactly like LAN (§ Ending).
 
 ## Relay (lobby only)
@@ -164,7 +167,7 @@ must therefore agree on field ORDER. Rules:
 | 5 | `SeatClaim` | client → host | request seat 0 or 1 |
 | 6 | `SeatRelease` | client → host | give up whatever seat this player holds |
 | 7 | `CharPick` | client → host | choose a character for the seat this player holds |
-| 8 | `AddAi` | client → host | host only: put an AI in a seat |
+| 8 | `AddAi` | client → host | host only: put an AI in a seat (carries the character too — the AI flow never PickCharacter'd the seat) |
 | 9 | `StartMatch` | host → all | both seats ready; carries the match setup |
 | 10 | `Bye` | either | leaving / shutting down / kicked, with a reason |
 | 11 | `MatchEnded` | host → all | a knockout happened; everyone returns to seat select |
@@ -219,9 +222,12 @@ Rules the host enforces:
 * Anyone may release their own seat at any time. Nobody can release someone else's.
 * Unlimited spectators — a player with no seat is a spectator, not an error.
 * **AI seats are host-only.** Only the host may `AddAi`, and the host may put an AI in either seat
-  regardless of what it holds itself. The AI runs on the host's machine and its inputs enter the
-  match as if the host had sent them. Only the host may `RemoveAi` to free such a seat (the
-  Backspace key in the seat screen); a human seat can only be released by its own holder.
+  regardless of what it holds itself. `AddAi` carries the character (`[2]`, fallback to the seat's
+  current character when absent): the AI flow picks a character in the same breath as the model, and
+  the seat was never `CharPick`ed — it belongs to nobody yet, so the server cannot read the pick
+  back from the seat. The AI runs on the host's machine and its inputs enter the match as if the
+  host had sent them. Only the host may `RemoveAi` to free such a seat (the Backspace key in the
+  seat screen); a human seat can only be released by its own holder.
 * A match may start only when both seats are occupied and each has a character.
 
 ## Match lifecycle

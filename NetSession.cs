@@ -216,6 +216,19 @@ public partial class NetSession : Node
     public void RequestLobbyJoin(string roomId, string password) =>
         Lobby?.JoinRoom(roomId, password);
 
+    // Leave a lobby room but KEEP the lobby connection: the server returns it to the browse phase,
+    // so the player lands back in the room browser without reconnecting (spec: ESC 退出房间后回到
+    // 选房界面). The host PLAYER still destroys the room and drops everyone — use Leave() for that.
+    public void LeaveLobbyRoom(string reason)
+    {
+        EndMatchLocal();
+        Lobby?.LeaveRoom(reason ?? "玩家离开了房间");
+        Room = null;
+        PendingCatchUp = null;
+        PendingStreamInputs.Clear();
+        _lockedDevices.Clear();
+    }
+
     // reason != null tells the other side why (the host broadcasts Bye, a client sends one).
     public void Leave(string reason)
     {
@@ -294,7 +307,7 @@ public partial class NetSession : Node
     public void RequestAddAi(int seat, CharacterId c, string model)
     {
         if (!IsHost) return;
-        if (Lobby != null) { Lobby.AddAi(seat, model); return; }
+        if (Lobby != null) { Lobby.AddAi(seat, (int)c, model); return; }
         if (Host.Room.AddAi(Host.HostPlayerId, seat, (int)c, model)) HostChanged();
     }
 

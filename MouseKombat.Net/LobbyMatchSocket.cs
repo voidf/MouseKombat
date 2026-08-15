@@ -65,10 +65,9 @@ public sealed class LobbyMatchSocket : IPeerSocket, IDisposable
 
     private readonly IPeerSocket _inner;
     private readonly byte[] _envelope = new byte[LobbyEnvelope.HeaderBytes];
-    // Separate send/receive scratch buffers: Backdash's socket IO runs sends and receives
-    // concurrently, so a shared buffer would let a send clobber an in-flight receive (and vice
-    // versa). Each direction sees only its own buffer.
-    private readonly byte[] _tx = new byte[ScratchSize];
+    // Receive scratch only. Sends allocate a fresh buffer per datagram: Backdash's socket may keep
+    // a reference to the handed buffer past the SendToAsync call (it runs its own IO thread), so a
+    // shared send buffer could be overwritten by the next frame before the bytes actually went out.
     private readonly byte[] _rx = new byte[ScratchSize];
 
     public LobbyMatchSocket(IPeerSocket inner, int roomId, int srcSlot, int dstSlot)
@@ -83,48 +82,51 @@ public sealed class LobbyMatchSocket : IPeerSocket, IDisposable
 
     public int Port => _inner.Port;
 
+    // The server strips the envelope before forwarding (it relays data[6:] verbatim), so a received
+    // datagram IS the raw rollback payload — pass it through untouched. Stripping here would cut
+    // six bytes out of every frame (16-byte handshake packets became 10 and never synchronized).
     public async ValueTask<SocketReceiveFromResult> ReceiveAsync(Memory<byte> buffer, CancellationToken ct)
     {
         var res = await _inner.ReceiveAsync(_rx, ct);
-        if (res.ReceivedBytes >= LobbyEnvelope.HeaderBytes)
-        {
-            int n = res.ReceivedBytes - LobbyEnvelope.HeaderBytes;
-            _rx.AsSpan(LobbyEnvelope.HeaderBytes, n).CopyTo(buffer.Span);
-            return new SocketReceiveFromResult { ReceivedBytes = n, RemoteEndPoint = res.RemoteEndPoint };
-        }
-        return new SocketReceiveFromResult { ReceivedBytes = 0, RemoteEndPoint = res.RemoteEndPoint };
+        _rx.AsSpan(0, res.ReceivedBytes).CopyTo(buffer.Span);
+        return new SocketReceiveFromResult { ReceivedBytes = res.ReceivedBytes, RemoteEndPoint = res.RemoteEndPoint };
     }
 
     public async ValueTask<int> ReceiveFromAsync(Memory<byte> buffer, SocketAddress address, CancellationToken ct)
     {
         int n = await _inner.ReceiveFromAsync(_rx, address, ct);
-        if (n < LobbyEnvelope.HeaderBytes) return 0;
-        _rx.AsSpan(LobbyEnvelope.HeaderBytes, n - LobbyEnvelope.HeaderBytes).CopyTo(buffer.Span);
-        return n - LobbyEnvelope.HeaderBytes;
+        _rx.AsSpan(0, n).CopyTo(buffer.Span);
+        return n;
     }
 
-    public ValueTask<int> SendToAsync(ReadOnlyMemory<byte> buffer, SocketAddress addr, CancellationToken ct)
+    // Backdash's PeerClient asserts that the bytes it handed us equal the bytes it believes it
+    // sent (sentSize == bodySize), so the returned count must be the PAYLOAD length, not the
+    // enveloped length — the +6 header is ours, not the session's.
+    public async ValueTask<int> SendToAsync(ReadOnlyMemory<byte> buffer, SocketAddress addr, CancellationToken ct)
     {
-        var outbound = PackInto(_tx, buffer);
-        return _inner.SendToAsync(outbound, addr, ct);
+        var outbound = PackInto(buffer);
+        int sent = await _inner.SendToAsync(outbound, addr, ct);
+        return Math.Max(0, sent - LobbyEnvelope.HeaderBytes);
     }
 
-    public ValueTask<int> SendToAsync(ReadOnlyMemory<byte> buffer, EndPoint ep, CancellationToken ct)
+    public async ValueTask<int> SendToAsync(ReadOnlyMemory<byte> buffer, EndPoint ep, CancellationToken ct)
     {
-        var outbound = PackInto(_tx, buffer);
-        return _inner.SendToAsync(outbound, ep, ct);
+        var outbound = PackInto(buffer);
+        int sent = await _inner.SendToAsync(outbound, ep, ct);
+        return Math.Max(0, sent - LobbyEnvelope.HeaderBytes);
     }
 
-    private ReadOnlyMemory<byte> PackInto(byte[] scratch, ReadOnlyMemory<byte> payload)
+    private ReadOnlyMemory<byte> PackInto(ReadOnlyMemory<byte> payload)
     {
         // A payload too big for the scratch cannot be enveloped; send nothing rather than an
         // unwrapped frame the server would misroute (the relay's own buffer is 2 KiB anyway).
-        if (payload.Length + LobbyEnvelope.HeaderBytes > scratch.Length) return ReadOnlyMemory<byte>.Empty;
-        scratch[0] = _envelope[0]; scratch[1] = _envelope[1];
-        scratch[2] = _envelope[2]; scratch[3] = _envelope[3];
-        scratch[4] = _envelope[4]; scratch[5] = _envelope[5];
-        payload.Span.CopyTo(scratch.AsSpan(LobbyEnvelope.HeaderBytes));
-        return new ReadOnlyMemory<byte>(scratch, 0, payload.Length + LobbyEnvelope.HeaderBytes);
+        if (payload.Length + LobbyEnvelope.HeaderBytes > ScratchSize) return ReadOnlyMemory<byte>.Empty;
+        var outbound = new byte[payload.Length + LobbyEnvelope.HeaderBytes];
+        outbound[0] = _envelope[0]; outbound[1] = _envelope[1];
+        outbound[2] = _envelope[2]; outbound[3] = _envelope[3];
+        outbound[4] = _envelope[4]; outbound[5] = _envelope[5];
+        payload.Span.CopyTo(outbound.AsSpan(LobbyEnvelope.HeaderBytes));
+        return outbound;
     }
 
     public void Update() => _inner.Update();

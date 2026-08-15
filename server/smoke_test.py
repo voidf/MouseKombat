@@ -18,8 +18,9 @@ from protocol import (
     MSG_ADD_AI, MSG_BYE, MSG_CHAR_PICK, MSG_HELLO, MSG_HOST_SEND_TO, MSG_LOBBY_CREATE,
     MSG_LOBBY_JOIN, MSG_LOBBY_LIST, MSG_LOBBY_PLAYER_JOINED, MSG_LOBBY_ROOMS,
     MSG_MATCH_ENDED, MSG_MATCH_INPUT_REPORT, MSG_MATCH_INPUTS, MSG_MATCH_RESULT,
-    MSG_MATCH_START, MSG_REJECTED, MSG_ROOM_STATE, MSG_SEAT_CLAIM, MSG_SEAT_RELEASE,
-    MSG_START_MATCH, MSG_WELCOME, PROTOCOL, FrameReader, decode_body, encode_frame,
+    MSG_MATCH_START, MSG_REJECTED, MSG_REMOVE_AI, MSG_ROOM_STATE, MSG_SEAT_CLAIM,
+    MSG_SEAT_RELEASE, MSG_START_MATCH, MSG_WELCOME, PROTOCOL, FrameReader, decode_body,
+    encode_frame,
 )
 from lobby_server import LobbyServer
 
@@ -314,6 +315,44 @@ async def run_scenarios(host, port, udp_port):
     await hostc.send(MSG_MATCH_START, [40.0, 760.0, 800.0, 120.0, 560.0, 650.0, 560.0])
     f = await mem.recv_until(MSG_START_MATCH)
     check(f is not None, "rematch: a room can start a second match")
+
+    # ---- AI placement carries its character (the seat was never PickCharacter'd) ----
+    # End the second match first so both seats are free again.
+    await hostc.send(MSG_MATCH_RESULT, [1])
+    await mem.recv_until(MSG_MATCH_ENDED)
+    await mem.wait_room_state(
+        lambda s: s[4] is False and all(x[0] == 0 for x in s[1]))
+    await hostc.send(MSG_ADD_AI, [1, "", 2])       # seat 1, character 2, built-in AI
+    f = await mem.wait_room_state(lambda s: s[1][1][2] is True and s[1][1][1] == 2)
+    check(f is not None, "ai: the host player places an AI with its character")
+    await hostc.send(MSG_REMOVE_AI, [1])
+    await mem.wait_room_state(lambda s: not s[1][1][2])
+    # Re-pick for the final hand-off below.
+    await hostc.claim(0)
+    await mem.claim(1)
+    await hostc.wait_room_state(
+        lambda s: s[1][0][0] == hostc.player_id and s[1][1][0] == mem.player_id)
+    await hostc.pick(0)
+    await mem.pick(1)
+    await hostc.wait_room_state(lambda s: s[1][0][1] == 0 and s[1][1][1] == 1)
+
+    # ---- a member leaving KEEPS the connection: back to browse, same socket ----
+    bye_mem = FakeClient(host, port, "回头客", udp_port=40008)
+    await bye_mem.connect()
+    await bye_mem.hello()
+    w = await bye_mem.join(hostc.room_id)
+    await hostc.recv_until(MSG_LOBBY_PLAYER_JOINED)
+    await bye_mem.send(MSG_BYE, ["玩家离开了房间"])
+    f = await hostc.wait_room_state(lambda s: len(s[0]) == 2)   # the leaver dropped out
+    check(f is not None, "leave: the member is removed from the room")
+    await bye_mem.send(MSG_LOBBY_LIST, [0])
+    f = await bye_mem.recv_until(MSG_LOBBY_ROOMS)
+    check(f is not None and f[1][0] == 0,
+          "leave: the member's connection survives and can browse again")
+    await bye_mem.join(hostc.room_id)   # and can re-join the same room on the same socket
+    check(bye_mem.player_id != 0,
+          "leave: the member can re-join a room on the same connection")
+    await hostc.recv_until(MSG_LOBBY_PLAYER_JOINED)
 
     # ---- host player leaves -> room destroyed, members told ----
     hostc.close()

@@ -666,11 +666,18 @@ public partial class NetSeatScreen : Control
         if (Net.IsLobby)
         {
             // Spec: the host player's Esc destroys the room and goes to the MAIN menu (everyone
-            // else gets the disconnect popup); a member just leaves the room and goes back to the
-            // lobby to browse again.
-            bool hostPlayer = Net.IsHost;
-            Net.Leave(hostPlayer ? "主持玩家已离开房间" : "玩家离开了房间");
-            GetTree().ChangeSceneToFile(hostPlayer ? MainMenuScenePath : LobbyMenuScenePath);
+            // else gets the disconnect popup). A member just leaves the room — the LOBBY connection
+            // stays up and the browser reappears when the lobby menu asks for the first page.
+            if (Net.IsHost)
+            {
+                Net.Leave("主持玩家已离开房间");
+                GetTree().ChangeSceneToFile(MainMenuScenePath);
+            }
+            else
+            {
+                Net.LeaveLobbyRoom("玩家离开了房间");
+                GetTree().ChangeSceneToFile(LobbyMenuScenePath);
+            }
             return;
         }
         bool wasHost = Net.IsHost;

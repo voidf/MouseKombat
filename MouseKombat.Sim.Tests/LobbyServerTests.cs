@@ -5,7 +5,9 @@ using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading;
+using Backdash.Network.Client;
 using MouseKombat.Net;
+using MouseKombat.Sim;
 
 // ---- lobby server integration test ----
 //
@@ -146,11 +148,30 @@ internal static partial class Program
             RunLobbyScenarios(port, Ver);
             LobbyEnvelopeTests();
             RunLobbyClientScenario(port, Ver);
+            LobbyRelayMatchTest(port, Ver);
         }
         finally
         {
-            try { proc.Kill(entireProcessTree: true); } catch { }
-            try { proc.WaitForExit(3000); } catch { }
+            // Diagnose a failed relay by dumping what the server actually logged (dropped UDP,
+            // refused matches, etc.) — the room channel's stdout is redirected and would otherwise
+            // vanish on failure. Kill FIRST: the process is still alive and ReadToEnd blocks on EOF.
+            if (_fail > 0)
+            {
+                try { proc.Kill(entireProcessTree: true); } catch { }
+                try { proc.WaitForExit(2000); } catch { }
+                try
+                {
+                    Console.WriteLine("--- lobby server log ---");
+                    Console.WriteLine(proc.StandardError.ReadToEnd());
+                    Console.WriteLine(proc.StandardOutput.ReadToEnd());
+                }
+                catch { }
+            }
+            else
+            {
+                try { proc.Kill(entireProcessTree: true); } catch { }
+                try { proc.WaitForExit(3000); } catch { }
+            }
         }
     }
 
@@ -171,38 +192,125 @@ internal static partial class Program
             "lobby envelope: a foreign short datagram is refused, not crashed on");
     }
 
+    // Poll a lobby client until an event of `kind` arrives. Frames of other kinds are skipped;
+    // a frame-less event (e.g. RoomChanged right after Welcome) cannot satisfy a frame predicate.
+    private static bool LobbyWait(LobbyRoomClient c, LobbyRoomClient.EventKind kind,
+                                  Func<NetFrame, bool> ok = null, int timeoutMs = 6000)
+    {
+        long deadline = Environment.TickCount64 + timeoutMs;
+        while (Environment.TickCount64 < deadline)
+        {
+            c.Poll();
+            while (c.TryDequeueEvent(out var e))
+            {
+                if (e.Kind != kind) continue;
+                if (ok == null) return true;
+                if (e.Frame.Body == null) continue;
+                if (ok(e.Frame)) return true;
+            }
+            Thread.Sleep(1);
+        }
+        return false;
+    }
+
+    // Two REAL rollback sessions through the REAL lobby server. The fighters' UDP goes through the
+    // server's relay wrapped in the LobbyMatchSocket envelope — the exact path a lobby game uses —
+    // so this is the assertion that the server relay + the client envelope actually synchronize a
+    // match (the loopback version of the user's 两个真人玩家卡在同步中). The room is driven by the
+    // real LobbyRoomClient up to MatchStart, then the sessions take over on the announced ports.
+    private static void LobbyRelayMatchTest(int port, string ver)
+    {
+        const int delay = 2;
+        var expected = ReferenceRun(NetFrames, delay);
+
+        using var sockA = BindUdp();
+        using var sockB = BindUdp();
+
+        using var host = new LobbyRoomClient { MatchUdpPort = sockA.Port };
+        host.Connect("127.0.0.1", port, "房主", ver);
+        host.CreateRoom(4, "", true);
+        Check(LobbyWait(host, LobbyRoomClient.EventKind.Connected), "lobby relay: host player created the room");
+        string roomId = host.Room.RoomId;
+
+        using var mem = new LobbyRoomClient { MatchUdpPort = sockB.Port };
+        mem.Connect("127.0.0.1", port, "玩家乙", ver);
+        mem.JoinRoom(roomId, "");
+        Check(LobbyWait(mem, LobbyRoomClient.EventKind.Connected), "lobby relay: member joined");
+
+        host.ClaimSeat(0);
+        mem.ClaimSeat(1);
+        LobbyWait(host, LobbyRoomClient.EventKind.RoomChanged,
+            f => f.As<RoomSnapshot>().Seats[0].OccupantPlayerId == host.PlayerId);
+        LobbyWait(mem, LobbyRoomClient.EventKind.RoomChanged,
+            f => f.As<RoomSnapshot>().Seats[1].OccupantPlayerId == mem.PlayerId);
+        host.PickCharacter(0);
+        mem.PickCharacter(1);
+        LobbyWait(host, LobbyRoomClient.EventKind.RoomChanged,
+            f => f.As<RoomSnapshot>().Seats[0].Ready && f.As<RoomSnapshot>().Seats[1].Ready);
+        host.RequestMatchStart(new MatchStart());
+        Check(LobbyWait(mem, LobbyRoomClient.EventKind.MatchStarting), "lobby relay: match started");
+        LobbyWait(mem, LobbyRoomClient.EventKind.RoomChanged, f => f.As<RoomSnapshot>().MatchRunning);
+
+        int roomIdNum = int.Parse(roomId);
+        var epServer = new IPEndPoint(IPAddress.Loopback, port);   // server UDP port == TCP port
+
+        var simA = MakeSim(240, 520);
+        var simB = MakeSim(240, 520);
+        var viewA = new TestPresenter(simA, NetScript);
+        var viewB = new TestPresenter(simB, NetScript);
+
+        // Each session believes its opponent lives at the SERVER's endpoint; the envelope carries
+        // {roomId, mySeat, otherSeat} so the server knows where to forward.
+        using var a = RollbackMatch.Create(simA, viewA, new MatchNetSetup
+        {
+            LocalSeat = new[] { true, false },
+            RemoteEndPoint = epServer,
+            Socket = new LobbyMatchSocket(sockA, roomIdNum, 0, 1),
+            InputDelayFrames = delay,
+        });
+        using var b = RollbackMatch.Create(simB, viewB, new MatchNetSetup
+        {
+            LocalSeat = new[] { false, true },
+            RemoteEndPoint = epServer,
+            Socket = new LobbyMatchSocket(sockB, roomIdNum, 1, 0),
+            InputDelayFrames = delay,
+        });
+
+        int target = NetFrames + NetOvershoot;
+        var sw = Stopwatch.StartNew();
+        bool ok = false;
+        while (sw.Elapsed < TimeSpan.FromSeconds(30))
+        {
+            host.Poll();
+            mem.Poll();
+            viewA.SetLocalFrame(a.Frame); a.Tick();
+            viewB.SetLocalFrame(b.Frame); b.Tick();
+            if (a.Frame >= target && b.Frame >= target) { ok = true; break; }
+            Thread.Yield();
+        }
+
+        Check(ok, $"lobby relay: both fighters reached frame {target} (A={a.Frame} B={b.Frame})");
+        Check(a.Synchronized && b.Synchronized,
+            "lobby relay: both fighters synchronized through the server");
+        Check(SameValues(expected, viewA.Value, NetFrames, out string whyA),
+            "lobby relay: side A matches a never-rewound run" + whyA);
+        Check(SameValues(expected, viewB.Value, NetFrames, out string whyB),
+            "lobby relay: side B matches a never-rewound run" + whyB);
+        DrainEvents(a, "lobby relay A");
+        DrainEvents(b, "lobby relay B");
+    }
+
     // The REAL client class (LobbyRoomClient) against the live server: browse, create, join, seats,
     // match start, the catch-up routing and the end. The raw-probe scenario above pins the wire
     // bytes; this one pins the client's behaviour on top of them.
     private static void RunLobbyClientScenario(int port, string ver)
     {
-        static bool Wait(LobbyRoomClient c, LobbyRoomClient.EventKind kind,
-                         Func<NetFrame, bool> ok = null, int timeoutMs = 6000)
-        {
-            long deadline = Environment.TickCount64 + timeoutMs;
-            while (Environment.TickCount64 < deadline)
-            {
-                c.Poll();
-                while (c.TryDequeueEvent(out var e))
-                {
-                    if (e.Kind != kind) continue;
-                    if (ok == null) return true;
-                    // A frame-less event (e.g. RoomChanged right after Welcome) cannot satisfy a
-                    // frame predicate; skip it and keep waiting for the one that carries a frame.
-                    if (e.Frame.Body == null) continue;
-                    if (ok(e.Frame)) return true;
-                }
-                Thread.Sleep(1);
-            }
-            return false;
-        }
-
         // browse: one connection pages through the room list
         using (var browser = new LobbyRoomClient { MatchUdpPort = 0 })
         {
             browser.Connect("127.0.0.1", port, "浏览者", ver);
             browser.ListRooms(0);
-            Check(Wait(browser, LobbyRoomClient.EventKind.LobbyRooms,
+            Check(LobbyWait(browser, LobbyRoomClient.EventKind.LobbyRooms,
                        f => f.As<LobbyRooms>().Page == 0),
                 "lobby client: browses the room list page");
         }
@@ -211,7 +319,7 @@ internal static partial class Program
         using var host = new LobbyRoomClient { MatchUdpPort = 46000 };
         host.Connect("127.0.0.1", port, "房主", ver);
         host.CreateRoom(4, "", true);
-        Check(Wait(host, LobbyRoomClient.EventKind.Connected), "lobby client: create lands in the room");
+        Check(LobbyWait(host, LobbyRoomClient.EventKind.Connected), "lobby client: create lands in the room");
         Check(host.IsHostPlayer, "lobby client: the creator is the host player");
         string roomId = host.Room.RoomId;
         Check(roomId.Length == 6, "lobby client: the room id is 6 digits");
@@ -220,28 +328,28 @@ internal static partial class Program
         using var mem = new LobbyRoomClient { MatchUdpPort = 46001 };
         mem.Connect("127.0.0.1", port, "玩家乙", ver);
         mem.JoinRoom(roomId, "");
-        Check(Wait(mem, LobbyRoomClient.EventKind.Connected) && !mem.IsHostPlayer,
+        Check(LobbyWait(mem, LobbyRoomClient.EventKind.Connected) && !mem.IsHostPlayer,
             "lobby client: a member joins as a non-host");
-        Check(Wait(host, LobbyRoomClient.EventKind.LobbyPlayerJoined,
+        Check(LobbyWait(host, LobbyRoomClient.EventKind.LobbyPlayerJoined,
                    f => f.As<LobbyPlayerJoined>().PlayerId == mem.PlayerId),
             "lobby client: the host player is told who joined");
 
         // seats + characters + match start
         host.ClaimSeat(0);
         mem.ClaimSeat(1);
-        Wait(host, LobbyRoomClient.EventKind.RoomChanged,
+        LobbyWait(host, LobbyRoomClient.EventKind.RoomChanged,
              f => f.As<RoomSnapshot>().Seats[0].OccupantPlayerId == host.PlayerId);
-        Wait(mem, LobbyRoomClient.EventKind.RoomChanged,
+        LobbyWait(mem, LobbyRoomClient.EventKind.RoomChanged,
              f => f.As<RoomSnapshot>().Seats[1].OccupantPlayerId == mem.PlayerId);
         host.PickCharacter(0);
         mem.PickCharacter(1);
-        Wait(host, LobbyRoomClient.EventKind.RoomChanged,
+        LobbyWait(host, LobbyRoomClient.EventKind.RoomChanged,
              f => f.As<RoomSnapshot>().Seats[0].Ready && f.As<RoomSnapshot>().Seats[1].Ready);
         host.RequestMatchStart(new MatchStart { P2StartX = 651f });
-        Check(Wait(mem, LobbyRoomClient.EventKind.MatchStarting,
+        Check(LobbyWait(mem, LobbyRoomClient.EventKind.MatchStarting,
                    f => f.As<StartMatch>().P2StartX == 651f),
             "lobby client: StartMatch arrives with the host player's geometry");
-        Wait(mem, LobbyRoomClient.EventKind.RoomChanged, f => f.As<RoomSnapshot>().MatchRunning);
+        LobbyWait(mem, LobbyRoomClient.EventKind.RoomChanged, f => f.As<RoomSnapshot>().MatchRunning);
 
         // UDP relay with the envelope bytes the match socket actually produces
         bool relayOk = false;
@@ -262,30 +370,60 @@ internal static partial class Program
         var body = new byte[frame.Length - NetCodec.HeaderBytes];
         Buffer.BlockCopy(frame, NetCodec.HeaderBytes, body, 0, body.Length);
         host.HostSendTo(mem.PlayerId, MsgType.MatchInputs, body);
-        Check(Wait(mem, LobbyRoomClient.EventKind.MatchInputs,
+        Check(LobbyWait(mem, LobbyRoomClient.EventKind.MatchInputs,
                    f => f.As<MatchInputs>().StartFrame == 7),
             "lobby client: HostSendTo delivers the stream frame");
 
         // the fighter's report reaches the host player through the server
         var rep = new MatchInputReport { StartFrame = 3, P1 = new ushort[] { 5 }, P2 = new ushort[] { 6 } };
         mem.Send(MsgType.MatchInputReport, rep);
-        Check(Wait(host, LobbyRoomClient.EventKind.InputReport,
+        Check(LobbyWait(host, LobbyRoomClient.EventKind.InputReport,
                    f => f.As<MatchInputReport>().StartFrame == 3),
             "lobby client: the host player receives the fighter's report");
 
         // MatchResult ends the match and clears the seats
         host.ReportMatchResult(0);
-        Check(Wait(mem, LobbyRoomClient.EventKind.MatchEnded,
+        Check(LobbyWait(mem, LobbyRoomClient.EventKind.MatchEnded,
                    f => f.As<MatchEnded>().WinnerSeat == 0),
             "lobby client: MatchResult ends the match");
-        Check(Wait(mem, LobbyRoomClient.EventKind.RoomChanged,
+        Check(LobbyWait(mem, LobbyRoomClient.EventKind.RoomChanged,
                    f => !f.As<RoomSnapshot>().MatchRunning
                         && f.As<RoomSnapshot>().Seats[0].OccupantPlayerId == 0),
             "lobby client: seats cleared after the match");
 
+        // AI placement carries its character in the message (the seat was never PickCharacter'd)
+        host.AddAi(1, 2, "");
+        Check(LobbyWait(host, LobbyRoomClient.EventKind.RoomChanged,
+                   f => f.As<RoomSnapshot>().Seats[1].IsAi
+                        && f.As<RoomSnapshot>().Seats[1].Character == 2),
+            "lobby client: the host player places an AI with its character");
+        host.RemoveAi(1);
+        LobbyWait(host, LobbyRoomClient.EventKind.RoomChanged,
+            f => !f.As<RoomSnapshot>().Seats[1].IsAi);
+
+        // a member leaving KEEPS the lobby connection (back to browse on the same socket)
+        host.ClaimSeat(0);
+        mem.ClaimSeat(1);
+        LobbyWait(host, LobbyRoomClient.EventKind.RoomChanged,
+            f => f.As<RoomSnapshot>().Seats[0].OccupantPlayerId == host.PlayerId);
+        host.PickCharacter(0);
+        mem.PickCharacter(1);
+        LobbyWait(host, LobbyRoomClient.EventKind.RoomChanged,
+            f => f.As<RoomSnapshot>().Seats[0].Ready && f.As<RoomSnapshot>().Seats[1].Ready);
+        mem.LeaveRoom("玩家离开了房间");
+        LobbyWait(host, LobbyRoomClient.EventKind.RoomChanged,
+            f => Array.Find(f.As<RoomSnapshot>().Players, p => p.PlayerId == mem.PlayerId) == null);
+        mem.ListRooms(0);
+        Check(LobbyWait(mem, LobbyRoomClient.EventKind.LobbyRooms,
+                   f => f.As<LobbyRooms>().Page == 0),
+            "lobby client: leaving a room keeps the connection browsable");
+        mem.JoinRoom(roomId, "");
+        Check(LobbyWait(mem, LobbyRoomClient.EventKind.Connected) && !mem.IsHostPlayer,
+            "lobby client: the same connection can re-join a room");
+
         // the host player leaving destroys the room
         host.Disconnect("房主离开");
-        Check(Wait(mem, LobbyRoomClient.EventKind.Disconnected),
+        Check(LobbyWait(mem, LobbyRoomClient.EventKind.Disconnected),
             "lobby client: the member is told when the host player leaves");
     }
 

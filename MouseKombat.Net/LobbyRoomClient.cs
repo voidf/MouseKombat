@@ -279,7 +279,10 @@ public sealed class LobbyRoomClient : IDisposable
     public void ClaimSeat(int seat) => Send(MsgType.SeatClaim, new SeatClaim { Seat = seat });
     public void ReleaseSeat() => Send(MsgType.SeatRelease, new SeatRelease());
     public void PickCharacter(int character) => Send(MsgType.CharPick, new CharPick { Character = character });
-    public void AddAi(int seat, string model) => Send(MsgType.AddAi, new AddAi { Seat = seat, AiModel = model ?? "" });
+    // The character travels WITH the AI: the pick never went to the server (the seat belongs to
+    // nobody yet), so the server cannot read it back from the seat.
+    public void AddAi(int seat, int character, string model) =>
+        Send(MsgType.AddAi, new AddAi { Seat = seat, Character = character, AiModel = model ?? "" });
     public void RemoveAi(int seat) => Send(MsgType.RemoveAi, new RemoveAi { Seat = seat });
     public void ReportMatchResult(int winnerSeat) => Send(MsgType.MatchResult, new MatchResult { WinnerSeat = winnerSeat });
 
@@ -335,6 +338,14 @@ public sealed class LobbyRoomClient : IDisposable
     {
         if (_stage == Stage.Room && reason != null) Send(MsgType.Bye, new Bye { Reason = reason });
         Shutdown();
+    }
+
+    // Leave the room but KEEP the connection: the server returns it to the browse phase, so the
+    // caller can page the room list and create/join again on the same socket (spec: ESC 退出房间
+    // 后回到选房界面，不断开大厅连接).
+    public void LeaveRoom(string reason)
+    {
+        if (_stage == Stage.Room && reason != null) Send(MsgType.Bye, new Bye { Reason = reason });
     }
 
     private void Fail(string why)

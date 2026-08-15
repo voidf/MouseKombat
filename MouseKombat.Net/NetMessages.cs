@@ -147,6 +147,12 @@ public sealed class AddAi
 {
     [Key(0)] public int Seat { get; set; }
     [Key(1)] public string AiModel { get; set; } = "";   // "" = built-in state machine
+    // The character to place, sent explicitly rather than read back from the seat: the AI flow
+    // picks a character in the same breath as the model (the seat was never PickCharacter'd —
+    // it does not belong to anyone yet), so the server cannot know it. -1 = fall back to the
+    // seat's current character (the pre-0.0.8 behaviour; a LAN host filling an empty seat via
+    // this message sends it).
+    [Key(2)] public int Character { get; set; } = -1;
 }
 
 [MessagePackObject]
