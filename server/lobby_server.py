@@ -117,6 +117,7 @@ class LobbyServer:
         self.max_rooms = max_rooms
         self.rooms = {}             # int room id -> Room
         self._udp_transport = None
+        self._udp_rebinding = False
         self._tcp_server = None
 
     # ---- lifecycle ----
@@ -128,7 +129,7 @@ class LobbyServer:
         # and StartMatch announces the REAL udp port.
         self.port = self._tcp_server.sockets[0].getsockname()[1]
         transport, _ = await asyncio.get_running_loop().create_datagram_endpoint(
-            lambda: _UdpProtocol(self._handle_udp), local_addr=(self.host, self.udp_port))
+            lambda: _UdpProtocol(self._handle_udp, self._udp_died), local_addr=(self.host, self.udp_port))
         self._udp_transport = transport
         self.udp_port = transport.get_extra_info("sockname")[1]
         asyncio.get_running_loop().create_task(self._reaper_loop())
@@ -494,6 +495,42 @@ class LobbyServer:
             if rid not in self.rooms:
                 return rid
 
+    # Windows Proactor tears down the UDP receive loop on a ConnectionReset — an ICMP "port
+    # unreachable" from a datagram forwarded to a peer that closed its socket (the fighters'
+    # sessions die at match end, and a last in-flight packet can still be relayed). Without this
+    # the relay would silently stop forwarding every later match. Linux keeps the transport alive
+    # on error_received, so the rebind is a no-op there in practice; on Windows it is what keeps
+    # consecutive matches playable.
+    def _udp_died(self):
+        if self._udp_rebinding:
+            return
+        self._udp_rebinding = True
+        asyncio.get_running_loop().create_task(self._rebind_udp())
+
+    async def _rebind_udp(self):
+        try:
+            # abort(), not close(): close() waits for pending operations, and on Windows the
+            # Proactor's UDP receive loop is already dead — the port stays held for seconds and
+            # the rebind keeps hitting WinError 10048.
+            self._udp_transport.abort()
+        except Exception:
+            pass
+        try:
+            for attempt in range(50):
+                try:
+                    transport, _ = await asyncio.get_running_loop().create_datagram_endpoint(
+                        lambda: _UdpProtocol(self._handle_udp, self._udp_died),
+                        local_addr=(self.host, self.udp_port))
+                    self._udp_transport = transport
+                    log.warning("udp transport rebound on %s:%d (attempt %d)",
+                                self.host, self.udp_port, attempt + 1)
+                    return
+                except OSError:
+                    await asyncio.sleep(0.05)
+            log.warning("udp transport rebind failed after retries")
+        finally:
+            self._udp_rebinding = False
+
     async def _reaper_loop(self):
         while True:
             await asyncio.sleep(30)
@@ -535,17 +572,26 @@ class LobbyServer:
         if src not in (0, 1) or dst not in (0, 1) or src == dst:
             return
         sa, da = state.seat(src), state.seat(dst)
-        if sa.occupant_player_id == 0 or sa.is_ai:
-            return   # AI seats have no socket: their input enters as the host player's
-        if da.occupant_player_id == 0 or da.is_ai:
-            return
-        msrc = room.members.get(sa.occupant_player_id)
-        mdst = room.members.get(da.occupant_player_id)
-        if msrc is None or mdst is None:
-            return
         ip = normalize_ip(addr[0])
-        if ip != msrc.tcp_ip:
-            return   # a datagram claiming a seat must come from that member's connection
+        if sa.is_ai:
+            # An AI seat is driven by the HOST player's machine (its inputs enter as the host's),
+            # so a datagram claiming an AI seat may only come from the host player — but it is a
+            # REAL fighter's packet and must be forwarded, exactly like the host's own seat.
+            msrc = room.host_member
+            if msrc is None or ip != msrc.tcp_ip:
+                return
+        else:
+            msrc = room.members.get(sa.occupant_player_id)
+            if msrc is None or ip != msrc.tcp_ip:
+                return   # a datagram claiming a seat must come from that member's connection
+        if da.is_ai:
+            # The AI seat has no socket of its own: its opponent's packets are driven by the host
+            # player's session, so they are forwarded to the HOST's endpoint.
+            mdst = room.host_member
+        else:
+            mdst = room.members.get(da.occupant_player_id)
+        if mdst is None:
+            return
         # Learn the member's PUBLIC match endpoint from what it actually sends: the announced
         # port is a LOCAL port, and behind a NAT the public UDP port differs. The FIRST datagram
         # (or any from the announced endpoint) is trusted by IP + seat claim; after that the
@@ -571,8 +617,9 @@ class LobbyServer:
 
 
 class _UdpProtocol(asyncio.DatagramProtocol):
-    def __init__(self, on_datagram):
+    def __init__(self, on_datagram, on_fatal=None):
         self._on_datagram = on_datagram
+        self._on_fatal = on_fatal
 
     def connection_made(self, transport):
         self.transport = transport
@@ -581,7 +628,12 @@ class _UdpProtocol(asyncio.DatagramProtocol):
         self._on_datagram(data, addr)
 
     def error_received(self, exc):
-        pass
+        log.warning("udp error_received: %r", exc)
+        if self._on_fatal is not None:
+            self._on_fatal()
+
+    def connection_lost(self, exc):
+        log.warning("udp connection_lost: %r", exc)
 
 
 # --------------------------------------------------------------------------- main

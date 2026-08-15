@@ -469,9 +469,11 @@ public partial class GameManager : Node2D, IMatchPresenter
             // of the peer. Nothing is ticked — the sim did not move and the animation is locked to the
             // sim (see Player.TickAnimation), so freezing is the right picture of "waiting".
             _stalledTicks++;
-            // Only once the peer is actually synchronized: during the initial handshake every tick
-            // stalls, and "等待对方…" would replace the more accurate "正在与对方同步…".
-            if (_stalledTicks == 30 && _netMatch.Synchronized) SetNetStatus("等待对方…");
+            // A knockout has the same symptom WITHOUT a network problem: the opponent's session stops
+            // driving its session the moment IT enters its win sequence, so OUR session stalls until
+            // the host's MatchEnded arrives. Over a finished KO that must not read as "waiting for
+            // the opponent" — the sim already says the round is over.
+            if (_stalledTicks == 30 && _netMatch.Synchronized && !_sim.MatchOver) SetNetStatus("等待对方…");
             return;
         }
         if (_stalledTicks > 0) { _stalledTicks = 0; SetNetStatus(""); }

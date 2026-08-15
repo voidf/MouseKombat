@@ -166,7 +166,9 @@ internal static partial class Program
             RunLobbyScenarios(port, Ver);
             LobbyEnvelopeTests();
             RunLobbyClientScenario(port, Ver);
+            UdpSocketBareSendTest();
             LobbyRelayMatchTest(port, Ver);
+            LobbyAiVsHumanRelayTest(port, Ver);
             LobbyRematchRelayTest(port, Ver);
         }
         catch (Exception e)
@@ -319,6 +321,141 @@ internal static partial class Program
             "lobby relay: side B matches a never-rewound run" + whyB);
         DrainEvents(a, "lobby relay A");
         DrainEvents(b, "lobby relay B");
+        Thread.Sleep(600);   // let the sessions' final in-flight packets drain before the next match
+    }
+
+    // Minimal probe: does a Backdash UdpSocket's SendToAsync actually emit datagrams? The failing
+    // rematch sessions "send" with no exception yet nothing reaches the server — if a bare
+    // UdpSocket cannot deliver either, the bug is inside Backdash's socket, not our envelope.
+    private static void UdpSocketBareSendTest()
+    {
+        const int attempts = 5;
+        using var sock = BindUdp();
+        using var probe = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
+        var dst = (IPEndPoint)probe.Client.LocalEndPoint;
+        byte[] payload = { 1, 2, 3, 4 };
+        var from = new IPEndPoint(IPAddress.Any, 0);
+        bool ok = false;
+        for (int i = 0; i < attempts; i++)
+        {
+            var t = sock.SendToAsync(payload, dst, CancellationToken.None);
+            t.AsTask().Wait(2000);
+            if (t.IsCompletedSuccessfully && t.Result == payload.Length)
+            {
+                probe.Client.ReceiveTimeout = 500;
+                try { probe.Receive(ref from); ok = true; break; } catch (SocketException) { }
+            }
+            Thread.Sleep(20);
+        }
+        Console.WriteLine($"[dbg] UdpSocket bare send (EndPoint): {(ok ? "DELIVERED" : "NOT DELIVERED")}");
+        Check(ok, "udp-socket probe: a bare Backdash UdpSocket delivers its datagrams");
+
+        // The SOCKETADDRESS overload is what a Backdash session actually calls (see the SEND logs);
+        // it must deliver too.
+        bool okAddr = false;
+        for (int i = 0; i < attempts; i++)
+        {
+            var sa = new SocketAddress(AddressFamily.InterNetwork);
+            sa[2] = (byte)(dst.Port >> 8); sa[3] = (byte)dst.Port;
+            sa[4] = dst.Address.GetAddressBytes()[0]; sa[5] = dst.Address.GetAddressBytes()[1];
+            sa[6] = dst.Address.GetAddressBytes()[2]; sa[7] = dst.Address.GetAddressBytes()[3];
+            var t = sock.SendToAsync(payload, sa, CancellationToken.None);
+            t.AsTask().Wait(2000);
+            if (t.IsCompletedSuccessfully && t.Result == payload.Length)
+            {
+                probe.Client.ReceiveTimeout = 500;
+                try { probe.Receive(ref from); okAddr = true; break; } catch (SocketException) { }
+            }
+            Thread.Sleep(20);
+        }
+        Console.WriteLine($"[dbg] UdpSocket bare send (SocketAddress): {(okAddr ? "DELIVERED" : "NOT DELIVERED")}");
+        Check(okAddr, "udp-socket probe: the SocketAddress overload delivers too");
+    }
+
+    // The user's AI-vs-human lobby match: the HOST PLAYER holds NO seat and drives an AI seat
+    // instead, against a human member (machine B). The host machine's session therefore sends
+    // datagrams claiming the AI seat as src — the server must forward those (only the host may
+    // drive an AI seat, but its packets are as real as any fighter's). This is the configuration
+    // that froze at "正在等待对方同步" in the user's room.
+    private static void LobbyAiVsHumanRelayTest(int port, string ver)
+    {
+        const int delay = 2;
+        var expected = ReferenceRun(NetFrames, delay);
+
+        using var sockA = BindUdp();
+        using var sockB = BindUdp();
+
+        using var host = new LobbyRoomClient { MatchUdpPort = sockA.Port };
+        host.Connect("127.0.0.1", port, "房主", ver);
+        host.CreateRoom(4, "", true);
+        Check(LobbyWait(host, LobbyRoomClient.EventKind.Connected), "lobby ai-vs-human: room created");
+        string roomId = host.Room.RoomId;
+
+        using var mem = new LobbyRoomClient { MatchUdpPort = sockB.Port };
+        mem.Connect("127.0.0.1", port, "玩家乙", ver);
+        mem.JoinRoom(roomId, "");
+        LobbyWait(mem, LobbyRoomClient.EventKind.Connected);
+
+        // seat 0 = AI driven by the host player's machine (the host holds no seat itself),
+        // seat 1 = the human member.
+        host.AddAi(0, 0, "");
+        LobbyWait(host, LobbyRoomClient.EventKind.RoomChanged,
+            f => f.As<RoomSnapshot>().Seats[0].IsAi);
+        mem.ClaimSeat(1);
+        mem.PickCharacter(1);
+        LobbyWait(host, LobbyRoomClient.EventKind.RoomChanged,
+            f => f.As<RoomSnapshot>().Seats[0].Ready && f.As<RoomSnapshot>().Seats[1].Ready);
+        host.RequestMatchStart(new MatchStart());
+        LobbyWait(host, LobbyRoomClient.EventKind.MatchStarting);
+        LobbyWait(mem, LobbyRoomClient.EventKind.MatchStarting);
+
+        int roomIdNum = int.Parse(roomId);
+        var epServer = new IPEndPoint(IPAddress.Loopback, port);
+
+        // The host machine drives the AI seat (local) and reaches the human through the server.
+        // The human machine drives its own seat, also through the server.
+        var simA = MakeSim(240, 520);
+        var simB = MakeSim(240, 520);
+        var viewA = new TestPresenter(simA, NetScript);
+        var viewB = new TestPresenter(simB, NetScript);
+        using var a = RollbackMatch.Create(simA, viewA, new MatchNetSetup
+        {
+            LocalSeat = new[] { true, false },
+            RemoteEndPoint = epServer,
+            Socket = new LobbyMatchSocket(sockA, roomIdNum, 0, 1),
+            InputDelayFrames = delay,
+        });
+        using var b = RollbackMatch.Create(simB, viewB, new MatchNetSetup
+        {
+            LocalSeat = new[] { false, true },
+            RemoteEndPoint = epServer,
+            Socket = new LobbyMatchSocket(sockB, roomIdNum, 1, 0),
+            InputDelayFrames = delay,
+        });
+
+        int target = NetFrames + NetOvershoot;
+        var sw = Stopwatch.StartNew();
+        bool ok = false;
+        while (sw.Elapsed < TimeSpan.FromSeconds(30))
+        {
+            host.Poll();
+            mem.Poll();
+            viewA.SetLocalFrame(a.Frame); a.Tick();
+            viewB.SetLocalFrame(b.Frame); b.Tick();
+            if (a.Frame >= target && b.Frame >= target) { ok = true; break; }
+            Thread.Yield();
+        }
+
+        Check(ok, $"lobby ai-vs-human: the AI-vs-human match synchronizes (A={a.Frame} B={b.Frame})");
+        Check(a.Synchronized && b.Synchronized,
+            "lobby ai-vs-human: both sides synchronized through the server");
+        Check(SameValues(expected, viewA.Value, NetFrames, out string whyA),
+            "lobby ai-vs-human: host side (AI) matches a never-rewound run" + whyA);
+        Check(SameValues(expected, viewB.Value, NetFrames, out string whyB),
+            "lobby ai-vs-human: human side matches a never-rewound run" + whyB);
+        DrainEvents(a, "lobby ai-vs-human A");
+        DrainEvents(b, "lobby ai-vs-human B");
+        Thread.Sleep(600);   // see above
     }
 
     // The user's exact lobby rematch scenario: a first match driven ENTIRELY by the host player
@@ -438,6 +575,7 @@ internal static partial class Program
             "lobby rematch: the second match synchronized through the server");
         DrainEvents(a, "lobby rematch A");
         DrainEvents(b, "lobby rematch B");
+        Thread.Sleep(600);   // let the sessions' final in-flight packets drain before the next match
     }
 
     // The REAL client class (LobbyRoomClient) against the live server: browse, create, join, seats,
