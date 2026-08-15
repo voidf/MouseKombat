@@ -1,12 +1,14 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene format=3 uid="uid://cxdqf3my18pec"]
 
-[ext_resource type="Script" path="res://LobbyMenuScreen.cs" id="1_lobby"]
+[ext_resource type="Script" uid="uid://7hk4qmuwvoos" path="res://LobbyMenuScreen.cs" id="1_lobby"]
 
-[node name="LobbyMenu" type="Control" node_paths=PackedStringArray("NameField", "HostField", "PortField", "ConnectButton", "StatusLabel", "Browser", "RoomList", "PageLabel", "PrevPageButton", "NextPageButton", "RefreshButton", "CreateButton", "JoinIdButton")]
+[node name="LobbyMenu" type="Control" unique_id=84609158 node_paths=PackedStringArray("NameField", "HostField", "PortField", "ConnectButton", "StatusLabel", "Browser", "RoomList", "PageLabel", "PrevPageButton", "NextPageButton", "RefreshButton", "CreateButton", "JoinIdButton")]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
 script = ExtResource("1_lobby")
 NameField = NodePath("Form/Name/Field")
 HostField = NodePath("Form/Host/Field")
@@ -22,25 +24,28 @@ RefreshButton = NodePath("Browser/Actions/Refresh")
 CreateButton = NodePath("Browser/Actions/Create")
 JoinIdButton = NodePath("Browser/Actions/JoinId")
 
-[node name="BG" type="ColorRect" parent="."]
+[node name="BG" type="ColorRect" parent="." unique_id=288962580]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
 color = Color(0.07, 0.075, 0.1, 1)
 
-[node name="Title" type="Label" parent="."]
+[node name="Title" type="Label" parent="." unique_id=120044372]
 layout_mode = 1
 anchors_preset = 10
 anchor_right = 1.0
 offset_top = 36.0
 offset_bottom = 80.0
+grow_horizontal = 2
 theme_override_font_sizes/font_size = 30
 text = "大厅联机"
 horizontal_alignment = 1
 vertical_alignment = 1
 
-[node name="Explain" type="Label" parent="."]
+[node name="Explain" type="Label" parent="." unique_id=1076794342]
 layout_mode = 1
 anchors_preset = 10
 anchor_right = 1.0
@@ -48,14 +53,15 @@ offset_left = 90.0
 offset_top = 92.0
 offset_right = -90.0
 offset_bottom = 152.0
+grow_horizontal = 2
 theme_override_colors/font_color = Color(0.72, 0.76, 0.85, 1)
 theme_override_font_sizes/font_size = 15
 text = "连接到官方大厅：浏览玩家公开的房间并加入，或自己创建一间房等人来。房间支持密码，一个房间最多 4 人。"
-autowrap_mode = 2
 horizontal_alignment = 1
 vertical_alignment = 1
+autowrap_mode = 2
 
-[node name="Form" type="VBoxContainer" parent="."]
+[node name="Form" type="VBoxContainer" parent="." unique_id=1702890916]
 layout_mode = 1
 anchors_preset = 8
 anchor_left = 0.5
@@ -63,69 +69,73 @@ anchor_top = 0.5
 anchor_right = 0.5
 anchor_bottom = 0.5
 offset_left = -240.0
-offset_top = -140.0
+offset_top = -121.03999
 offset_right = 240.0
-offset_bottom = -16.0
+offset_bottom = 51.960205
+grow_horizontal = 2
+grow_vertical = 2
 theme_override_constants/separation = 12
 
-[node name="Name" type="HBoxContainer" parent="Form"]
+[node name="Name" type="HBoxContainer" parent="Form" unique_id=1926416730]
 layout_mode = 2
 theme_override_constants/separation = 10
 
-[node name="Label" type="Label" parent="Form/Name"]
+[node name="Label" type="Label" parent="Form/Name" unique_id=1302804016]
 custom_minimum_size = Vector2(110, 0)
 layout_mode = 2
 text = "玩家名字"
 vertical_alignment = 1
 
-[node name="Field" type="LineEdit" parent="Form/Name"]
+[node name="Field" type="LineEdit" parent="Form/Name" unique_id=311960117]
 layout_mode = 2
 size_flags_horizontal = 3
 placeholder_text = "局内头顶显示用，最多 16 字节"
 
-[node name="Host" type="HBoxContainer" parent="Form"]
+[node name="Host" type="HBoxContainer" parent="Form" unique_id=1515147585]
 layout_mode = 2
 theme_override_constants/separation = 10
 
-[node name="Label" type="Label" parent="Form/Host"]
+[node name="Label" type="Label" parent="Form/Host" unique_id=1675224172]
 custom_minimum_size = Vector2(110, 0)
 layout_mode = 2
 text = "大厅地址"
 vertical_alignment = 1
 
-[node name="Field" type="LineEdit" parent="Form/Host"]
+[node name="Field" type="LineEdit" parent="Form/Host" unique_id=425864666]
 layout_mode = 2
 size_flags_horizontal = 3
 placeholder_text = "官方大厅：4kr.top（域名 / IPv4 / IPv6 均可）"
 
-[node name="Port" type="HBoxContainer" parent="Form"]
+[node name="Port" type="HBoxContainer" parent="Form" unique_id=1976338970]
 layout_mode = 2
 theme_override_constants/separation = 10
 
-[node name="Label" type="Label" parent="Form/Port"]
+[node name="Label" type="Label" parent="Form/Port" unique_id=510686298]
 custom_minimum_size = Vector2(110, 0)
 layout_mode = 2
 text = "端口"
 vertical_alignment = 1
 
-[node name="Field" type="LineEdit" parent="Form/Port"]
+[node name="Field" type="LineEdit" parent="Form/Port" unique_id=1105736258]
 custom_minimum_size = Vector2(120, 0)
 layout_mode = 2
 
-[node name="ConnectButton" type="Button" parent="Form"]
-layout_mode = 2
+[node name="ConnectButton" type="Button" parent="Form" unique_id=1439339625]
 custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
 theme_override_font_sizes/font_size = 20
 text = "连接大厅"
 
-[node name="Browser" type="Control" parent="."]
+[node name="Browser" type="Control" parent="." unique_id=1146808516]
 visible = false
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
 
-[node name="RoomHeader" type="Label" parent="Browser"]
+[node name="RoomHeader" type="Label" parent="Browser" unique_id=1590758553]
 layout_mode = 1
 anchors_preset = 10
 anchor_right = 1.0
@@ -133,12 +143,13 @@ offset_left = 80.0
 offset_top = 168.0
 offset_right = -80.0
 offset_bottom = 200.0
+grow_horizontal = 2
 theme_override_colors/font_color = Color(0.6, 0.63, 0.72, 1)
 theme_override_font_sizes/font_size = 14
 text = "房主 · 房间号 · 密码 · 人数"
 horizontal_alignment = 1
 
-[node name="RoomScroll" type="ScrollContainer" parent="Browser"]
+[node name="RoomScroll" type="ScrollContainer" parent="Browser" unique_id=1678576660]
 layout_mode = 1
 anchors_preset = 10
 anchor_right = 1.0
@@ -146,14 +157,15 @@ offset_left = 120.0
 offset_top = 204.0
 offset_right = -120.0
 offset_bottom = 392.0
+grow_horizontal = 2
 horizontal_scroll_mode = 0
 
-[node name="RoomList" type="VBoxContainer" parent="Browser/RoomScroll"]
+[node name="RoomList" type="VBoxContainer" parent="Browser/RoomScroll" unique_id=1450077650]
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_constants/separation = 6
 
-[node name="Paging" type="HBoxContainer" parent="Browser"]
+[node name="Paging" type="HBoxContainer" parent="Browser" unique_id=1941478639]
 layout_mode = 1
 anchors_preset = 10
 anchor_right = 1.0
@@ -161,27 +173,28 @@ offset_left = 140.0
 offset_top = 400.0
 offset_right = -140.0
 offset_bottom = 440.0
+grow_horizontal = 2
 theme_override_constants/separation = 14
 alignment = 1
 
-[node name="PrevPage" type="Button" parent="Browser/Paging"]
+[node name="PrevPage" type="Button" parent="Browser/Paging" unique_id=46479081]
 custom_minimum_size = Vector2(96, 36)
 layout_mode = 2
 text = "上一页"
 
-[node name="PageLabel" type="Label" parent="Browser/Paging"]
+[node name="PageLabel" type="Label" parent="Browser/Paging" unique_id=1471702634]
 custom_minimum_size = Vector2(120, 0)
 layout_mode = 2
 text = "第 1 / 1 页"
 horizontal_alignment = 1
 vertical_alignment = 1
 
-[node name="NextPage" type="Button" parent="Browser/Paging"]
+[node name="NextPage" type="Button" parent="Browser/Paging" unique_id=469029756]
 custom_minimum_size = Vector2(96, 36)
 layout_mode = 2
 text = "下一页"
 
-[node name="Actions" type="HBoxContainer" parent="Browser"]
+[node name="Actions" type="HBoxContainer" parent="Browser" unique_id=110362573]
 layout_mode = 1
 anchors_preset = 10
 anchor_right = 1.0
@@ -189,28 +202,29 @@ offset_left = 140.0
 offset_top = 452.0
 offset_right = -140.0
 offset_bottom = 500.0
+grow_horizontal = 2
 theme_override_constants/separation = 16
 alignment = 1
 
-[node name="Refresh" type="Button" parent="Browser/Actions"]
+[node name="Refresh" type="Button" parent="Browser/Actions" unique_id=399909101]
 custom_minimum_size = Vector2(140, 44)
 layout_mode = 2
 theme_override_font_sizes/font_size = 18
 text = "刷新列表"
 
-[node name="Create" type="Button" parent="Browser/Actions"]
+[node name="Create" type="Button" parent="Browser/Actions" unique_id=1151505866]
 custom_minimum_size = Vector2(140, 44)
 layout_mode = 2
 theme_override_font_sizes/font_size = 18
 text = "创建房间"
 
-[node name="JoinId" type="Button" parent="Browser/Actions"]
+[node name="JoinId" type="Button" parent="Browser/Actions" unique_id=298297231]
 custom_minimum_size = Vector2(180, 44)
 layout_mode = 2
 theme_override_font_sizes/font_size = 18
 text = "按房间号加入"
 
-[node name="Status" type="Label" parent="."]
+[node name="Status" type="Label" parent="." unique_id=89242761]
 layout_mode = 1
 anchors_preset = 10
 anchor_right = 1.0
@@ -218,13 +232,14 @@ offset_left = 60.0
 offset_top = 512.0
 offset_right = -60.0
 offset_bottom = 560.0
+grow_horizontal = 2
 theme_override_colors/font_color = Color(0.75, 0.8, 0.9, 1)
 theme_override_font_sizes/font_size = 15
-autowrap_mode = 2
 horizontal_alignment = 1
 vertical_alignment = 1
+autowrap_mode = 2
 
-[node name="Back" type="Button" parent="."]
+[node name="Back" type="Button" parent="." unique_id=619546390]
 custom_minimum_size = Vector2(130, 36)
 layout_mode = 1
 anchors_preset = 2
@@ -234,24 +249,29 @@ offset_left = 24.0
 offset_top = -56.0
 offset_right = 154.0
 offset_bottom = -20.0
+grow_vertical = 0
 text = "返回 (Esc)"
 
-[node name="Popups" type="Control" parent="."]
+[node name="Popups" type="Control" parent="." unique_id=2067041936]
 visible = false
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
 mouse_filter = 2
 
-[node name="Dim" type="ColorRect" parent="Popups"]
+[node name="Dim" type="ColorRect" parent="Popups" unique_id=1926716203]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
 color = Color(0, 0, 0, 0.55)
 
-[node name="PasswordPanel" type="Panel" parent="Popups"]
+[node name="PasswordPanel" type="Panel" parent="Popups" unique_id=1484220189]
 visible = false
 layout_mode = 0
 offset_left = 260.0
@@ -259,7 +279,7 @@ offset_top = 170.0
 offset_right = 580.0
 offset_bottom = 370.0
 
-[node name="Title" type="Label" parent="Popups/PasswordPanel"]
+[node name="Title" type="Label" parent="Popups/PasswordPanel" unique_id=932159416]
 layout_mode = 0
 offset_left = 20.0
 offset_top = 16.0
@@ -268,7 +288,7 @@ offset_bottom = 52.0
 theme_override_font_sizes/font_size = 18
 text = "该房间有密码"
 
-[node name="Row" type="HBoxContainer" parent="Popups/PasswordPanel"]
+[node name="Row" type="HBoxContainer" parent="Popups/PasswordPanel" unique_id=1774443269]
 layout_mode = 0
 offset_left = 20.0
 offset_top = 70.0
@@ -276,19 +296,19 @@ offset_right = 300.0
 offset_bottom = 106.0
 theme_override_constants/separation = 10
 
-[node name="Label" type="Label" parent="Popups/PasswordPanel/Row"]
+[node name="Label" type="Label" parent="Popups/PasswordPanel/Row" unique_id=3517078]
 custom_minimum_size = Vector2(90, 0)
 layout_mode = 2
 text = "密码"
 vertical_alignment = 1
 
-[node name="Field" type="LineEdit" parent="Popups/PasswordPanel/Row"]
+[node name="Field" type="LineEdit" parent="Popups/PasswordPanel/Row" unique_id=875901895]
 layout_mode = 2
 size_flags_horizontal = 3
 placeholder_text = "4位数字"
 secret = true
 
-[node name="Buttons" type="HBoxContainer" parent="Popups/PasswordPanel"]
+[node name="Buttons" type="HBoxContainer" parent="Popups/PasswordPanel" unique_id=1789752664]
 layout_mode = 0
 offset_left = 70.0
 offset_top = 132.0
@@ -297,17 +317,17 @@ offset_bottom = 176.0
 theme_override_constants/separation = 12
 alignment = 2
 
-[node name="JoinBtn" type="Button" parent="Popups/PasswordPanel/Buttons"]
+[node name="JoinBtn" type="Button" parent="Popups/PasswordPanel/Buttons" unique_id=983336913]
 custom_minimum_size = Vector2(105, 44)
 layout_mode = 2
 text = "加入"
 
-[node name="CancelBtn" type="Button" parent="Popups/PasswordPanel/Buttons"]
+[node name="CancelBtn" type="Button" parent="Popups/PasswordPanel/Buttons" unique_id=564432786]
 custom_minimum_size = Vector2(105, 44)
 layout_mode = 2
 text = "取消"
 
-[node name="CreatePanel" type="Panel" parent="Popups"]
+[node name="CreatePanel" type="Panel" parent="Popups" unique_id=2014184286]
 visible = false
 layout_mode = 0
 offset_left = 210.0
@@ -315,7 +335,7 @@ offset_top = 130.0
 offset_right = 590.0
 offset_bottom = 420.0
 
-[node name="Title" type="Label" parent="Popups/CreatePanel"]
+[node name="Title" type="Label" parent="Popups/CreatePanel" unique_id=1920914312]
 layout_mode = 0
 offset_left = 20.0
 offset_top = 16.0
@@ -324,7 +344,7 @@ offset_bottom = 52.0
 theme_override_font_sizes/font_size = 18
 text = "创建房间"
 
-[node name="PlayersRow" type="HBoxContainer" parent="Popups/CreatePanel"]
+[node name="PlayersRow" type="HBoxContainer" parent="Popups/CreatePanel" unique_id=1082035595]
 layout_mode = 0
 offset_left = 20.0
 offset_top = 68.0
@@ -332,18 +352,18 @@ offset_right = 360.0
 offset_bottom = 104.0
 theme_override_constants/separation = 10
 
-[node name="Label" type="Label" parent="Popups/CreatePanel/PlayersRow"]
+[node name="Label" type="Label" parent="Popups/CreatePanel/PlayersRow" unique_id=695732873]
 custom_minimum_size = Vector2(90, 0)
 layout_mode = 2
 text = "人数上限"
 vertical_alignment = 1
 
-[node name="Field" type="LineEdit" parent="Popups/CreatePanel/PlayersRow"]
+[node name="Field" type="LineEdit" parent="Popups/CreatePanel/PlayersRow" unique_id=196449857]
 layout_mode = 2
 size_flags_horizontal = 3
 placeholder_text = "2–4"
 
-[node name="PasswordRow" type="HBoxContainer" parent="Popups/CreatePanel"]
+[node name="PasswordRow" type="HBoxContainer" parent="Popups/CreatePanel" unique_id=748986096]
 layout_mode = 0
 offset_left = 20.0
 offset_top = 112.0
@@ -351,29 +371,29 @@ offset_right = 360.0
 offset_bottom = 148.0
 theme_override_constants/separation = 10
 
-[node name="Label" type="Label" parent="Popups/CreatePanel/PasswordRow"]
+[node name="Label" type="Label" parent="Popups/CreatePanel/PasswordRow" unique_id=28990073]
 custom_minimum_size = Vector2(90, 0)
 layout_mode = 2
 text = "密码"
 vertical_alignment = 1
 
-[node name="Field" type="LineEdit" parent="Popups/CreatePanel/PasswordRow"]
+[node name="Field" type="LineEdit" parent="Popups/CreatePanel/PasswordRow" unique_id=1844632579]
 layout_mode = 2
 size_flags_horizontal = 3
 placeholder_text = "4位数字（可留空）"
 secret = true
 
-[node name="Searchable" type="CheckBox" parent="Popups/CreatePanel"]
+[node name="Searchable" type="CheckBox" parent="Popups/CreatePanel" unique_id=349263065]
 layout_mode = 0
 offset_left = 20.0
 offset_top = 156.0
 offset_right = 360.0
 offset_bottom = 192.0
 theme_override_font_sizes/font_size = 14
-text = "在大厅列表中公开（可关闭，仅凭房间号加入）"
 button_pressed = true
+text = "在大厅列表中公开（可关闭，仅凭房间号加入）"
 
-[node name="Buttons" type="HBoxContainer" parent="Popups/CreatePanel"]
+[node name="Buttons" type="HBoxContainer" parent="Popups/CreatePanel" unique_id=591080135]
 layout_mode = 0
 offset_left = 110.0
 offset_top = 220.0
@@ -382,17 +402,17 @@ offset_bottom = 264.0
 theme_override_constants/separation = 12
 alignment = 2
 
-[node name="CreateBtn" type="Button" parent="Popups/CreatePanel/Buttons"]
+[node name="CreateBtn" type="Button" parent="Popups/CreatePanel/Buttons" unique_id=1124611786]
 custom_minimum_size = Vector2(115, 44)
 layout_mode = 2
 text = "创建"
 
-[node name="CancelBtn" type="Button" parent="Popups/CreatePanel/Buttons"]
+[node name="CancelBtn" type="Button" parent="Popups/CreatePanel/Buttons" unique_id=793299484]
 custom_minimum_size = Vector2(115, 44)
 layout_mode = 2
 text = "取消"
 
-[node name="JoinIdPanel" type="Panel" parent="Popups"]
+[node name="JoinIdPanel" type="Panel" parent="Popups" unique_id=804803436]
 visible = false
 layout_mode = 0
 offset_left = 260.0
@@ -400,7 +420,7 @@ offset_top = 150.0
 offset_right = 580.0
 offset_bottom = 380.0
 
-[node name="Title" type="Label" parent="Popups/JoinIdPanel"]
+[node name="Title" type="Label" parent="Popups/JoinIdPanel" unique_id=254631233]
 layout_mode = 0
 offset_left = 20.0
 offset_top = 16.0
@@ -409,7 +429,7 @@ offset_bottom = 52.0
 theme_override_font_sizes/font_size = 18
 text = "按房间号加入"
 
-[node name="IdRow" type="HBoxContainer" parent="Popups/JoinIdPanel"]
+[node name="IdRow" type="HBoxContainer" parent="Popups/JoinIdPanel" unique_id=1496493169]
 layout_mode = 0
 offset_left = 20.0
 offset_top = 68.0
@@ -417,18 +437,18 @@ offset_right = 300.0
 offset_bottom = 104.0
 theme_override_constants/separation = 10
 
-[node name="Label" type="Label" parent="Popups/JoinIdPanel/IdRow"]
+[node name="Label" type="Label" parent="Popups/JoinIdPanel/IdRow" unique_id=1913827640]
 custom_minimum_size = Vector2(90, 0)
 layout_mode = 2
 text = "房间号"
 vertical_alignment = 1
 
-[node name="Field" type="LineEdit" parent="Popups/JoinIdPanel/IdRow"]
+[node name="Field" type="LineEdit" parent="Popups/JoinIdPanel/IdRow" unique_id=962907767]
 layout_mode = 2
 size_flags_horizontal = 3
 placeholder_text = "6位数字"
 
-[node name="PwRow" type="HBoxContainer" parent="Popups/JoinIdPanel"]
+[node name="PwRow" type="HBoxContainer" parent="Popups/JoinIdPanel" unique_id=1620586666]
 layout_mode = 0
 offset_left = 20.0
 offset_top = 112.0
@@ -436,19 +456,19 @@ offset_right = 300.0
 offset_bottom = 148.0
 theme_override_constants/separation = 10
 
-[node name="Label" type="Label" parent="Popups/JoinIdPanel/PwRow"]
+[node name="Label" type="Label" parent="Popups/JoinIdPanel/PwRow" unique_id=1140621477]
 custom_minimum_size = Vector2(90, 0)
 layout_mode = 2
 text = "密码"
 vertical_alignment = 1
 
-[node name="Field" type="LineEdit" parent="Popups/JoinIdPanel/PwRow"]
+[node name="Field" type="LineEdit" parent="Popups/JoinIdPanel/PwRow" unique_id=634170360]
 layout_mode = 2
 size_flags_horizontal = 3
 placeholder_text = "有密码才填"
 secret = true
 
-[node name="Buttons" type="HBoxContainer" parent="Popups/JoinIdPanel"]
+[node name="Buttons" type="HBoxContainer" parent="Popups/JoinIdPanel" unique_id=2139353108]
 layout_mode = 0
 offset_left = 70.0
 offset_top = 168.0
@@ -457,12 +477,12 @@ offset_bottom = 212.0
 theme_override_constants/separation = 12
 alignment = 2
 
-[node name="JoinBtn" type="Button" parent="Popups/JoinIdPanel/Buttons"]
+[node name="JoinBtn" type="Button" parent="Popups/JoinIdPanel/Buttons" unique_id=513200427]
 custom_minimum_size = Vector2(105, 44)
 layout_mode = 2
 text = "加入"
 
-[node name="CancelBtn" type="Button" parent="Popups/JoinIdPanel/Buttons"]
+[node name="CancelBtn" type="Button" parent="Popups/JoinIdPanel/Buttons" unique_id=739770021]
 custom_minimum_size = Vector2(105, 44)
 layout_mode = 2
 text = "取消"
