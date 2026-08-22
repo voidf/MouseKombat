@@ -1,6 +1,7 @@
 using Godot;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using MouseKombat.Sim;
@@ -80,8 +81,15 @@ public partial class HeroLibrary : Node
     {
         if (string.IsNullOrEmpty(path)) return null;
         if (_particles.TryGetValue(path, out var cached)) return cached;
+        // res:// first (dev / pck), then a user:// shadow copy (exported editor imports)
         string res = ResolveResPath(path);
         var scene = ResourceLoader.Exists(res) ? ResourceLoader.Load<PackedScene>(res) : null;
+        if (scene == null)
+        {
+            string userPath = "user://" + path;
+            if (Godot.FileAccess.FileExists(userPath))
+                scene = ResourceLoader.Load<PackedScene>(userPath);
+        }
         _particles[path] = scene;
         return scene;
     }
@@ -109,26 +117,28 @@ public partial class HeroLibrary : Node
         _fireballs.Clear();
         _particles.Clear();
 
-        // (virtualPath, realPath) for every content file under both roots; user:// shadows
-        // res:// per folder/file by winning the sort (processed after, overwrites dictionary keys)
-        var files = new List<(string virt, string real)>();
+        // normalized path ("Heroes/x/char.json", scheme stripped) -> real res://|user:// path.
+        // user:// is scanned after res:// so a shadow copy of the same file WINS — an exported
+        // build's editable user:// copy overrides the pck's shipped file. Hashing the
+        // normalized paths is what makes a dev build (res:// only) and an exported build with
+        // byte-identical shadow copies produce the SAME asset hash.
+        var files = new Dictionary<string, string>();
         foreach (string scheme in new[] { "res://", "user://" })
             foreach (string root in Roots)
-                CollectDir(scheme + root, scheme, files);
+                CollectDir(scheme + root, files);
 
         using var md5 = MD5.Create();
         var hashInput = new MemoryStream();
-        files.Sort((a, b) => string.CompareOrdinal(a.virt, b.virt));
-        foreach (var (virt, real) in files)
+        foreach (var kv in files.OrderBy(kv => kv.Key, System.StringComparer.Ordinal))
         {
-            if (IsIgnored(virt)) continue;
+            if (IsIgnored(kv.Key)) continue;
             byte[] body;
-            using (var fa = Godot.FileAccess.Open(real, Godot.FileAccess.ModeFlags.Read))
+            using (var fa = Godot.FileAccess.Open(kv.Value, Godot.FileAccess.ModeFlags.Read))
             {
                 if (fa == null) continue;
                 body = fa.GetBuffer((int)fa.GetLength());
             }
-            var pathBytes = Encoding.UTF8.GetBytes(virt);
+            var pathBytes = Encoding.UTF8.GetBytes(kv.Key);
             hashInput.Write(pathBytes, 0, pathBytes.Length);
             hashInput.WriteByte(0);
             hashInput.Write(body, 0, body.Length);
@@ -148,7 +158,7 @@ public partial class HeroLibrary : Node
         return name.StartsWith('.') || name.EndsWith(".import") || name == "images-manifest.json";
     }
 
-    private static void CollectDir(string dir, string schemeRoot, List<(string, string)> into)
+    private static void CollectDir(string dir, Dictionary<string, string> into)
     {
         var da = DirAccess.Open(dir);
         if (da == null) return;
@@ -159,9 +169,14 @@ public partial class HeroLibrary : Node
             if (entry.StartsWith(".")) { entry = da.GetNext(); continue; }
             string full = dir + "/" + entry;
             if (da.CurrentIsDir())
-                CollectDir(full, schemeRoot, into);
+                CollectDir(full, into);
             else
-                into.Add((full, full));
+            {
+                // strip the scheme: "res://Heroes/x" and "user://Heroes/x" share the identity
+                // "Heroes/x", so shadowing replaces instead of adding a second hash entry
+                int schemeEnd = full.IndexOf("://") + 3;
+                into[full[schemeEnd..]] = full;
+            }
             entry = da.GetNext();
         }
         da.ListDirEnd();

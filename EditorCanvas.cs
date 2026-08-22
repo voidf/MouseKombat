@@ -58,7 +58,6 @@ public sealed partial class EditorCanvas : Control
     private bool _rootDragging;
     private bool _boxDragging;
     private bool _resizeDragging;
-    private int _cycleCount;               // overlap click cycling
     private int _dragEdgeMask;             // bit0 left bit1 right bit2 top bit3 bottom (canvas space)
     private bool _dragSnapshotted;         // one undo memento per drag, taken pre-mutation
 
@@ -103,6 +102,11 @@ public sealed partial class EditorCanvas : Control
     private HeroFrame Frame => Action != null && Project.SelectedFrame >= 0
         && Project.SelectedFrame < Action.Frames.Count ? Action.Frames[Project.SelectedFrame] : null;
 
+    // the frame's root in DATA space — boxes are authored local to the fighter's anchor, and
+    // the anchor sits AT the root this frame, so every box draw/pick/drag shifts by it
+    private Vector2 FrameRoot => Frame == null ? Vector2.Zero
+        : new Vector2(Frame.Root?.X ?? 0, Frame.Root?.Y ?? 0);
+
     // ================= draw =================
 
     public override void _Draw()
@@ -145,7 +149,7 @@ public sealed partial class EditorCanvas : Control
     {
         var a = Action;
         if (a == null || a.Frames.Count == 0) return -1;
-        if (LoopForOnion && a.Loop)
+        if (LoopForOnion)   // follows the timeline's 循环 playback checkbox (set by the screen)
         {
             int n = a.Frames.Count;
             return ((idx % n) + n) % n;
@@ -209,13 +213,30 @@ public sealed partial class EditorCanvas : Control
     private void DrawBoxes(HeroActionDef action, HeroFrame frame)
     {
         int fi = Project.SelectedFrame;
+        var root = FrameRoot;
 
-        // hurtboxes of this frame (defensive)
-        for (int i = 0; i < frame.Hurtboxes.Count; i++)
-            DrawBox(HeroBoxRect(frame.Hurtboxes[i]), HurtColor,
-                IsSel(SelectionKind.Hurtbox, i, -1), IsHover(SelectionKind.Hurtbox, i, -1));
+        // hurtboxes of this frame; an empty per-frame list means the character's BASE boxes
+        // (char.json) are in force — draw those instead (read-only, dimmer) so every frame of
+        // every action always shows hurtboxes, exactly like the game plays it
+        bool fallback = frame.Hurtboxes.Count == 0;
+        var hurt = EffectiveHurtboxes(action, frame);
+        for (int i = 0; i < hurt.Count; i++)
+        {
+            var color = HurtColor;
+            bool sel = !fallback && IsSel(SelectionKind.Hurtbox, i, -1);
+            bool hov = !fallback && IsHover(SelectionKind.Hurtbox, i, -1);
+            var viewRect = HeroBoxRect(hurt[i], root);
+            if (fallback)
+            {
+                // base boxes are not editable data — plain, transparent outlines
+                DrawRect(viewRect, new Color(HurtColor, 0.08f), true);
+                DrawRect(viewRect, new Color(HurtColor, 0.5f), false, 1f);
+            }
+            else DrawBox(viewRect, color, sel, hov);
+        }
 
-        // strike/grab boxes of actives covering this frame
+        // strike/grab boxes of actives covering this frame (also anchored at the frame root —
+        // the sim evaluates them from the fighter's root-displaced position)
         if (action.Attack != null)
         {
             for (int a = 0; a < action.Attack.Actives.Count; a++)
@@ -224,7 +245,7 @@ public sealed partial class EditorCanvas : Control
                 if (fi < act.ActiveRange[0] || fi > act.ActiveRange[1]) continue;
                 var color = act.IsGrab ? GrabColor : HitColor;
                 for (int i = 0; i < act.Hitboxes.Count; i++)
-                    DrawBox(HeroBoxRect(act.Hitboxes[i]), color,
+                    DrawBox(HeroBoxRect(act.Hitboxes[i], root), color,
                         IsSel(SelectionKind.Hitbox, i, a), IsHover(SelectionKind.Hitbox, i, a));
             }
         }
@@ -244,6 +265,17 @@ public sealed partial class EditorCanvas : Control
         }
     }
 
+    // the per-frame list when overridden, else the character's base set from char.json
+    // (crouching attacks fall back to the crouch box set)
+    private IReadOnlyList<HeroBox> EffectiveHurtboxes(HeroActionDef action, HeroFrame frame)
+    {
+        if (frame.Hurtboxes.Count > 0) return frame.Hurtboxes;
+        var physics = Char?.Def.Physics;
+        if (physics == null) return System.Array.Empty<HeroBox>();
+        var set = action.Attack?.Stance == "Crouch" ? physics.CrouchBoxes : physics.StandBoxes;
+        return new[] { set.Head, set.Body, set.Arms, set.Legs };
+    }
+
     private Rect2 LayerViewRect(HeroFrame frame, HeroLayer l, HeroLibrary.HeroFrameImage info)
     {
         var center = LayerCanvasCenter(frame, l);
@@ -259,10 +291,12 @@ public sealed partial class EditorCanvas : Control
         yield return viewRect.GetCenter();
     }
 
-    // a box's view rect; data forward(+X) maps to canvas left, so the rect flips around cx
-    private Rect2 HeroBoxRect(HeroBox b)
+    // a box's view rect. Data boxes are local to the fighter's anchor; the anchor sits at the
+    // frame ROOT, so the root shifts the rect. Data forward(+X) maps to canvas left, and the
+    // rect flips around cx accordingly.
+    private Rect2 HeroBoxRect(HeroBox b, Vector2 root)
     {
-        var tl = DataToView(new Vector2(b.Cx + b.Hw, b.Cy - b.Hh));   // data right edge -> canvas left
+        var tl = DataToView(new Vector2(root.X + b.Cx + b.Hw, root.Y + b.Cy - b.Hh));   // data right edge -> canvas left
         return new Rect2(tl, new Vector2(b.Hw * 2, b.Hh * 2) * _zoom);
     }
 
@@ -314,8 +348,11 @@ public sealed partial class EditorCanvas : Control
         // the victim's frame advances with the attacker's, bounded by its own length
         int vFrame = Mathf.Clamp(fi - use.Frame, 0, victimAction.Frames.Count - 1);
 
-        // draw the victim around the bind point: shift the origin there for the moment
-        var offset = DataToCanvas(new Vector2(use.BindPos?.X ?? 0, use.BindPos?.Y ?? 0));
+        // draw the victim around the bind point (relative to the attacker's ROOT-displaced
+        // anchor, exactly where the sim binds it): shift the origin there for the moment
+        var attackerRoot = new Vector2(Action.Frames[Project.SelectedFrame].Root?.X ?? 0,
+                                       Action.Frames[Project.SelectedFrame].Root?.Y ?? 0);
+        var offset = DataToCanvas(attackerRoot + new Vector2(use.BindPos?.X ?? 0, use.BindPos?.Y ?? 0));
         var savePan = _pan;
         _pan += offset * _zoom;
         DrawFrameAtOrigin(victim, victimAction, vFrame, new Color(1f, 1f, 1f, 0.85f));
@@ -341,6 +378,7 @@ public sealed partial class EditorCanvas : Control
     private void DrawFireballPreview(HeroActionDef action)
     {
         int fi = Project.SelectedFrame;
+        var root = FrameRoot;   // the fighter's anchor has moved with the root by this frame
         foreach (var p in action.Attack.Projectiles)
         {
             if (fi < p.SpawnFrame) continue;
@@ -351,7 +389,7 @@ public sealed partial class EditorCanvas : Control
             // travel from the spawn point at Speed px/s for (fi - SpawnFrame) logic frames,
             // moving FORWARD (canvas left)
             float dist = p.Speed * (fi - p.SpawnFrame) / 60f;
-            var spawn = DataToCanvas(new Vector2(p.Offset?.X ?? 0, p.Offset?.Y ?? 0));
+            var spawn = DataToCanvas(root + new Vector2(p.Offset?.X ?? 0, p.Offset?.Y ?? 0));
             var pos = spawn + new Vector2(-dist, 0);
             var size = new Vector2(tex.GetWidth(), tex.GetHeight());
             DrawTextureRect(tex, new Rect2(ToView(pos - size * 0.5f), size * _zoom),
@@ -528,25 +566,17 @@ public sealed partial class EditorCanvas : Control
             }
         }
 
-        // click-to-select: boxes (cycling), then layers, then nothing
-        var hit = PickBox(pos);
-        if (hit != null)
+        // click-to-select: everything under the cursor in a stable order (hurtboxes, hitboxes,
+        // layers). A fresh spot picks the front candidate; clicking again where the CURRENT
+        // selection still applies cycles to the next one, wrapping around.
+        var hits = PickAllAt(pos);
+        if (hits.Count > 0)
         {
-            // same spot, already selected -> cycle to the NEXT box under the cursor
-            if (Selected.Kind == hit.Kind && Selected.Index == hit.Index && Selected.ActiveIndex == hit.ActiveIndex)
-                hit = PickBox(pos, skip: ++_cycleCount);
-            else
-                _cycleCount = 0;
-            SetSelection(hit);
-            if (SelBoxRect() != null) _boxDragging = true;
-            return;
-        }
-
-        var layerIdx = PickLayer(pos);
-        if (layerIdx >= 0)
-        {
-            SetSelection(new Selection { Kind = SelectionKind.Layer, Index = layerIdx, ActiveIndex = -1 });
-            _boxDragging = true;
+            int cur = hits.FindIndex(h => SameSelection(h, Selected));
+            SetSelection(cur >= 0 ? hits[(cur + 1) % hits.Count] : hits[0]);
+            if (Selected.Kind is SelectionKind.Hurtbox or SelectionKind.Hitbox
+                && SelBoxRect() != null) _boxDragging = true;
+            else if (Selected.Kind == SelectionKind.Layer) _boxDragging = true;
             return;
         }
 
@@ -567,7 +597,8 @@ public sealed partial class EditorCanvas : Control
     {
         var frame = Frame;
         if (frame == null) return;
-        var data = CanvasToData(ToCanvas(viewPos));
+        var root = FrameRoot;
+        var data = CanvasToData(ToCanvas(viewPos)) - root;   // store LOCAL to the anchor
 
         switch (Selected.Kind)
         {
@@ -594,8 +625,7 @@ public sealed partial class EditorCanvas : Control
             case SelectionKind.Layer when Selected.Index < frame.Layers.Count:
             {
                 var l = frame.Layers[Selected.Index];
-                var root = new Vector2(frame.Root?.X ?? 0, frame.Root?.Y ?? 0);
-                var off = data - root;
+                var off = data;
                 l.Off = new HeroVec(Round001(off.X), Round001(off.Y));
                 frame.Layers[Selected.Index] = l;
                 break;
@@ -612,10 +642,12 @@ public sealed partial class EditorCanvas : Control
         var box = GetHeroBox(Selected);
         if (box == null) return;
 
-        // work in CANVAS space edges (where the drag lives), then convert back
+        // work in CANVAS space edges (where the drag lives), then convert back; the root
+        // offsets the anchor, so strip it off again when writing the local box
+        var root = FrameRoot;
         var b = box.Box;
-        float cl = -(b.Cx + b.Hw), cr = -(b.Cx - b.Hw);       // canvas left/right
-        float ct = b.Cy - b.Hh, cb = b.Cy + b.Hh;             // canvas top/bottom
+        float cl = -(root.X + b.Cx + b.Hw), cr = -(root.X + b.Cx - b.Hw);   // canvas left/right
+        float ct = root.Y + b.Cy - b.Hh, cb = root.Y + b.Cy + b.Hh;         // canvas top/bottom
         var pt = ToCanvas(viewPos);
         if ((_dragEdgeMask & 1) != 0) cl = pt.X;
         if ((_dragEdgeMask & 2) != 0) cr = pt.X;
@@ -623,9 +655,9 @@ public sealed partial class EditorCanvas : Control
         if ((_dragEdgeMask & 8) != 0) cb = pt.Y;
         if (cr < cl) (cl, cr) = (cr, cl);
         if (cb < ct) (ct, cb) = (cb, ct);
-        b.Cx = Round001(-(cl + cr) * 0.5f);
+        b.Cx = Round001(-(cl + cr) * 0.5f - root.X);
         b.Hw = Round001((cr - cl) * 0.5f);
-        b.Cy = Round001((ct + cb) * 0.5f);
+        b.Cy = Round001((ct + cb) * 0.5f - root.Y);
         b.Hh = Round001((cb - ct) * 0.5f);
         SetHeroBox(Selected, b);
         QueueRedraw();
@@ -672,7 +704,7 @@ public sealed partial class EditorCanvas : Control
     private Rect2? SelBoxRect()
     {
         var b = GetHeroBox(Selected);
-        return b != null ? HeroBoxRect(b.Box) : null;
+        return b != null ? HeroBoxRect(b.Box, FrameRoot) : null;
     }
 
     // returns an edge mask (bit0 left bit1 right bit2 top bit3 bottom); corners set two edges
@@ -685,14 +717,19 @@ public sealed partial class EditorCanvas : Control
         return -1;
     }
 
-    private Selection PickBox(Vector2 pos, int skip = 0)
+    // all candidates under a view point, in a stable order: hurtboxes, hitboxes (actives
+    // order), then layers topmost-z first. Consecutive clicks at the same overlapping spot
+    // cycle through this list round-robin.
+    private List<Selection> PickAllAt(Vector2 pos)
     {
         var action = Action;
         var frame = Frame;
-        if (action == null || frame == null) return null;
         var hits = new List<Selection>();
+        if (action == null || frame == null) return hits;
+        var root = FrameRoot;
+
         for (int i = 0; i < frame.Hurtboxes.Count; i++)
-            if (HeroBoxRect(frame.Hurtboxes[i]).HasPoint(pos))
+            if (HeroBoxRect(frame.Hurtboxes[i], root).HasPoint(pos))
                 hits.Add(new Selection { Kind = SelectionKind.Hurtbox, Index = i, ActiveIndex = -1 });
         if (action.Attack != null)
             for (int a = 0; a < action.Attack.Actives.Count; a++)
@@ -701,45 +738,38 @@ public sealed partial class EditorCanvas : Control
                 if (Project.SelectedFrame < act.ActiveRange[0] || Project.SelectedFrame > act.ActiveRange[1])
                     continue;
                 for (int i = 0; i < act.Hitboxes.Count; i++)
-                    if (HeroBoxRect(act.Hitboxes[i]).HasPoint(pos))
+                    if (HeroBoxRect(act.Hitboxes[i], root).HasPoint(pos))
                         hits.Add(new Selection { Kind = SelectionKind.Hitbox, Index = i, ActiveIndex = a });
             }
-        if (hits.Count == 0) return null;
-        return hits[skip % hits.Count];
-    }
-
-    private int PickLayer(Vector2 pos)
-    {
-        var frame = Frame;
-        if (frame == null) return -1;
-        // topmost z first
         for (int i = frame.Layers.Count - 1; i >= 0; i--)
         {
             var l = frame.Layers[i];
             var info = Char.ImageOf(l.Img);
             if (info == null) continue;
-            if (LayerViewRect(frame, l, info).HasPoint(pos)) return i;
+            if (LayerViewRect(frame, l, info).HasPoint(pos))
+                hits.Add(new Selection { Kind = SelectionKind.Layer, Index = i, ActiveIndex = -1 });
         }
-        return -1;
+        return hits;
     }
+
+    private static bool SameSelection(Selection a, Selection b) =>
+        a.Kind == b.Kind && a.Index == b.Index && a.ActiveIndex == b.ActiveIndex;
 
     private void UpdateHover(Vector2 pos)
     {
-        var hit = PickBox(pos);
-        var newHover = hit ?? new Selection { Kind = SelectionKind.None };
+        var hits = PickAllAt(pos);
+        var newHover = hits.Count > 0 ? hits[0] : new Selection { Kind = SelectionKind.None };
         if (newHover.Kind != Hovered.Kind || newHover.Index != Hovered.Index
             || newHover.ActiveIndex != Hovered.ActiveIndex)
         {
             Hovered = newHover;
             QueueRedraw();
-            SelectionChanged?.Invoke(Selected);   // tabs also key off hover to highlight rows
         }
     }
 
     public void SetSelection(Selection s)
     {
         Selected = s ?? new Selection { Kind = SelectionKind.None };
-        _cycleCount = 0;
         QueueRedraw();
         SelectionChanged?.Invoke(Selected);
     }

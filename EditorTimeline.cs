@@ -18,6 +18,7 @@ public sealed partial class EditorTimeline : Control
     public const float CellHeight = 84f;
     public const float CellGap = 4f;
     public const float PlusWidth = 40f;
+    public const float TailPad = 40f;                // breathing room right of the "+" cell
 
     public bool LoopPlayback;
     public bool Playing;
@@ -43,7 +44,7 @@ public sealed partial class EditorTimeline : Control
     }
 
     private float ContentWidth =>
-        (Action?.Frames.Count ?? 0) * (CellWidth + CellGap) + PlusWidth + 40f;
+        (Action?.Frames.Count ?? 0) * (CellWidth + CellGap) + PlusWidth + TailPad;
 
     public void FrameChangedExternally()
     {
@@ -280,6 +281,18 @@ public sealed partial class EditorTimeline : Control
                 ScrollCells(CellWidth * 3f);
                 AcceptEvent();
             }
+            // plain wheel: Vegas-style HORIZONTAL zoom of the cells anchored at the pointer;
+            // cell height is untouched. (Ctrl+wheel / lateral wheel = horizontal scroll above.)
+            else if (mb.ButtonIndex == MouseButton.WheelUp)
+            {
+                ZoomAtPointer(mb.Position, 1.15f);
+                AcceptEvent();
+            }
+            else if (mb.ButtonIndex == MouseButton.WheelDown)
+            {
+                ZoomAtPointer(mb.Position, 1f / 1.15f);
+                AcceptEvent();
+            }
         }
         else if (@event is InputEventMouseButton mbu && !mbu.Pressed
                  && mbu.ButtonIndex == MouseButton.Left)
@@ -321,8 +334,15 @@ public sealed partial class EditorTimeline : Control
 
     public void ZoomAtPointer(Vector2 pos, float factor)
     {
+        // zoom bounds per the spec: MIN = the whole strip fits without scrolling,
+        // MAX = one cell fills the visible width
+        int n = System.Math.Max(1, Action?.Frames.Count ?? 1);
+        float avail = System.Math.Max(60f, Size.X - PlusWidth - TailPad);
+        float min = Mathf.Clamp((avail - n * CellGap) / n, 2f, 76f);
+        float max = Mathf.Max(Size.X - CellGap - 8f, min);
+
         float cellX = (pos.X + Scroll) / (CellWidth + CellGap);   // cell-space anchor
-        CellWidth = Mathf.Clamp(CellWidth * factor, 36f, 220f);
+        CellWidth = Mathf.Clamp(CellWidth * factor, min, max);
         Scroll = Mathf.Clamp(cellX * (CellWidth + CellGap) - pos.X, 0,
             Mathf.Max(0, ContentWidth - Size.X));
         _scrollTarget = Scroll;
@@ -414,13 +434,13 @@ public sealed partial class EditorTimeline : Control
         AddChild(menu);
         menu.AddItem("删除选中帧", 0);
         menu.AddItem("复制选中帧（插入到最右）", 1);
-        menu.Position = new Vector2I((int)(GlobalPosition.X + pos.X), (int)(GlobalPosition.Y + pos.Y + 24));
         menu.IdPressed += id =>
         {
             if (id == 0) DeleteSelectedFrames();
             else if (id == 1) CopySelectedFrames();
         };
         menu.PopupHide += () => menu.QueueFree();
+        EditorTabs.PositionPopup(menu, this, GlobalPosition + pos);
         menu.Popup();
     }
 

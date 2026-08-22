@@ -88,11 +88,17 @@ public partial class MKEditorScreen : Control
         _timeline.PlaybackToggled += UpdateTransport;
         _tabs.Changed += OnModelChanged;
         _tabs.StructureChanged += OnStructureChanged;
+        _canvas.SelectionChanged += _ => _tabs.OnModelChanged(false);
         _tabs.BrushTarget += r =>
         {
             _timeline.BrushRange = r;
             _timeline.QueueRedraw();
         };
+
+        // OS file drops land on the WINDOW, not on controls: route them to whichever drop
+        // zone (layer cards, FX rows) is under the mouse
+        GetWindow().FilesDropped += files =>
+            _tabs.DispatchFilesDropped(files, GetGlobalMousePosition());
 
         OnStructureChanged();
     }
@@ -138,7 +144,7 @@ public partial class MKEditorScreen : Control
         var next = new Button { Text = "下一帧 ▶", CustomMinimumSize = new Vector2(84, 34) };
         next.Pressed += () => { _timeline.StepFrame(1); UpdateTransport(); };
         _loopCheck = new CheckBox { Text = "循环" };
-        _loopCheck.Toggled += v => _timeline.LoopPlayback = v;
+        _loopCheck.Toggled += v => { _timeline.LoopPlayback = v; UpdateTransport(); };
 
         bar.AddChild(_playButton);
         bar.AddChild(_reverseButton);
@@ -179,16 +185,25 @@ public partial class MKEditorScreen : Control
 
     private void BuildExitDialog()
     {
+        // three ways out: OK saves+exits, the custom button exits without saving, and Cancel /
+        // the window's X button both just close the dialog (stay in the editor)
         _exitDialog = new ConfirmationDialog
         {
             Title = "未保存的修改",
             DialogText = "有未保存的修改。保存并退出，还是直接退出？",
             OkButtonText = "保存并退出",
-            CancelButtonText = "直接退出",
+            CancelButtonText = "取消",
         };
         AddChild(_exitDialog);
         _exitDialog.Confirmed += () => { Save(); BackToMenu(); };
-        _exitDialog.Canceled += BackToMenu;
+        _exitDialog.Canceled += () => { };   // cancel / X: stay in the editor
+        _exitDialog.AddButton("直接退出", right: false, "quit_nosave");
+        _exitDialog.CustomAction += action =>
+        {
+            if (action != "quit_nosave") return;
+            _exitDialog.Hide();
+            BackToMenu();
+        };
     }
 
     private void RequestExit()
@@ -206,6 +221,7 @@ public partial class MKEditorScreen : Control
         _canvas.QueueRedraw();
         _timeline.InvalidateThumbnails();
         _timeline.QueueRedraw();
+        _tabs.OnModelChanged(_timeline.Playing);   // frame switch / canvas drag -> tab pages
         UpdateStatus();
     }
 
@@ -225,6 +241,12 @@ public partial class MKEditorScreen : Control
             ? (_timeline.ReversePlayback ? "❚❚ 倒放中" : "❚❚ 暂停")
             : "▶ 播放";
         _loopCheck.ButtonPressed = _timeline.LoopPlayback;
+
+        // the timeline's 循环 checkbox also drives the onion skin's wrap-around; and stopping
+        // playback catches up the deferred layer/constants page rebuilds
+        _canvas.LoopForOnion = _timeline.LoopPlayback;
+        _canvas.QueueRedraw();
+        if (!_timeline.Playing) _tabs.OnModelChanged(false);
     }
 
     private void UpdateStatus()

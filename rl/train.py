@@ -17,7 +17,12 @@ def main():
     total = int(sys.argv[1]) if len(sys.argv) > 1 else 200_000
     n_envs = 8
 
-    venv = make_vec_env(MouseKombatEnv, n_envs=n_envs)
+    # chars come from env vars so the same script trains a data-driven hero:
+    #   MK_AGENT_CHAR=hero:Kangaroo MK_OPP_CHAR=hero:新角色 python rl/train.py 2000
+    agent_char = os.environ.get("MK_AGENT_CHAR", "Hamster")
+    opp_char = os.environ.get("MK_OPP_CHAR", "Kangaroo")
+    venv = make_vec_env(MouseKombatEnv, n_envs=n_envs,
+                        env_kwargs=dict(agent_char=agent_char, opp_char=opp_char))
     model = PPO(
         "MlpPolicy", venv,
         n_steps=1024, batch_size=2048, gae_lambda=0.95, gamma=0.99,

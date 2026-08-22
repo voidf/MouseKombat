@@ -8,7 +8,7 @@ import sys
 import numpy as np
 from stable_baselines3 import PPO
 
-from mk_env import _ensure_runtime
+from mk_env import _ensure_runtime, make_config
 _ensure_runtime()
 from MouseKombat.Sim import (  # noqa: E402
     GameSim, PlayerConfig, InputFrame, StateMachineAgent, ZonerAgent, RusherAgent, CharacterId, Observation,
@@ -50,11 +50,12 @@ class Ctrl:
 
 
 def make():
-    # real matchup by default: P1 Hamster (left) vs P2 Kangaroo (right). Override via MK_P1CHAR/MK_P2CHAR.
-    p1c = getattr(CharacterId, os.environ.get("MK_P1CHAR", "Hamster"))
-    p2c = getattr(CharacterId, os.environ.get("MK_P2CHAR", "Kangaroo"))
-    c1 = PlayerConfig(); c1.Character = p1c; c1.SetStart(200.0, 560.0, True)
-    c2 = PlayerConfig(); c2.Character = p2c; c2.SetStart(600.0, 560.0, False)
+    # real matchup by default: P1 Hamster (left) vs P2 Kangaroo (right). Override via MK_P1CHAR/
+    # MK_P2CHAR — CharacterId names, or "hero:<Heroes folder>" for a data-driven hero.
+    p1c = os.environ.get("MK_P1CHAR", "Hamster")
+    p2c = os.environ.get("MK_P2CHAR", "Kangaroo")
+    c1 = make_config(p1c, 200.0, 560.0, True)
+    c2 = make_config(p2c, 600.0, 560.0, False)
     return GameSim(c1, c2, 40.0, 760.0, 800.0)
 
 

@@ -24,7 +24,7 @@ from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv
 from stable_baselines3.common.callbacks import BaseCallback
 
-from mk_env import _ensure_runtime
+from mk_env import _ensure_runtime, make_config
 _ensure_runtime()
 from MouseKombat.Sim import (  # noqa: E402
     GameSim, PlayerConfig, InputFrame, StateMachineAgent, ZonerAgent, RusherAgent, CharacterId, Observation,
@@ -35,8 +35,11 @@ NUM_ACT = 10
 # Every CharacterId the sim knows, as names: SubprocVecEnv workers get this pickled, and pythonnet
 # enum members are not picklable, so keep strings and resolve at use. Squirrel was added third;
 # policies trained before it existed only ever saw 0/1 in the character observation slots, so they
-# need a warm-start retrain.
-ROSTER = ["Hamster", "Kangaroo", "Squirrel"]
+# need a warm-start retrain. MK_EXTRA_HEROES="hero:新角色,hero:Kangaroo" appends data-driven
+# heroes loaded from ../Heroes (the game's own JSON) to the draw pool.
+ROSTER = ["Hamster", "Kangaroo", "Squirrel"] + [
+    h.strip() for h in os.environ.get("MK_EXTRA_HEROES", "").split(",") if h.strip()
+]
 HERE = os.path.dirname(__file__)
 POOL_DIR = os.path.join(HERE, "checkpoints", "pool")
 POOL_RECENT = 20  # sample opponents from the most-recent N snapshots (bounds per-worker cache)
@@ -92,8 +95,8 @@ class SelfPlayEnv(gym.Env):
         left_char, right_char = (learner, opp) if self._self == 0 else (opp, learner)
         lx = random.uniform(80.0, 350.0)
         rx = random.uniform(450.0, 720.0)          # random start distance, incl. the real far start
-        c1 = PlayerConfig(); c1.Character = getattr(CharacterId, left_char); c1.SetStart(lx, 560.0, True)
-        c2 = PlayerConfig(); c2.Character = getattr(CharacterId, right_char); c2.SetStart(rx, 560.0, False)
+        c1 = make_config(left_char, lx, 560.0, True)
+        c2 = make_config(right_char, rx, 560.0, False)
         return GameSim(c1, c2, 40.0, 760.0, 800.0)
 
     def reset(self, *, seed=None, options=None):

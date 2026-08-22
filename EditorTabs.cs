@@ -28,6 +28,21 @@ public sealed partial class EditorTabs : Control
     // runtime-only character order on the 角色 tab (drag reorder, never saved)
     private readonly List<string> _charOrder = new();
 
+    // ---- live refresh plumbing (frame switch / canvas drag <-> tab spinboxes) ----
+    // The canvas drags and the timeline frame step mutate the model without going through this
+    // control; instead of rebuilding whole pages on every mouse motion (janky) the spinboxes
+    // that mirror model numbers register here and get SetValueNoSignal'd on demand.
+    private readonly List<(Range widget, System.Func<double> read)> _liveLayerNums = new();
+    private readonly List<(Range widget, System.Func<double> read)> _liveConstNums = new();
+    private string _syncChar, _syncAction = "";
+    private int _syncFrame = -1;
+    private int _syncSelKind = -1, _syncSelIndex = -1, _syncSelActive = -1;
+    private bool _pendingRebuild;               // set while playing; rebuild on pause
+
+    // ---- OS file drop zones (Window.FilesDropped is dispatched here by the screen) ----
+    private sealed class FileDropZone { public Control C; public string Ext; public System.Action<string[]> OnFiles; }
+    private readonly List<FileDropZone> _dropZones = new();
+
     public const int CardHeight = 200;            // 角色/图层 card height, preview 200x200
     public const int PreviewSize = 200;
     public const int MaxEditWidth = 240;          // name/text inputs cap, scroll inside
@@ -74,6 +89,76 @@ public sealed partial class EditorTabs : Control
         RebuildLayerPage();
         RebuildConstantsPage();
         RebuildOnionPage();
+        CaptureSyncState();
+    }
+
+    // Record what the tab pages were built for, so OnModelChanged can tell "frame moved /
+    // selection moved" (rebuild the affected page) from "numbers changed in place" (live-sync).
+    private void CaptureSyncState()
+    {
+        _syncChar = Project?.SelectedChar;
+        _syncAction = Project?.SelectedAction ?? "";
+        _syncFrame = Project != null ? Project.SelectedFrame : -1;
+        var s = Canvas?.Selected;
+        _syncSelKind = s == null ? -1 : (int)s.Kind;
+        _syncSelIndex = s?.Index ?? -1;
+        _syncSelActive = s?.ActiveIndex ?? -1;
+    }
+
+    // The screen calls this for every model mutation (canvas drag, timeline step, field edit).
+    // While PLAYING we skip page rebuilds (60/s rebuilds churn the tree for nothing) and catch
+    // up once playback stops.
+    public void OnModelChanged(bool playing)
+    {
+        if (Project == null) return;
+        if (playing) { _pendingRebuild = true; return; }
+
+        bool frameMoved = _syncChar != Project.SelectedChar
+                       || _syncAction != (Project.SelectedAction ?? "")
+                       || _syncFrame != Project.SelectedFrame;
+        var s = Canvas?.Selected;
+        bool selMoved = s == null ? _syncSelKind != -1
+            : _syncSelKind != (int)s.Kind || _syncSelIndex != s.Index || _syncSelActive != s.ActiveIndex;
+
+        if (_pendingRebuild || frameMoved)
+        {
+            // the layer list and the per-frame sections are per-frame state — rebuild both
+            CaptureSyncState();
+            _pendingRebuild = false;
+            RebuildLayerPage();
+            RebuildConstantsPage();
+        }
+        else if (selMoved)
+        {
+            CaptureSyncState();
+            RebuildLayerPage();   // selection highlight only
+        }
+        else SyncLiveNumbers();
+    }
+
+    private void SyncLiveNumbers()
+    {
+        foreach (var (widget, read) in _liveLayerNums) widget.SetValueNoSignal(read());
+        foreach (var (widget, read) in _liveConstNums) widget.SetValueNoSignal(read());
+    }
+
+    // Route an OS file drop (Window.FilesDropped) to the zone under the mouse, if any.
+    public void DispatchFilesDropped(string[] files, Vector2 globalMouse)
+    {
+        _dropZones.RemoveAll(z => !GodotObject.IsInstanceValid(z.C));
+        foreach (var z in _dropZones)
+        {
+            if (!z.C.GetGlobalRect().HasPoint(globalMouse)) continue;
+            var matching = files.Where(f => f.ToLower().EndsWith(z.Ext)).ToArray();
+            if (matching.Length > 0) z.OnFiles(matching);
+            return;
+        }
+    }
+
+    private void RegisterDropZone(Control c, string ext, System.Action<string[]> onFiles)
+    {
+        _dropZones.RemoveAll(z => !GodotObject.IsInstanceValid(z.C));
+        _dropZones.Add(new FileDropZone { C = c, Ext = ext, OnFiles = onFiles });
     }
 
     // =====================================================================
@@ -95,6 +180,7 @@ public sealed partial class EditorTabs : Control
             var ch = Project.Char(folder);
             if (ch == null) continue;
             var card = MakeCard(selected: Project.SelectedChar == folder, height: CardHeight);
+            var box = CardBox(card);
 
             // portrait: first frame of the IDLE action, 200x200, top-aligned
             var idle = ch.Action(ch.Def.AnimNames?.Idle ?? "IDLE") ?? ch.Def.Actions.FirstOrDefault();
@@ -106,8 +192,9 @@ public sealed partial class EditorTabs : Control
                     StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
                     CustomMinimumSize = new Vector2(PreviewSize, PreviewSize),
                     SizeFlagsVertical = SizeFlags.ShrinkBegin,
+                    MouseFilter = MouseFilterEnum.Ignore,   // must not eat card clicks
                 };
-                card.AddChild(thumb);
+                box.AddChild(thumb);
             }
 
             var side = new VBoxContainer { SizeFlagsVertical = SizeFlags.ShrinkBegin };
@@ -121,7 +208,7 @@ public sealed partial class EditorTabs : Control
                 AutowrapMode = TextServer.AutowrapMode.WordSmart,
             };
             side.AddChild(hint);
-            card.AddChild(side);
+            box.AddChild(side);
 
             // Photoshop-style insert drag (runtime only): drop BETWEEN cards
             var dragFolder = folder;
@@ -253,6 +340,7 @@ public sealed partial class EditorTabs : Control
         foreach (var a in ch.Def.Actions)
         {
             var card = MakeCard(selected: Project.SelectedAction == a.Name, height: 64);
+            var box = CardBox(card);
             string name = a.Name;
 
             // info label does NOT expand; the rename box sits beside it, capped and scrollable
@@ -263,10 +351,10 @@ public sealed partial class EditorTabs : Control
                 TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
                 ClipText = true,
             };
-            card.AddChild(label);
+            box.AddChild(label);
             var edit = MakeNameEdit(a.Name);
             edit.TextSubmitted += t => RenameAction(ch, a, t, edit);
-            card.AddChild(edit);
+            box.AddChild(edit);
 
             card.GuiInput += @event =>
             {
@@ -369,6 +457,7 @@ public sealed partial class EditorTabs : Control
     private void RebuildLayerPage()
     {
         ClearChildren(_layerPage);
+        _liveLayerNums.Clear();
         var ch = Project.Current;
         var action = ch?.Action(Project.SelectedAction);
         if (action == null || Project.SelectedFrame >= action.Frames.Count) return;
@@ -381,6 +470,7 @@ public sealed partial class EditorTabs : Control
             var l = layers[i];
             var card = MakeCard(selected: Canvas.Selected.Kind == EditorCanvas.SelectionKind.Layer
                 && Canvas.Selected.Index == frame.Layers.IndexOf(l), height: CardHeight);
+            var box = CardBox(card);
 
             // 200x200 preview, top-aligned
             var info = ch.ImageOf(l.Img);
@@ -389,12 +479,13 @@ public sealed partial class EditorTabs : Control
                 CustomMinimumSize = new Vector2(PreviewSize, PreviewSize),
                 StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
                 SizeFlagsVertical = SizeFlags.ShrinkBegin,
+                MouseFilter = MouseFilterEnum.Ignore,
             };
             if (info != null) thumb.Texture = info.Page;
-            card.AddChild(thumb);
+            box.AddChild(thumb);
 
             var fields = new VBoxContainer { SizeFlagsVertical = SizeFlags.ShrinkBegin };
-            var zRow = RowOf("Z", out var zEdit);
+            var zRow = RowOf("Z", out var zEdit, "渲染顺序：Z 小的先画（在下层）。拖动到另一图层上=交换两者 Z。");
             zEdit.Value = l.Z;
             zEdit.ValueChanged += v =>
             {
@@ -407,16 +498,39 @@ public sealed partial class EditorTabs : Control
             fields.AddChild(zRow);
 
             var xy = new HBoxContainer();
-            var xRow = RowOf("X", out var xEdit);
-            var yRow = RowOf("Y", out var yEdit);
+            var xRow = RowOf("X", out var xEdit, "图层中心相对本帧根坐标的 X 偏移（可在主视图拖动图层修改）");
+            var yRow = RowOf("Y", out var yEdit, "图层中心相对本帧根坐标的 Y 偏移（上为负）");
             xEdit.Value = l.Off?.X ?? 0;
             yEdit.Value = l.Off?.Y ?? 0;
             xEdit.Step = 1; yEdit.Step = 1;
             xEdit.ValueChanged += v => { MarkEditing(); l.Off = new HeroVec((float)v, l.Off?.Y ?? 0); Changed?.Invoke(); };
             yEdit.ValueChanged += v => { MarkEditing(); l.Off = new HeroVec(l.Off?.X ?? 0, (float)v); Changed?.Invoke(); };
+            _liveLayerNums.Add((xEdit, () => l.Off?.X ?? 0));
+            _liveLayerNums.Add((yEdit, () => l.Off?.Y ?? 0));
             xy.AddChild(xRow); xy.AddChild(yRow);
             fields.AddChild(xy);
-            card.AddChild(fields);
+
+            // replace the image: OS drag & drop a .png anywhere on the card, or this button.
+            // Same-name files are OVERWRITTEN — this is a replace, not a new asset.
+            var replace = new Button { Text = "替换图片…", CustomMinimumSize = new Vector2(96, 28) };
+            replace.Pressed += () => PickFile("*.png ; PNG 图片", "选择替换用的 PNG 图片", f =>
+                ApplyLayerImage(ch.ImportImage(f, overwrite: true)));
+            fields.AddChild(replace);
+            box.AddChild(fields);
+
+            void ApplyLayerImage(ImportOutcome res)
+            {
+                if (res.Result != ImportResult.Ok || res.Path == null)
+                {
+                    if (res.Result == ImportResult.Failed) Warn("图片导入失败（见日志）");
+                    return;
+                }
+                Project.PushUndo();
+                l.Img = res.Path;
+                ch.InvalidateImage(res.Path);   // the caches may hold the overwritten texture
+                Changed?.Invoke();
+                RebuildLayerPage();
+            }
 
             // drag onto another card = SWAP the two z values (unlike the character tab's insert)
             int captured = i;
@@ -434,22 +548,10 @@ public sealed partial class EditorTabs : Control
                     RebuildLayerPage();
                 });
 
-            // OS file drop: replace this layer's image (offsets stay, original name kept)
-            WireFileDrop(card, ".png", files =>
-            {
-                if (files.Length == 0) return;
-                var res = ch.ImportImage(files[0]);
-                if (res.Result == ImportResult.Collision)
-                {
-                    Warn($"images/ 里已有同名文件：{System.IO.Path.GetFileName(files[0])}");
-                    return;
-                }
-                if (res.Path == null) return;
-                Project.PushUndo();
-                l.Img = res.Path;
-                Changed?.Invoke();
-                RebuildLayerPage();
-            });
+            // OS file drop (routed via Window.FilesDropped): replace this layer's image,
+            // offsets stay, the original file name is kept
+            RegisterDropZone(card, ".png", files =>
+                ApplyLayerImage(ch.ImportImage(files[0], overwrite: true)));
 
             card.GuiInput += @event =>
             {
@@ -509,6 +611,7 @@ public sealed partial class EditorTabs : Control
     private void RebuildConstantsPage()
     {
         ClearChildren(_constPage);
+        _liveConstNums.Clear();
         var ch = Project.Current;
         var action = ch?.Action(Project.SelectedAction);
         if (action == null)
@@ -520,24 +623,33 @@ public sealed partial class EditorTabs : Control
 
         Section(_constPage, $"动作 · {action.Name}");
 
-        var loopCheck = Check("循环播放动画", action.Loop, v => { MarkEditing(); action.Loop = v; Changed?.Invoke(); });
+        var loopCheck = Check("循环播放动画", action.Loop, v => { MarkEditing(); action.Loop = v; Changed?.Invoke(); },
+            "勾选后该动作播完自动回到第 1 帧（IDLE 等待机动画用）");
         _constPage.AddChild(loopCheck);
 
-        var canAct = SpinRow("CanActNextActionAt (-1 禁用)", action.CanActNextActionAt, -1, 9999,
-            v => { MarkEditing(); action.CanActNextActionAt = v; Changed?.Invoke(); });
+        var canAct = SpinRow("CanActNextActionAt", action.CanActNextActionAt, -1, 9999,
+            v => { MarkEditing(); action.CanActNextActionAt = v; Changed?.Invoke(); },
+            "从这一帧起可以再次出招/行动（动作动画继续播）；-1 = 必须播完才能行动");
         _constPage.AddChild(canAct);
 
         if (frame != null)
         {
-            var rootBox = new HBoxContainer();
-            rootBox.AddChild(new Label { Text = "根坐标 (Ctrl+主视图拖动): " });
+            var rootBox = new HBoxContainer
+            {
+                TooltipText = "本帧角色锚点相对原点的偏移（累计值）。按住 Ctrl 在主视图拖动可修改；"
+                    + "影响本帧所有图层与碰撞盒。运行时引擎按相邻两帧的差值移动角色（根位移）。",
+            };
+            rootBox.AddChild(new Label { Text = "根坐标 " });
             var rx = new SpinBox { Value = frame.Root?.X ?? 0, Step = 1, SizeFlagsHorizontal = SizeFlags.ExpandFill };
             var ry = new SpinBox { Value = frame.Root?.Y ?? 0, Step = 1, SizeFlagsHorizontal = SizeFlags.ExpandFill };
             rx.ValueChanged += v => { MarkEditing(); frame.Root = new HeroVec((float)v, frame.Root?.Y ?? 0); Changed?.Invoke(); };
             ry.ValueChanged += v => { MarkEditing(); frame.Root = new HeroVec(frame.Root?.X ?? 0, (float)v); Changed?.Invoke(); };
+            _liveConstNums.Add((rx, () => frame.Root?.X ?? 0));
+            _liveConstNums.Add((ry, () => frame.Root?.Y ?? 0));
             rootBox.AddChild(rx); rootBox.AddChild(ry);
             _constPage.AddChild(rootBox);
 
+            BuildHurtboxSection(frame);
             BuildFxSection(ch, frame);
         }
 
@@ -547,7 +659,7 @@ public sealed partial class EditorTabs : Control
             action.IsAttack = v;
             if (v && action.Attack == null) action.Attack = new HeroAttack();
             RebuildConstantsPage();
-        });
+        }, "勾选后此动作是一个可以用按键/搓招触发的出招动作，展示抬手/收招/打击等参数");
         _constPage.AddChild(atkCheck);
 
         if (action.IsAttack && action.Attack != null) BuildAttackSection(ch, action);
@@ -563,9 +675,61 @@ public sealed partial class EditorTabs : Control
             action.IsThrow = v;
             if (v && action.Throw == null) action.Throw = new HeroThrow();
             RebuildConstantsPage();
-        });
+        }, "勾选后此动作是投技命中后进入的表演动作（由 IsGrab 的 Active 区间跳转过来）");
         _constPage.AddChild(throwCheck);
         if (action.IsThrow && action.Throw != null) BuildThrowSection(ch, action);
+    }
+
+    // per-frame defensive boxes. Empty list = the character's BASE boxes from char.json are
+    // used (which the canvas always displays); adding any box here overrides the base set
+    // for this frame only.
+    private void BuildHurtboxSection(HeroFrame frame)
+    {
+        Section(_constPage, "本帧受击盒");
+        if (frame.Hurtboxes.Count == 0)
+            _constPage.AddChild(new Label
+            {
+                Text = "（本帧未覆盖 — 主视图显示并使用角色基础受击盒）",
+                Modulate = new Color(1, 1, 1, 0.45f),
+            });
+        for (int i = 0; i < frame.Hurtboxes.Count; i++)
+        {
+            int idx = i;
+            var box = frame.Hurtboxes[i];
+            var row = BoxRow(box, hover =>
+            {
+                Canvas.Hovered = hover
+                    ? new EditorCanvas.Selection { Kind = EditorCanvas.SelectionKind.Hurtbox, Index = idx, ActiveIndex = -1 }
+                    : new EditorCanvas.Selection();
+                Canvas.QueueRedraw();
+            });
+            var dup = new Button { Text = "复制", CustomMinimumSize = new Vector2(52, 26) };
+            dup.Pressed += () =>
+            {
+                Project.PushUndo();
+                frame.Hurtboxes.Insert(idx + 1, HeroJson.Read<HeroBox>(HeroJson.Write(box)));
+                RebuildConstantsPage();
+            };
+            row.AddChild(dup);
+            var del = new Button { Text = "删除", CustomMinimumSize = new Vector2(52, 26) };
+            del.Pressed += () =>
+            {
+                Project.PushUndo();
+                frame.Hurtboxes.RemoveAt(idx);
+                RebuildConstantsPage();
+            };
+            row.AddChild(del);
+            _constPage.AddChild(row);
+        }
+        var plus = new Button { Text = "+ 受击盒" };
+        plus.Pressed += () =>
+        {
+            Project.PushUndo();
+            frame.Hurtboxes.Add(new HeroBox(0, -102, 55, 47));   // seeded from the default body box
+            RebuildConstantsPage();
+            Changed?.Invoke();
+        };
+        _constPage.AddChild(plus);
     }
 
     private void BuildAttackSection(EditorChar ch, HeroActionDef action)
@@ -573,10 +737,16 @@ public sealed partial class EditorTabs : Control
         var a = action.Attack;
         Section(_constPage, "出招参数");
 
-        _constPage.AddChild(RangeRow("抬手 StartupRange", a.StartupRange));
-        _constPage.AddChild(RangeRow("收招 RecoveryRange", a.RecoveryRange));
+        _constPage.AddChild(RangeRow("抬手 StartupRange", a.StartupRange,
+            "抬手区间 [起,止] 帧号：此阶段招式尚未生效。将来用于打康（Counter Hit）判定"));
+        _constPage.AddChild(RangeRow("收招 RecoveryRange", a.RecoveryRange,
+            "收招区间 [起,止] 帧号：此阶段不能再出招。将来用于确反（Punish）判定与取消"));
 
-        var guardRow = new HBoxContainer();
+        var guardRow = new HBoxContainer
+        {
+            TooltipText = "Guard 判定高度：High 上段（站防）/ Mid 中段（站蹲皆可防）/ Low 下段（蹲防）。\n"
+                + "Stance 出招姿态：影响能否在被防/命中时的状态匹配。",
+        };
         guardRow.AddChild(new Label { Text = "Guard " });
         var guard = new OptionButton();
         foreach (var g in new[] { "High", "Mid", "Low" }) guard.AddItem(g);
@@ -591,18 +761,33 @@ public sealed partial class EditorTabs : Control
         guardRow.AddChild(stance);
         _constPage.AddChild(guardRow);
 
-        _constPage.AddChild(SpinRow("oH (击中硬直帧)", a.OH, 0, 999, v => { MarkEditing(); a.OH = v; Changed?.Invoke(); }));
-        _constPage.AddChild(SpinRow("oB (防御硬直帧)", a.OB, 0, 999, v => { MarkEditing(); a.OB = v; Changed?.Invoke(); }));
-        _constPage.AddChild(FloatRow("Knockback", a.Knockback, v => { MarkEditing(); a.Knockback = v; Changed?.Invoke(); }));
-        _constPage.AddChild(FloatRow("KnockbackOnBlock", a.KnockbackOnBlock, v => { MarkEditing(); a.KnockbackOnBlock = v; Changed?.Invoke(); }));
-        _constPage.AddChild(Check("Launches (浮空)", a.Launches, v => { MarkEditing(); a.Launches = v; Changed?.Invoke(); }));
-        _constPage.AddChild(FloatRow("LaunchUp", a.LaunchUp, v => { MarkEditing(); a.LaunchUp = v; Changed?.Invoke(); }));
-        _constPage.AddChild(FloatRow("LaunchBack", a.LaunchBack, v => { MarkEditing(); a.LaunchBack = v; Changed?.Invoke(); }));
-        _constPage.AddChild(Check("CanAirJuggle", a.CanAirJuggle, v => { MarkEditing(); a.CanAirJuggle = v; Changed?.Invoke(); }));
-        _constPage.AddChild(Check("ImmuneOnStartup (抬手无敌)", a.ImmuneOnStartup, v => { MarkEditing(); a.ImmuneOnStartup = v; Changed?.Invoke(); }));
-        _constPage.AddChild(Check("Unblockable (防御不能)", a.Unblockable, v => { MarkEditing(); a.Unblockable = v; Changed?.Invoke(); }));
+        _constPage.AddChild(SpinRow("oH", a.OH, 0, 999, v => { MarkEditing(); a.OH = v; Changed?.Invoke(); },
+            "命中硬直帧：打中对手时对手的受击硬直长度（越大越有利）"));
+        _constPage.AddChild(SpinRow("oB", a.OB, 0, 999, v => { MarkEditing(); a.OB = v; Changed?.Invoke(); },
+            "防御硬直帧：被对手防御时对手的防御硬直长度"));
+        _constPage.AddChild(FloatRow("Knockback", a.Knockback, v => { MarkEditing(); a.Knockback = v; Changed?.Invoke(); },
+            "命中时对手被击退的速度（px/s）"));
+        _constPage.AddChild(FloatRow("KnockbackOnBlock", a.KnockbackOnBlock, v => { MarkEditing(); a.KnockbackOnBlock = v; Changed?.Invoke(); },
+            "被防御时对手被推开的速度（px/s）"));
+        _constPage.AddChild(Check("Launches", a.Launches, v => { MarkEditing(); a.Launches = v; Changed?.Invoke(); },
+            "命中是否把对手打浮空（进入空中连段/juggle 状态）。注意与根坐标无关：根坐标移动的是"
+            + "出招者自己，Launch 系列作用于被打的对手"));
+        _constPage.AddChild(FloatRow("LaunchUp", a.LaunchUp, v => { MarkEditing(); a.LaunchUp = v; Changed?.Invoke(); },
+            "Launches 命中时对手获得的向上初速度（px/s）。留作浮空连段（juggle）轨迹用"));
+        _constPage.AddChild(FloatRow("LaunchBack", a.LaunchBack, v => { MarkEditing(); a.LaunchBack = v; Changed?.Invoke(); },
+            "Launches 命中时对手获得的向后初速度（px/s），与 LaunchUp 一起决定浮空弧线"));
+        _constPage.AddChild(Check("CanAirJuggle", a.CanAirJuggle, v => { MarkEditing(); a.CanAirJuggle = v; Changed?.Invoke(); },
+            "命中浮空/空中对手后，对手是否保持浮空可继续追打（juggle）"));
+        _constPage.AddChild(Check("ImmuneOnStartup", a.ImmuneOnStartup, v => { MarkEditing(); a.ImmuneOnStartup = v; Changed?.Invoke(); },
+            "抬手阶段无敌：不会被打击和投技命中"));
+        _constPage.AddChild(Check("Unblockable", a.Unblockable, v => { MarkEditing(); a.Unblockable = v; Changed?.Invoke(); },
+            "防御不能：该招绕过防御直接命中（投技类判定）"));
 
-        var motionRow = new HBoxContainer();
+        var motionRow = new HBoxContainer
+        {
+            TooltipText = "搓招方向输入：236 = 前四分之一圈（QCF）、214 = 后四分之一圈（QCB）、623 = 升龙（DP）。\n"
+                + "搓招的优先级与按键映射在代码层面指定，这里只选方向。",
+        };
         motionRow.AddChild(new Label { Text = "Motion " });
         var motion = new OptionButton();
         foreach (var m in new[] { "无", "236", "214", "623" }) motion.AddItem(m);
@@ -611,12 +796,17 @@ public sealed partial class EditorTabs : Control
         motionRow.AddChild(motion);
         _constPage.AddChild(motionRow);
 
-        _constPage.AddChild(TextRow("CommandLabel (搓招提示)", a.CommandLabel ?? "",
-            t => { MarkEditing(); a.CommandLabel = t; Changed?.Invoke(); }));
+        _constPage.AddChild(TextRow("CommandLabel", a.CommandLabel ?? "",
+            t => { MarkEditing(); a.CommandLabel = t; Changed?.Invoke(); },
+            "搓招成功时底边栏显示的提示文字；留空则不显示"));
 
         // buttons: compact TOGGLE buttons in a row (not checkboxes — they waste width);
         // 2+ active = simultaneous press (throw input)
-        var btnRow = new HBoxContainer();
+        var btnRow = new HBoxContainer
+        {
+            TooltipText = "触发按键：单选 = 命令按键；两个同时勾 = 同时按下（投技类输入）。\n"
+                + "配合 AnyPunch/AnyKick 放宽为任意拳/脚。",
+        };
         btnRow.AddChild(new Label { Text = "按键 " });
         foreach (AttackButton b in System.Enum.GetValues(typeof(AttackButton)))
         {
@@ -638,31 +828,38 @@ public sealed partial class EditorTabs : Control
             btnRow.AddChild(btn);
         }
         _constPage.AddChild(btnRow);
-        _constPage.AddChild(Check("AnyPunch (任意拳)", a.AnyPunch, v => { MarkEditing(); a.AnyPunch = v; Changed?.Invoke(); }));
-        _constPage.AddChild(Check("AnyKick (任意脚)", a.AnyKick, v => { MarkEditing(); a.AnyKick = v; Changed?.Invoke(); }));
+        _constPage.AddChild(Check("AnyPunch", a.AnyPunch, v => { MarkEditing(); a.AnyPunch = v; Changed?.Invoke(); },
+            "勾选后最后一个拳按键放宽为任意拳（LP/MP/HP 皆可触发）"));
+        _constPage.AddChild(Check("AnyKick", a.AnyKick, v => { MarkEditing(); a.AnyKick = v; Changed?.Invoke(); },
+            "勾选后最后一个脚按键放宽为任意脚（LK/MK/HK 皆可触发）"));
 
-        _constPage.AddChild(TextRow("StartupCancelInto (逗号分隔)", string.Join(",", a.StartupCancelInto ?? new List<string>()),
-            t => { MarkEditing(); a.StartupCancelInto = SplitList(t); Changed?.Invoke(); }));
-        _constPage.AddChild(TextRow("RecoveryCancelInto (逗号分隔)", string.Join(",", a.RecoveryCancelInto ?? new List<string>()),
-            t => { MarkEditing(); a.RecoveryCancelInto = SplitList(t); Changed?.Invoke(); }));
+        _constPage.AddChild(MultiActionDropdownRow(ch, "StartupCancelInto", a.StartupCancelInto,
+            "抬手阶段可取消进入的动作（下拉多选，点条目打勾/取消勾）"));
+        _constPage.AddChild(MultiActionDropdownRow(ch, "RecoveryCancelInto", a.RecoveryCancelInto,
+            "收招阶段可取消进入的动作（下拉多选，点条目打勾/取消勾）"));
 
-        // ---- actives: Label header + right-click 复制/删除 ----
+        // ---- actives: vertical cards (header row over the body), right-click 复制/删除 ----
         Section(_constPage, "Active 区间（右键复制/删除）");
         for (int ai = 0; ai < a.Actives.Count; ai++)
         {
             int idx = ai;
             var act = a.Actives[ai];
-            var card = MakeCard(false);
+            var card = MakeCard(false, vertical: true);
             card.SizeFlagsHorizontal = SizeFlags.ExpandFill;
 
-            var head = new HBoxContainer();
+            var body = CardBox(card);
+            var head = new HBoxContainer
+            {
+                TooltipText = "一段独立的打击判定窗口：区间内的打击盒命中只消费一次，"
+                    + "多个 Active 区间用于多段判定技能（如旋风腿）。",
+            };
             var headLabel = new Label
             {
                 Text = $"区间 {ai}  [{act.ActiveRange[0]}..{act.ActiveRange[1]}]{(act.IsGrab ? " · 投技" : "")}",
                 SizeFlagsHorizontal = SizeFlags.ShrinkBegin,
             };
             head.AddChild(headLabel);
-            card.AddChild(head);
+            body.AddChild(head);
 
             card.GuiInput += @event =>
             {
@@ -689,21 +886,29 @@ public sealed partial class EditorTabs : Control
                 }
             };
 
-            var body = new VBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
-            body.AddChild(RangeRow("ActiveRange", act.ActiveRange));
-            body.AddChild(SpinRow("Damage", act.Damage, 0, 100000, v => { MarkEditing(); act.Damage = v; Changed?.Invoke(); }));
-            body.AddChild(Check("ShouldWhiffIfNotHit (空挥打断)", act.ShouldWhiffIfNotHit,
-                v => { MarkEditing(); act.ShouldWhiffIfNotHit = v; RebuildConstantsPage(); Changed?.Invoke(); }));
+            body.AddChild(RangeRow("ActiveRange", act.ActiveRange,
+                "该打击区间的帧范围 [起,止]。可用刷选按钮在时间轴上拖出范围"));
+            body.AddChild(SpinRow("Damage", act.Damage, 0, 100000, v => { MarkEditing(); act.Damage = v; Changed?.Invoke(); },
+                "此区间命中一次造成的伤害（血量为 ×100 尺度）"));
+            body.AddChild(Check("ShouldWhiffIfNotHit", act.ShouldWhiffIfNotHit,
+                v => { MarkEditing(); act.ShouldWhiffIfNotHit = v; RebuildConstantsPage(); Changed?.Invoke(); },
+                "空挥打断：此区间没有命中任何对手时，播完本区间直接跳到空挥动作"));
             if (act.ShouldWhiffIfNotHit)
                 body.AddChild(ActionDropdownRow(ch, "WhiffAction 空挥跳转", act.WhiffAction,
                     t => { act.WhiffAction = t; Changed?.Invoke(); }));
             body.AddChild(Check("IsGrab 投技", act.IsGrab,
-                v => { MarkEditing(); act.IsGrab = v; RebuildConstantsPage(); Changed?.Invoke(); }));
+                v => { MarkEditing(); act.IsGrab = v; RebuildConstantsPage(); Changed?.Invoke(); },
+                "投技起手：此区间的打击盒作为投技判定，命中后跳转到 ThrowAction"));
             if (act.IsGrab)
                 body.AddChild(ActionDropdownRow(ch, "ThrowAction 命中后动作", act.ThrowAction,
                     t => { act.ThrowAction = t; Changed?.Invoke(); }));
 
-            body.AddChild(new Label { Text = "打击盒（主视图可拖动/缩放）" });
+            body.AddChild(new Label
+            {
+                Text = "打击盒（主视图可拖动/缩放）",
+                TooltipText = "此区间共用的打击判定盒。同一区间内的打击盒命中只消费一次；"
+                    + "悬停高亮主视图对应盒，坐标改动与主视图拖动双向同步",
+            });
             for (int bi = 0; bi < act.Hitboxes.Count; bi++)
             {
                 int bIdx = bi;
@@ -741,7 +946,6 @@ public sealed partial class EditorTabs : Control
                 RebuildConstantsPage();
             };
             body.AddChild(plusBox);
-            card.AddChild(body);
             _constPage.AddChild(card);
         }
         var plusAct = new Button { Text = "+ Active 区间" };
@@ -760,23 +964,28 @@ public sealed partial class EditorTabs : Control
         };
         _constPage.AddChild(plusAct);
 
-        // ---- projectiles: Label header + right-click 复制/删除 ----
+        // ---- projectiles: vertical cards (header over body), right-click 复制/删除 ----
         Section(_constPage, "Fireball 生成（右键复制/删除）");
         for (int pi = 0; pi < a.Projectiles.Count; pi++)
         {
             int idx = pi;
             var p = a.Projectiles[pi];
-            var card = MakeCard(false);
+            var card = MakeCard(false, vertical: true);
             card.SizeFlagsHorizontal = SizeFlags.ExpandFill;
 
-            var head = new HBoxContainer();
+            var body = CardBox(card);
+            var head = new HBoxContainer
+            {
+                TooltipText = "一个飞行道具生成配置：在 SpawnFrame 那一帧于 Offset 位置按 Prefab 生成，"
+                    + "碰撞盒直接做在 FireballTSCN/ 的 tscn 里。一个招式可以配多个。",
+            };
             var headLabel = new Label
             {
                 Text = $"fireball {pi} · {p.Prefab}",
                 SizeFlagsHorizontal = SizeFlags.ShrinkBegin,
             };
             head.AddChild(headLabel);
-            card.AddChild(head);
+            body.AddChild(head);
 
             card.GuiInput += @event =>
             {
@@ -802,8 +1011,10 @@ public sealed partial class EditorTabs : Control
                 }
             };
 
-            var body = new VBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
-            var prefabRow = new HBoxContainer();
+            var prefabRow = new HBoxContainer
+            {
+                TooltipText = "FireballTSCN/ 下的预制体（tscn 文件名，不含扩展名）；碰撞盒做在 tscn 里",
+            };
             prefabRow.AddChild(new Label { Text = "Prefab " });
             var prefab = new OptionButton();
             foreach (var id in FireballIds()) prefab.AddItem(id);
@@ -814,18 +1025,27 @@ public sealed partial class EditorTabs : Control
             prefabRow.AddChild(prefab);
             body.AddChild(prefabRow);
 
-            body.AddChild(SpinRow("SpawnFrame", p.SpawnFrame, 0, 9999, v => { MarkEditing(); p.SpawnFrame = v; Changed?.Invoke(); }));
-            body.AddChild(FloatRow("Speed", p.Speed, v => { MarkEditing(); p.Speed = v; Changed?.Invoke(); }));
-            body.AddChild(FloatRow("OffsetX (前方为正)", p.Offset?.X ?? 0, v => { MarkEditing(); p.Offset = new HeroVec(v, p.Offset?.Y ?? 0); Changed?.Invoke(); }));
-            body.AddChild(FloatRow("OffsetY (上为负)", p.Offset?.Y ?? 0, v => { MarkEditing(); p.Offset = new HeroVec(p.Offset?.X ?? 0, v); Changed?.Invoke(); }));
-            body.AddChild(SpinRow("Damage", p.Damage, 0, 1000000, v => { MarkEditing(); p.Damage = v; Changed?.Invoke(); }));
-            body.AddChild(SpinRow("oH", p.OH, 0, 999, v => { MarkEditing(); p.OH = v; Changed?.Invoke(); }));
-            body.AddChild(SpinRow("oB", p.OB, 0, 999, v => { MarkEditing(); p.OB = v; Changed?.Invoke(); }));
-            body.AddChild(FloatRow("Knockback", p.Knockback, v => { MarkEditing(); p.Knockback = v; Changed?.Invoke(); }));
-            body.AddChild(FloatRow("MaxDistance (0=无限)", p.MaxDistance, v => { MarkEditing(); p.MaxDistance = v; Changed?.Invoke(); }));
-            body.AddChild(SpinRow("LifeTimeFrame (0=无限)", p.LifeTimeFrame, 0, 99999, v => { MarkEditing(); p.LifeTimeFrame = v; Changed?.Invoke(); }));
-            body.AddChild(Check("CanAirJuggle", p.CanAirJuggle, v => { MarkEditing(); p.CanAirJuggle = v; Changed?.Invoke(); }));
-            var guardRow2 = new HBoxContainer();
+            body.AddChild(SpinRow("SpawnFrame", p.SpawnFrame, 0, 9999, v => { MarkEditing(); p.SpawnFrame = v; Changed?.Invoke(); },
+                "在该帧生成 fireball；主视图切到之后的帧可预览飞行位置"));
+            body.AddChild(FloatRow("Speed", p.Speed, v => { MarkEditing(); p.Speed = v; Changed?.Invoke(); },
+                "飞行速度 px/s（向对手方向）"));
+            body.AddChild(FloatRow("OffsetX", p.Offset?.X ?? 0, v => { MarkEditing(); p.Offset = new HeroVec(v, p.Offset?.Y ?? 0); Changed?.Invoke(); },
+                "生成位置相对角色锚点的 X 偏移（前方为正）"));
+            body.AddChild(FloatRow("OffsetY", p.Offset?.Y ?? 0, v => { MarkEditing(); p.Offset = new HeroVec(p.Offset?.X ?? 0, v); Changed?.Invoke(); },
+                "生成位置相对角色锚点的 Y 偏移（上为负）"));
+            body.AddChild(SpinRow("Damage", p.Damage, 0, 1000000, v => { MarkEditing(); p.Damage = v; Changed?.Invoke(); },
+                "命中伤害（血量为 ×100 尺度）"));
+            body.AddChild(SpinRow("oH", p.OH, 0, 999, v => { MarkEditing(); p.OH = v; Changed?.Invoke(); }, "命中硬直帧"));
+            body.AddChild(SpinRow("oB", p.OB, 0, 999, v => { MarkEditing(); p.OB = v; Changed?.Invoke(); }, "被防御硬直帧"));
+            body.AddChild(FloatRow("Knockback", p.Knockback, v => { MarkEditing(); p.Knockback = v; Changed?.Invoke(); },
+                "命中击退速度 px/s"));
+            body.AddChild(FloatRow("MaxDistance", p.MaxDistance, v => { MarkEditing(); p.MaxDistance = v; Changed?.Invoke(); },
+                "最长飞行距离；0 = 无限"));
+            body.AddChild(SpinRow("LifeTimeFrame", p.LifeTimeFrame, 0, 99999, v => { MarkEditing(); p.LifeTimeFrame = v; Changed?.Invoke(); },
+                "最长存活帧数；0 = 无限"));
+            body.AddChild(Check("CanAirJuggle", p.CanAirJuggle, v => { MarkEditing(); p.CanAirJuggle = v; Changed?.Invoke(); },
+                "命中浮空/空中对手后可继续追打"));
+            var guardRow2 = new HBoxContainer { TooltipText = "判定高度：High 上段 / Mid 中段 / Low 下段" };
             guardRow2.AddChild(new Label { Text = "Guard " });
             var g2 = new OptionButton();
             foreach (var g in new[] { "High", "Mid", "Low" }) g2.AddItem(g);
@@ -834,7 +1054,6 @@ public sealed partial class EditorTabs : Control
             guardRow2.AddChild(g2);
             body.AddChild(guardRow2);
 
-            card.AddChild(body);
             _constPage.AddChild(card);
         }
         var plusProj = new Button { Text = "+ fireball" };
@@ -857,21 +1076,28 @@ public sealed partial class EditorTabs : Control
     {
         var t = action.Throw;
         Section(_constPage, "投技参数（命中后动作）");
-        _constPage.AddChild(Check("CanGrabAirborne (可抓空中)", t.CanGrabAirborne,
-            v => { MarkEditing(); t.CanGrabAirborne = v; Changed?.Invoke(); }));
-        _constPage.AddChild(FloatRow("ReleaseVel.X (前方为正)", t.ReleaseVel?.X ?? 0,
-            v => { MarkEditing(); t.ReleaseVel = new HeroVec(v, t.ReleaseVel?.Y ?? 0); Changed?.Invoke(); }));
-        _constPage.AddChild(FloatRow("ReleaseVel.Y (上为负)", t.ReleaseVel?.Y ?? 0,
-            v => { MarkEditing(); t.ReleaseVel = new HeroVec(t.ReleaseVel?.X ?? 0, v); Changed?.Invoke(); }));
+        _constPage.AddChild(Check("CanGrabAirborne", t.CanGrabAirborne,
+            v => { MarkEditing(); t.CanGrabAirborne = v; Changed?.Invoke(); },
+            "投技起手是否可以抓到空中的对手"));
+        _constPage.AddChild(FloatRow("ReleaseVel.X", t.ReleaseVel?.X ?? 0,
+            v => { MarkEditing(); t.ReleaseVel = new HeroVec(v, t.ReleaseVel?.Y ?? 0); Changed?.Invoke(); },
+            "投技结束时受害者获得的速度 X（前方为正）"));
+        _constPage.AddChild(FloatRow("ReleaseVel.Y", t.ReleaseVel?.Y ?? 0,
+            v => { MarkEditing(); t.ReleaseVel = new HeroVec(t.ReleaseVel?.X ?? 0, v); Changed?.Invoke(); },
+            "投技结束时受害者获得的速度 Y（上为负）"));
         _constPage.AddChild(Check("ReleaseToJuggle", t.ReleaseToJuggle,
-            v => { MarkEditing(); t.ReleaseToJuggle = v; Changed?.Invoke(); }));
+            v => { MarkEditing(); t.ReleaseToJuggle = v; Changed?.Invoke(); },
+            "放开后受害者进入浮空连段状态（可追打）"));
 
         Section(_constPage, "HurtTimeline（多段伤害）");
         for (int i = 0; i < t.HurtTimeline.Count; i++)
         {
             int idx = i;
             var h = t.HurtTimeline[i];
-            var row = new HBoxContainer();
+            var row = new HBoxContainer
+            {
+                TooltipText = "进行到该帧时对投技受害者造成的伤害；可添加多段实现多段投。",
+            };
             row.AddChild(new Label { Text = "帧 " });
             var f = new SpinBox { Value = h.Frame, MinValue = 0, MaxValue = 9999 };
             f.ValueChanged += v => { MarkEditing(); h.Frame = (int)v; Changed?.Invoke(); };
@@ -899,11 +1125,15 @@ public sealed partial class EditorTabs : Control
         {
             int idx = i;
             var k = t.VictimBind[i];
-            var card = MakeCard(false);
+            var card = MakeCard(false, vertical: true);
             card.SizeFlagsHorizontal = SizeFlags.ExpandFill;
-            var head = new HBoxContainer();
+            var body = CardBox(card);
+            var head = new HBoxContainer
+            {
+                TooltipText = "从该帧起生效的受害者绑定：受害者锚点插值到 BindPos，并播放 VictimAnim。",
+            };
             head.AddChild(new Label { Text = $"绑定 {i} · 帧 {k.Frame}" });
-            card.AddChild(head);
+            body.AddChild(head);
             card.GuiInput += @event =>
             {
                 if (@event is InputEventMouseButton mb && mb.Pressed && mb.ButtonIndex == MouseButton.Right)
@@ -925,16 +1155,19 @@ public sealed partial class EditorTabs : Control
                     });
                 }
             };
-            var body = new VBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
-            body.AddChild(SpinRow("Frame", k.Frame, 0, 9999, v => { MarkEditing(); k.Frame = v; Changed?.Invoke(); }));
-            body.AddChild(FloatRow("BindPos.X (前方为正)", k.BindPos?.X ?? 0,
-                v => { MarkEditing(); k.BindPos = new HeroVec(v, k.BindPos?.Y ?? 0); Changed?.Invoke(); }));
-            body.AddChild(FloatRow("BindPos.Y (上为负)", k.BindPos?.Y ?? 0,
-                v => { MarkEditing(); k.BindPos = new HeroVec(k.BindPos?.X ?? 0, v); Changed?.Invoke(); }));
-            body.AddChild(TextRow("VictimAnim", k.VictimAnim ?? "", s2 => { MarkEditing(); k.VictimAnim = s2; Changed?.Invoke(); }));
-            body.AddChild(Check("IsResetVictimAnim (同动画重播)", k.IsResetVictimAnim,
-                v => { MarkEditing(); k.IsResetVictimAnim = v; Changed?.Invoke(); }));
-            card.AddChild(body);
+            body.AddChild(SpinRow("Frame", k.Frame, 0, 9999, v => { MarkEditing(); k.Frame = v; Changed?.Invoke(); },
+                "该绑定生效的帧号（主视图会在对应帧预览受害者位置/动画）"));
+            body.AddChild(FloatRow("BindPos.X", k.BindPos?.X ?? 0,
+                v => { MarkEditing(); k.BindPos = new HeroVec(v, k.BindPos?.Y ?? 0); Changed?.Invoke(); },
+                "受害者锚点相对投技方锚点的 X 偏移（前方为正）"));
+            body.AddChild(FloatRow("BindPos.Y", k.BindPos?.Y ?? 0,
+                v => { MarkEditing(); k.BindPos = new HeroVec(k.BindPos?.X ?? 0, v); Changed?.Invoke(); },
+                "受害者锚点相对投技方锚点的 Y 偏移（上为负）"));
+            body.AddChild(TextRow("VictimAnim", k.VictimAnim ?? "", s2 => { MarkEditing(); k.VictimAnim = s2; Changed?.Invoke(); },
+                "受害者在绑定期间播放的动作名（对方角色的动作）"));
+            body.AddChild(Check("IsResetVictimAnim", k.IsResetVictimAnim,
+                v => { MarkEditing(); k.IsResetVictimAnim = v; Changed?.Invoke(); },
+                "勾选：即使下一绑定帧动画名相同也从首帧重播；否则同名动画继续播放"));
             _constPage.AddChild(card);
         }
         var plusBind = new Button { Text = "+ 绑定关键帧" };
@@ -963,16 +1196,19 @@ public sealed partial class EditorTabs : Control
         _constPage.AddChild(prevRow);
     }
 
-    // ---- FX: OS file drops copy the file in under its original name; the row then shows the
-    // path RELATIVE TO THE GAME ROOT (no res:// prefix). A name clash is refused with a popup.
+    // ---- FX: OS file drops (Window.FilesDropped routed to zones) or 选择… buttons copy the
+    // file in under its original name; the row shows the path RELATIVE TO THE GAME ROOT.
     private void BuildFxSection(EditorChar ch, HeroFrame frame)
     {
-        Section(_constPage, "本帧 FX（纯表现，可拖入 tscn/ogg）");
+        Section(_constPage, "本帧 FX（纯表现，可拖入或选择 tscn/ogg）");
         var fx = frame.Fx ??= new HeroFx();
         for (int i = 0; i < fx.Particles.Count; i++)
         {
             int idx = i;
-            var row = new HBoxContainer();
+            var row = new HBoxContainer
+            {
+                TooltipText = "在本帧生成的粒子预制体（ParticleTSCN/ 下的 tscn，任何角色可引用）",
+            };
             var edit = new LineEdit
             {
                 Text = fx.Particles[i],
@@ -980,33 +1216,31 @@ public sealed partial class EditorTabs : Control
             };
             edit.TextChanged += t => { MarkEditing(); fx.Particles[idx] = t; Changed?.Invoke(); };
             row.AddChild(edit);
-            AddFileDrop(row, ".tscn", f =>
+            var pick = new Button { Text = "选择…", CustomMinimumSize = new Vector2(64, 26) };
+            pick.Pressed += () => PickFile("*.tscn ; Godot 场景", "选择粒子 tscn", f =>
             {
-                var res = Project.ImportSharedAsset(f, "ParticleTSCN");
-                if (res.Result == ImportResult.Collision)
-                {
-                    Warn($"ParticleTSCN/ 已有同名文件：{System.IO.Path.GetFileName(f)}");
-                    return;
-                }
-                if (res.Path == null) return;
-                Project.PushUndo();
-                fx.Particles[idx] = res.Path;
-                Changed?.Invoke();
-                RebuildConstantsPage();
+                var res = Project.ImportSharedAsset(f, "ParticleTSCN", overwrite: true);
+                ApplyFxAsset(() => fx.Particles[idx], v => fx.Particles[idx] = v, res, "ParticleTSCN");
+            });
+            row.AddChild(pick);
+            RegisterDropZone(row, ".tscn", files =>
+            {
+                var res = Project.ImportSharedAsset(files[0], "ParticleTSCN", overwrite: true);
+                ApplyFxAsset(() => fx.Particles[idx], v => fx.Particles[idx] = v, res, "ParticleTSCN");
             });
             var del = new Button { Text = "删除", CustomMinimumSize = new Vector2(52, 26) };
             del.Pressed += () => { Project.PushUndo(); fx.Particles.RemoveAt(idx); RebuildConstantsPage(); };
             row.AddChild(del);
             _constPage.AddChild(row);
         }
-        var plusP = new Button { Text = "+ 粒子（可拖入 tscn）" };
+        var plusP = new Button { Text = "+ 粒子（可拖入或选择 tscn）" };
         plusP.Pressed += () => { Project.PushUndo(); fx.Particles.Add("ParticleTSCN/FX_Hit.tscn"); RebuildConstantsPage(); };
         _constPage.AddChild(plusP);
 
         for (int i = 0; i < fx.Sounds.Count; i++)
         {
             int idx = i;
-            var row = new HBoxContainer();
+            var row = new HBoxContainer { TooltipText = "在本帧播放的音效（当前角色 audio/ 下的 ogg）" };
             var edit = new LineEdit
             {
                 Text = fx.Sounds[i],
@@ -1014,28 +1248,44 @@ public sealed partial class EditorTabs : Control
             };
             edit.TextChanged += t => { MarkEditing(); fx.Sounds[idx] = t; Changed?.Invoke(); };
             row.AddChild(edit);
-            AddFileDrop(row, ".ogg", f =>
+            var pick = new Button { Text = "选择…", CustomMinimumSize = new Vector2(64, 26) };
+            pick.Pressed += () => PickFile("*.ogg ; Ogg 音频", "选择音效 ogg", f =>
             {
-                var res = ch.ImportAudio(f);
-                if (res.Result == ImportResult.Collision)
-                {
-                    Warn($"audio/ 已有同名文件：{System.IO.Path.GetFileName(f)}");
-                    return;
-                }
-                if (res.Path == null) return;
-                Project.PushUndo();
-                fx.Sounds[idx] = res.Path;
-                Changed?.Invoke();
-                RebuildConstantsPage();
+                var res = ch.ImportAudio(f, overwrite: true);
+                ApplyFxAsset(() => fx.Sounds[idx], v => fx.Sounds[idx] = v, res, "audio");
+            });
+            row.AddChild(pick);
+            RegisterDropZone(row, ".ogg", files =>
+            {
+                var res = ch.ImportAudio(files[0], overwrite: true);
+                ApplyFxAsset(() => fx.Sounds[idx], v => fx.Sounds[idx] = v, res, "audio");
             });
             var del = new Button { Text = "删除", CustomMinimumSize = new Vector2(52, 26) };
             del.Pressed += () => { Project.PushUndo(); fx.Sounds.RemoveAt(idx); RebuildConstantsPage(); };
             row.AddChild(del);
             _constPage.AddChild(row);
         }
-        var plusS = new Button { Text = "+ 音效（可拖入 ogg）" };
+        var plusS = new Button { Text = "+ 音效（可拖入或选择 ogg）" };
         plusS.Pressed += () => { Project.PushUndo(); fx.Sounds.Add(""); RebuildConstantsPage(); };
         _constPage.AddChild(plusS);
+    }
+
+    private void ApplyFxAsset(System.Func<string> get, System.Action<string> set, ImportOutcome res, string where)
+    {
+        if (res.Result == ImportResult.Collision)
+        {
+            Warn($"{where}/ 已有同名文件且导入被拒绝：{get()}");
+            return;
+        }
+        if (res.Path == null)
+        {
+            if (res.Result == ImportResult.Failed) Warn("文件导入失败（见日志）");
+            return;
+        }
+        Project.PushUndo();
+        set(res.Path);
+        Changed?.Invoke();
+        RebuildConstantsPage();
     }
 
     // =====================================================================
@@ -1093,11 +1343,12 @@ public sealed partial class EditorTabs : Control
         _onionPage.AddChild(_onionSliders);
         RebuildOnionSliders();
 
-        _onionPage.AddChild(Check("循环时考虑首尾相接", Canvas.LoopForOnion, v =>
+        _onionPage.AddChild(new Label
         {
-            Canvas.LoopForOnion = v;
-            Canvas.QueueRedraw();
-        }));
+            Text = "洋葱皮的循环首尾相接跟随时间轴区的“循环”勾选自动生效。",
+            Modulate = new Color(1, 1, 1, 0.45f),
+            AutowrapMode = TextServer.AutowrapMode.WordSmart,
+        });
     }
 
     // exactly as many slider rows as the before/after counts ask for, nothing more
@@ -1160,7 +1411,11 @@ public sealed partial class EditorTabs : Control
         foreach (var c in box.GetChildren().ToList()) c.QueueFree();
     }
 
-    private static PanelContainer MakeCard(bool selected, int height = 0)
+    // A card is a PanelContainer with EXACTLY ONE content container (HBox by default, VBox for
+    // the tall form cards). Adding a second child to a PanelContainer stacks both in the same
+    // rect — that was the 叠字/点不中 bug (an empty HBox + a 200x200 TextureRect with
+    // MouseFilter.Stop ate every click).
+    private static PanelContainer MakeCard(bool selected, int height = 0, bool vertical = false)
     {
         var p = new PanelContainer
         {
@@ -1175,16 +1430,31 @@ public sealed partial class EditorTabs : Control
             BorderColor = selected ? new Color(0.35f, 0.75f, 1f) : new Color(1, 1, 1, 0.12f),
             ContentMarginLeft = 6, ContentMarginRight = 6, ContentMarginTop = 4, ContentMarginBottom = 4,
         });
-        var h = new HBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
-        p.AddChild(h);
+        BoxContainer content = vertical ? new VBoxContainer() : new HBoxContainer();
+        content.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+        p.AddChild(content);
         return p;
     }
+
+    private static BoxContainer CardBox(PanelContainer card) => card.GetChild<BoxContainer>(0);
 
     private static Button PlusButton(string label, System.Action onAdd)
     {
         var b = new Button { Text = "+  " + label, CustomMinimumSize = new Vector2(0, 44) };
         b.Pressed += onAdd;
         return b;
+    }
+
+    // Popups parented to a control in the main window: with non-embedded subwindows the
+    // Window.Position is in SCREEN coordinates, so the window's own position must be added.
+    // Popup() with no position lands at the top-left corner of the screen — the misplaced
+    // right-click menus were exactly that.
+    internal static void PositionPopup(Window popup, Control anchor, Vector2 viewportPos)
+    {
+        var win = anchor.GetWindow();
+        popup.Position = win.GuiEmbedSubwindows
+            ? (Vector2I)viewportPos
+            : win.Position + (Vector2I)viewportPos;
     }
 
     private static void CardContextMenu(Control at, (string, System.Action)[] items)
@@ -1194,6 +1464,7 @@ public sealed partial class EditorTabs : Control
         for (int i = 0; i < items.Length; i++) menu.AddItem(items[i].Item1, i);
         menu.IdPressed += id => items[(int)id].Item2();
         menu.PopupHide += () => menu.QueueFree();
+        PositionPopup(menu, at, at.GetViewport().GetMousePosition());
         menu.Popup();
     }
 
@@ -1206,18 +1477,36 @@ public sealed partial class EditorTabs : Control
         dlg.PopupCentered();
     }
 
-    private static HBoxContainer RowOf(string label, out SpinBox box)
+    // Native file picker used by the 替换图片/选择… buttons.
+    private void PickFile(string filter, string title, System.Action<string> onPick)
+    {
+        var fd = new FileDialog
+        {
+            FileMode = FileDialog.FileModeEnum.OpenFile,
+            Access = FileDialog.AccessEnum.Filesystem,
+            Title = title,
+            UseNativeDialog = true,
+            Filters = new[] { filter },
+        };
+        AddChild(fd);
+        fd.FileSelected += path => { onPick(path); fd.QueueFree(); };
+        fd.Canceled += fd.QueueFree;
+        fd.PopupCentered(new Vector2I(900, 600));
+    }
+
+    private static HBoxContainer RowOf(string label, out SpinBox box, string tip = null)
     {
         var row = new HBoxContainer();
         row.AddChild(new Label { Text = label + " " });
         box = new SpinBox { SizeFlagsHorizontal = SizeFlags.ExpandFill, Step = 1 };
         row.AddChild(box);
+        if (tip != null) row.TooltipText = tip;
         return row;
     }
 
-    private static Control SpinRow(string label, int value, int min, int max, System.Action<int> set)
+    private static Control SpinRow(string label, int value, int min, int max, System.Action<int> set, string tip = null)
     {
-        var row = RowOf(label, out var box);
+        var row = RowOf(label, out var box, tip);
         box.MinValue = min;
         box.MaxValue = max;
         box.Value = value;
@@ -1225,9 +1514,9 @@ public sealed partial class EditorTabs : Control
         return row;
     }
 
-    private static Control FloatRow(string label, float value, System.Action<float> set)
+    private static Control FloatRow(string label, float value, System.Action<float> set, string tip = null)
     {
-        var row = RowOf(label, out var box);
+        var row = RowOf(label, out var box, tip);
         box.MinValue = -100000;
         box.MaxValue = 100000;
         box.Step = 1;
@@ -1236,7 +1525,7 @@ public sealed partial class EditorTabs : Control
         return row;
     }
 
-    private static Control TextRow(string label, string value, System.Action<string> set)
+    private static Control TextRow(string label, string value, System.Action<string> set, string tip = null)
     {
         var row = new HBoxContainer();
         row.AddChild(new Label { Text = label + " ", SizeFlagsHorizontal = SizeFlags.ShrinkBegin });
@@ -1247,14 +1536,67 @@ public sealed partial class EditorTabs : Control
         };
         edit.TextChanged += t => set(t);
         row.AddChild(edit);
+        if (tip != null) row.TooltipText = tip;
         return row;
     }
 
-    private static Control Check(string label, bool value, System.Action<bool> set)
+    private static Control Check(string label, bool value, System.Action<bool> set, string tip = null)
     {
         var cb = new CheckBox { Text = label, ButtonPressed = value };
         cb.Toggled += v => set(v);
+        if (tip != null) cb.TooltipText = tip;
         return cb;
+    }
+
+    // Multi-select dropdown over the character's actions: clicking an entry toggles its
+    // checkmark WITHOUT closing (a plain checkbox list in a popup), clicking elsewhere closes
+    // and the already-applied changes stand. Parented to the row so rebuilds free it.
+    private Control MultiActionDropdownRow(EditorChar ch, string label, List<string> selected, string tip)
+    {
+        var row = new HBoxContainer { TooltipText = tip };
+        row.AddChild(new Label { Text = label + " " });
+        var btn = new Button { CustomMinimumSize = new Vector2(180, 30) };
+
+        var names = ch.Def.Actions.Select(a => a.Name).ToList();
+        var list = new VBoxContainer();
+        var checks = new CheckBox[names.Count];
+        for (int i = 0; i < names.Count; i++)
+        {
+            int idx = i;
+            checks[i] = new CheckBox { Text = names[i], ButtonPressed = selected.Contains(names[i]) };
+            checks[i].Toggled += on =>
+            {
+                MarkEditing();
+                if (on) { if (!selected.Contains(names[idx])) selected.Add(names[idx]); }
+                else selected.Remove(names[idx]);
+                Changed?.Invoke();
+                RefreshBtn();
+            };
+            list.AddChild(checks[i]);
+        }
+
+        var popup = new PopupPanel();
+        popup.AddChild(list);
+        row.AddChild(popup);
+
+        void RefreshBtn()
+        {
+            string joined = string.Join(", ", selected.Where(s => names.Contains(s)));
+            btn.Text = string.IsNullOrEmpty(joined) ? "（无） ▾" : joined + " ▾";
+        }
+
+        btn.Pressed += () =>
+        {
+            for (int i = 0; i < names.Count; i++)
+                checks[i].ButtonPressed = selected.Contains(names[i]);
+            PositionPopup(popup, btn, btn.GlobalPosition + new Vector2(0, btn.Size.Y));
+            popup.Popup();
+        };
+        popup.PopupHide += RefreshBtn;
+
+        RefreshBtn();
+        row.AddChild(btn);
+        return row;
     }
 
     private Control ActionDropdownRow(EditorChar ch, string label, string current, System.Action<string> set)
@@ -1280,25 +1622,33 @@ public sealed partial class EditorTabs : Control
         return row;
     }
 
-    // one row of a box list: center X/Y editors + hover highlight toward the canvas
+    // one row of a box list: center X/Y editors + hover highlight toward the canvas.
+    // Registers with the live-sync list so canvas drags update these spinboxes in place.
     private HBoxContainer BoxRow(HeroBox box, System.Action<bool> hover)
     {
-        var row = new HBoxContainer();
+        var row = new HBoxContainer
+        {
+            TooltipText = "碰撞盒中心坐标（相对角色锚点）。在主视图拖动盒内移动、拖角缩放，改动双向同步。",
+        };
         row.AddChild(new Label { Text = "中心 " });
         var x = new SpinBox { Value = box.Cx, Step = 1, MinValue = -10000, MaxValue = 10000, SizeFlagsHorizontal = SizeFlags.ExpandFill };
         var y = new SpinBox { Value = box.Cy, Step = 1, MinValue = -10000, MaxValue = 10000, SizeFlagsHorizontal = SizeFlags.ExpandFill };
         x.ValueChanged += v => { MarkEditing(); box.Cx = (float)v; Changed?.Invoke(); };
         y.ValueChanged += v => { MarkEditing(); box.Cy = (float)v; Changed?.Invoke(); };
+        _liveConstNums.Add((x, () => box.Cx));
+        _liveConstNums.Add((y, () => box.Cy));
         row.AddChild(x); row.AddChild(y);
         row.MouseEntered += () => hover(true);
         row.MouseExited += () => hover(false);
         return row;
     }
 
-    // a range editor with the brush button: enter brush mode, then drag across timeline cells
-    private Control RangeRow(string label, int[] range)
+    // a range editor with the brush button: enter brush mode, then drag across timeline cells.
+    // Registered with the live-sync list so brush painting on the timeline updates the boxes.
+    private Control RangeRow(string label, int[] range, string tip = null)
     {
         var row = new HBoxContainer();
+        if (tip != null) row.TooltipText = tip;
         row.AddChild(new Label { Text = label + " ", SizeFlagsHorizontal = SizeFlags.ShrinkBegin });
         var from = new SpinBox { Value = range[0], Step = 1, MinValue = 0, MaxValue = 9999 };
         var to = new SpinBox { Value = range.Length > 1 ? range[1] : range[0], Step = 1, MinValue = 0, MaxValue = 9999 };
@@ -1306,8 +1656,15 @@ public sealed partial class EditorTabs : Control
         to.CustomMinimumSize = new Vector2(64, 0);
         from.ValueChanged += v => { MarkEditing(); range[0] = (int)v; Changed?.Invoke(); };
         to.ValueChanged += v => { MarkEditing(); if (range.Length > 1) range[1] = (int)v; Changed?.Invoke(); };
+        _liveConstNums.Add((from, () => range[0]));
+        _liveConstNums.Add((to, () => range.Length > 1 ? range[1] : range[0]));
         row.AddChild(from); row.AddChild(to);
-        var brush = new Button { Text = "刷选", CustomMinimumSize = new Vector2(56, 26) };
+        var brush = new Button
+        {
+            Text = "刷选",
+            CustomMinimumSize = new Vector2(56, 26),
+            TooltipText = "按下后在时间轴格子上拖动来选出 [起,止] 帧范围（Esc 取消）",
+        };
         brush.Pressed += () => BrushTarget?.Invoke(range);
         row.AddChild(brush);
         return row;
@@ -1326,24 +1683,22 @@ public sealed partial class EditorTabs : Control
         parent.AddChild(l);
     }
 
-    private static List<string> SplitList(string t) =>
-        t.Split(',', System.StringSplitOptions.RemoveEmptyEntries | System.StringSplitOptions.TrimEntries)
-            .ToList();
-
     private static string[] _fireballIds;
 
+    // res:// (dev: repo, export: pck) ∪ user:// (export-time shadow imports), sorted.
     private static string[] FireballIds()
     {
         if (_fireballIds != null) return _fireballIds;
         var ids = new List<string>();
-        var da = DirAccess.Open("res://FireballTSCN");
-        if (da != null)
+        foreach (string scheme in new[] { "res://", "user://" })
         {
+            var da = DirAccess.Open(scheme + "FireballTSCN");
+            if (da == null) continue;
             da.ListDirBegin();
             string f = da.GetNext();
             while (!string.IsNullOrEmpty(f))
             {
-                if (f.EndsWith(".tscn")) ids.Add(f[..^5]);
+                if (f.EndsWith(".tscn") && !ids.Contains(f[..^5])) ids.Add(f[..^5]);
                 f = da.GetNext();
             }
             da.ListDirEnd();
@@ -1353,7 +1708,7 @@ public sealed partial class EditorTabs : Control
         return _fireballIds;
     }
 
-    // ---------------- drag & drop plumbing ----------------
+    // ---------------- drag plumbing (in-editor card drags; OS file drops see RegisterDropZone) ----------------
 
     private static void WireDrag(Control c,
         System.Func<Dictionary<string, Variant>> getData,
@@ -1400,45 +1755,6 @@ public sealed partial class EditorTabs : Control
             var plain = new Dictionary<string, Variant>();
             foreach (var k in dict.Keys) plain[k.ToString()] = dict[k];
             return plain;
-        }
-    }
-
-    // OS file drag & drop onto a control ({"type":"files"} payload)
-    private static void WireFileDrop(Control c, string ext, System.Action<string[]> onFiles)
-    {
-        var helper = new FileDropHelper
-        {
-            OnFiles = files => onFiles(files.Where(f => f.ToLower().EndsWith(ext)).ToArray()),
-        };
-        c.AddChild(helper);
-    }
-
-    private static void AddFileDrop(Control c, string ext, System.Action<string> onFile)
-    {
-        WireFileDrop(c, ext, files =>
-        {
-            var f = files.FirstOrDefault(x => x.ToLower().EndsWith(ext));
-            if (f != null) onFile(f);
-        });
-    }
-
-    private sealed partial class FileDropHelper : Control
-    {
-        public System.Action<string[]> OnFiles;
-
-        public override bool _CanDropData(Vector2 atPosition, Variant data)
-        {
-            if (data.VariantType != Variant.Type.Dictionary) return false;
-            var dict = data.AsGodotDictionary();
-            return dict.ContainsKey("type") && dict["type"].AsString() == "files";
-        }
-
-        public override void _DropData(Vector2 atPosition, Variant data)
-        {
-            var dict = data.AsGodotDictionary();
-            if (!dict.ContainsKey("files")) return;
-            var arr = dict["files"].AsStringArray();
-            if (arr.Length > 0) OnFiles?.Invoke(arr);
         }
     }
 

@@ -30,9 +30,19 @@ public sealed class EditorProject
 
     // ---------------- loading / saving ----------------
 
+    // Where the editor's WRITES go. In dev that is the repo itself (res:// == the project
+    // folder, writable). In an EXPORTED build res:// is the read-only .pck, so the editor
+    // works on user:// shadow copies instead — the same place HeroLibrary.Scan() lets win
+    // over res:// — which is why saves in the exported build change the asset hash.
+    public static bool IsExported => OS.HasFeature("template");
+
+    public static string WritableGameRoot() =>
+        ProjectSettings.GlobalizePath(IsExported ? "user://" : "res://");
+
     public static EditorProject LoadDefault()
     {
-        string root = ProjectSettings.GlobalizePath("res://Heroes");
+        if (IsExported) BootstrapShadowCopies();
+        string root = System.IO.Path.Combine(WritableGameRoot(), "Heroes");
         if (!Directory.Exists(root)) Directory.CreateDirectory(root);
         var p = new EditorProject { HeroesRoot = root };
         foreach (var dir in Directory.GetDirectories(root).OrderBy(d => d, System.StringComparer.Ordinal))
@@ -42,6 +52,51 @@ public sealed class EditorProject
         }
         p.SelectedChar = p.Chars.Count > 0 ? p.Chars[0].Folder : null;
         return p;
+    }
+
+    // First editor run in an exported build: copy the shipped content out of the pck into
+    // user:// so it becomes editable (byte-identical, so the asset hash starts out equal to
+    // the dev build's). Later runs reuse the copies — the user's edits live in them.
+    private static void BootstrapShadowCopies()
+    {
+        foreach (string folder in new[] { "Heroes", "FireballTSCN", "ParticleTSCN" })
+        {
+            string userDir = ProjectSettings.GlobalizePath("user://" + folder);
+            if (Directory.Exists(userDir) && Directory.GetFileSystemEntries(userDir).Length > 0) continue;
+            var resDir = DirAccess.Open("res://" + folder);
+            if (resDir == null) continue;
+            CopyResTree("res://" + folder, "user://" + folder);
+            GD.Print($"[MKEditor] bootstrapped user://{folder} from the packaged content");
+        }
+    }
+
+    // res:// may live inside a pck, so this copy goes through Godot's file APIs, not System.IO
+    private static void CopyResTree(string from, string to)
+    {
+        DirAccess.MakeDirRecursiveAbsolute(ProjectSettings.GlobalizePath(to));
+        var da = DirAccess.Open(from);
+        if (da == null) return;
+        da.ListDirBegin();
+        string entry = da.GetNext();
+        while (!string.IsNullOrEmpty(entry))
+        {
+            if (!entry.StartsWith("."))
+            {
+                string src = from + "/" + entry;
+                if (da.CurrentIsDir()) CopyResTree(src, to + "/" + entry);
+                else
+                {
+                    using var reader = Godot.FileAccess.Open(src, Godot.FileAccess.ModeFlags.Read);
+                    if (reader == null) continue;
+                    var bytes = reader.GetBuffer((int)reader.GetLength());
+                    using var writer = Godot.FileAccess.Open(to + "/" + entry,
+                        Godot.FileAccess.ModeFlags.Write);
+                    writer?.StoreBuffer(bytes);
+                }
+            }
+            entry = da.GetNext();
+        }
+        da.ListDirEnd();
     }
 
     public void SaveAll()
@@ -64,19 +119,19 @@ public sealed class EditorProject
         }
     }
 
-    // A shared asset (particle tscn today) copied into a GAME-ROOT folder such as
-    // ParticleTSCN/ under its original name; clashes refused. Returns the root-relative path.
-    public ImportOutcome ImportSharedAsset(string sourcePath, string folder)
+    // A shared asset (particle/fireball tscn) copied into a GAME-ROOT folder (ParticleTSCN/…)
+    // under its original name. In dev the game root is the repo; in an exported build it is
+    // user:// (the shadow copy the runtime prefers). Returns the game-root-relative path.
+    public ImportOutcome ImportSharedAsset(string sourcePath, string folder, bool overwrite = false)
     {
-        string root = System.IO.Path.GetFullPath(Path.Combine(HeroesRoot, ".."));
-        string dir = System.IO.Path.Combine(root, folder);
+        string dir = System.IO.Path.Combine(WritableGameRoot(), folder);
         string fileName = System.IO.Path.GetFileName(sourcePath);
         string dest = System.IO.Path.Combine(dir, fileName);
-        if (File.Exists(dest)) return new ImportOutcome { Result = ImportResult.Collision };
+        if (!overwrite && File.Exists(dest)) return new ImportOutcome { Result = ImportResult.Collision };
         try
         {
             Directory.CreateDirectory(dir);
-            File.Copy(sourcePath, dest, overwrite: false);
+            File.Copy(sourcePath, dest, overwrite: true);
             return new ImportOutcome { Result = ImportResult.Ok, Path = $"{folder}/{fileName}" };
         }
         catch (System.Exception e)
@@ -324,20 +379,20 @@ public sealed class EditorChar
         return info;
     }
 
-    // Import a PNG from OUTSIDE the project (OS drag & drop) into images/, keeping the
-    // ORIGINAL file name. A name clash is refused (popup in the UI) — never silently renamed
-    // or overwritten, because layers already reference files by name.
-    public ImportOutcome ImportImage(string sourcePath)
+    // Import a PNG from OUTSIDE the project (OS drag & drop / file picker) into images/,
+    // keeping the ORIGINAL file name. overwrite=true is the REPLACE flow (same name = the
+    // asset's content is swapped, every layer referencing it sees the new pixels).
+    public ImportOutcome ImportImage(string sourcePath, bool overwrite = false)
     {
         string imgDir = Path.Combine(Dir, "images");
         string fileName = Sanitize(Path.GetFileNameWithoutExtension(sourcePath)) + ".png";
         string dest = Path.Combine(imgDir, fileName);
-        if (File.Exists(dest)) return new ImportOutcome { Result = ImportResult.Collision };
+        if (!overwrite && File.Exists(dest)) return new ImportOutcome { Result = ImportResult.Collision };
         try
         {
             Directory.CreateDirectory(imgDir);
             File.WriteAllText(Path.Combine(imgDir, ".gdignore"), "");
-            File.Copy(sourcePath, dest, overwrite: false);
+            File.Copy(sourcePath, dest, overwrite: true);
             return new ImportOutcome { Result = ImportResult.Ok, Path = "images/" + fileName };
         }
         catch (System.Exception e)
@@ -347,18 +402,18 @@ public sealed class EditorChar
         }
     }
 
-    // An ogg into this character's audio/, same original-name + no-clash rules.
+    // An ogg into this character's audio/, same original-name rules.
     // Returns the GAME-ROOT-relative path the FX rows display ("Heroes/<char>/audio/x.ogg").
-    public ImportOutcome ImportAudio(string sourcePath)
+    public ImportOutcome ImportAudio(string sourcePath, bool overwrite = false)
     {
         string fileName = Sanitize(Path.GetFileNameWithoutExtension(sourcePath)) + ".ogg";
         string dir = Path.Combine(Dir, "audio");
         string dest = Path.Combine(dir, fileName);
-        if (File.Exists(dest)) return new ImportOutcome { Result = ImportResult.Collision };
+        if (!overwrite && File.Exists(dest)) return new ImportOutcome { Result = ImportResult.Collision };
         try
         {
             Directory.CreateDirectory(dir);
-            File.Copy(sourcePath, dest, overwrite: false);
+            File.Copy(sourcePath, dest, overwrite: true);
             string rootRel = $"Heroes/{Folder}/audio/{fileName}";
             return new ImportOutcome { Result = ImportResult.Ok, Path = rootRel };
         }

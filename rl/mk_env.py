@@ -30,17 +30,36 @@ def _ensure_runtime():
 
 _ensure_runtime()
 from MouseKombat.Sim import (  # noqa: E402
-    GameSim, PlayerConfig, InputFrame, StateMachineAgent, CharacterId, Observation,
+    GameSim, PlayerConfig, InputFrame, StateMachineAgent, CharacterId, Observation, HeroDisk,
 )
 
 OBS = 32
 NUM_ACT = 10
 
+_HEROES_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Heroes"))
+
+
+def make_config(spec, x, y, facing):
+    """CharacterId name ("Hamster") or a data-driven hero via "hero:<Folder>" (Heroes/<Folder>,
+    the exact JSON the game's HeroLibrary loads — MKEditor output trains here unchanged)."""
+    if spec.startswith("hero:"):
+        folder = spec[len("hero:"):]
+        cfg = HeroDisk.BuildPlayerConfig(os.path.join(_HEROES_DIR, folder), float(x), float(y), bool(facing))
+        return cfg
+    cfg = PlayerConfig()
+    cfg.Character = getattr(CharacterId, spec)
+    cfg.SetStart(float(x), float(y), bool(facing))
+    return cfg
+
+
+_make_config = make_config   # old internal name
+
 
 class MouseKombatEnv(gym.Env):
     metadata = {"render_modes": []}
 
-    # agent_char / opp_char are CharacterId names: "Hamster", "Kangaroo" or "Squirrel".
+    # agent_char / opp_char are CharacterId names ("Hamster", "Kangaroo", "Squirrel") or a
+    # data-driven hero spec "hero:<Folder>" resolved against ../Heroes.
     def __init__(self, agent_char="Hamster", opp_char="Kangaroo", max_steps=3600, opp_seed=0):
         super().__init__()
         self.observation_space = spaces.Box(low=-4.0, high=4.0, shape=(OBS,), dtype=np.float32)
@@ -55,12 +74,8 @@ class MouseKombatEnv(gym.Env):
         self._steps = 0
 
     def _make_sim(self):
-        c1 = PlayerConfig()
-        c1.Character = getattr(CharacterId, self._agent_char)
-        c1.SetStart(300.0, 560.0, True)
-        c2 = PlayerConfig()
-        c2.Character = getattr(CharacterId, self._opp_char)
-        c2.SetStart(500.0, 560.0, False)
+        c1 = _make_config(self._agent_char, 300.0, 560.0, True)
+        c2 = _make_config(self._opp_char, 500.0, 560.0, False)
         return GameSim(c1, c2, 40.0, 760.0, 800.0)
 
     def _obs(self):
