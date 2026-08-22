@@ -7,6 +7,11 @@ using MouseKombat.Sim;
 // Everything here edits the EditorProject model directly and calls back Changed() so the canvas,
 // timeline and status bar repaint. Each tab has a Rebuild() because structural edits (selecting
 // another character/action/frame, undo) invalidate every row.
+//
+// LAYOUT RULE every page follows: content must never propagate a wide minimum size upward —
+// that once made the TabContainer wider than the left panel (buttons rendered into the canvas
+// and the HSplit could not be dragged). Pages live in ScrollContainers with horizontal scroll
+// allowed (min width 0), and long text inputs are capped (240px, scrolling inside).
 public sealed partial class EditorTabs : Control
 {
     public EditorProject Project;
@@ -17,52 +22,46 @@ public sealed partial class EditorTabs : Control
     public TabContainer Tabs;
 
     // -------- pages --------
-    private VBoxContainer _charPage, _actionPage, _layerPage;
-    private ScrollContainer _constScroll;
-    private VBoxContainer _constPage;
-    private VBoxContainer _onionPage;
-
-    // -------- constants-tab live references (rebuilt on selection) --------
-    private readonly List<System.IDisposable> _bindings = new();
+    private VBoxContainer _charPage, _actionPage, _layerPage, _constPage, _onionPage;
+    private VBoxContainer _onionSliders;
 
     // runtime-only character order on the 角色 tab (drag reorder, never saved)
     private readonly List<string> _charOrder = new();
 
+    public const int CardHeight = 200;            // 角色/图层 card height, preview 200x200
+    public const int PreviewSize = 200;
+    public const int MaxEditWidth = 240;          // name/text inputs cap, scroll inside
+
     public override void _Ready()
     {
-        AnchorRight = 1f; AnchorBottom = 1f;
+        AnchorRight = 1f;
+        AnchorBottom = 1f;
         Tabs = new TabContainer { AnchorRight = 1f, AnchorBottom = 1f };
         AddChild(Tabs);
 
         _charPage = Page("角色");
-        _layerPage = Page("图层", scroll: true);
-        _actionPage = Page("动作", scroll: true);
-        _constPage = Page("常数", scroll: true);
-        _onionPage = Page("洋葱皮", scroll: true);
-
-        Tabs.TabChanged += _ => { };   // pages are always built; the container hides the rest
+        _layerPage = Page("图层");
+        _actionPage = Page("动作");
+        _constPage = Page("常数");
+        _onionPage = Page("洋葱皮");
     }
 
-    private VBoxContainer Page(string title, bool scroll = false)
+    // NOTE: Canvas is assigned by the screen AFTER AddChild — _Ready must not touch it
+    // (onion defaults live in EditorCanvas.InitOnionDefaults, called by the screen).
+    private VBoxContainer Page(string title)
     {
-        Control root;
-        if (scroll)
+        var sc = new ScrollContainer
         {
-            var sc = new ScrollContainer
-            {
-                HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled,
-                SizeFlagsVertical = SizeFlags.ExpandFill,
-            };
-            Tabs.AddChild(sc);
-            root = sc;
-        }
-        else root = Tabs;
+            HorizontalScrollMode = ScrollContainer.ScrollMode.Auto,
+            SizeFlagsVertical = SizeFlags.ExpandFill,
+        };
+        Tabs.AddChild(sc);
         var box = new VBoxContainer
         {
             SizeFlagsHorizontal = SizeFlags.ExpandFill,
             SizeFlagsVertical = SizeFlags.ExpandFill,
         };
-        root.AddChild(box);
+        sc.AddChild(box);
         int idx = Tabs.GetTabCount() - 1;
         Tabs.SetTabTitle(idx, title);
         return box;
@@ -70,8 +69,6 @@ public sealed partial class EditorTabs : Control
 
     public void RebuildAll()
     {
-        foreach (var b in _bindings) b.Dispose();
-        _bindings.Clear();
         RebuildCharPage();
         RebuildActionPage();
         RebuildLayerPage();
@@ -97,28 +94,34 @@ public sealed partial class EditorTabs : Control
         {
             var ch = Project.Char(folder);
             if (ch == null) continue;
-            var card = MakeCard(selected: Project.SelectedChar == folder);
-            card.MouseFilter = MouseFilterEnum.Stop;
+            var card = MakeCard(selected: Project.SelectedChar == folder, height: CardHeight);
 
-            // portrait: first frame of the IDLE action
+            // portrait: first frame of the IDLE action, 200x200, top-aligned
             var idle = ch.Action(ch.Def.AnimNames?.Idle ?? "IDLE") ?? ch.Def.Actions.FirstOrDefault();
             if (idle != null && idle.Frames.Count > 0)
             {
                 var thumb = new TextureRect
                 {
-                    Texture = ImageTexture.CreateFromImage(ch.Thumbnail(idle, 0, 56)),
+                    Texture = ImageTexture.CreateFromImage(ch.Thumbnail(idle, 0, PreviewSize)),
                     StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
-                    CustomMinimumSize = new Vector2(56, 56),
+                    CustomMinimumSize = new Vector2(PreviewSize, PreviewSize),
+                    SizeFlagsVertical = SizeFlags.ShrinkBegin,
                 };
                 card.AddChild(thumb);
             }
-            var nameEdit = new LineEdit { Text = ch.Folder, SizeFlagsHorizontal = SizeFlags.ExpandFill };
-            nameEdit.TextChanged += t =>
-            {
-                if (t == ch.Folder) return;
-            };
+
+            var side = new VBoxContainer { SizeFlagsVertical = SizeFlags.ShrinkBegin };
+            var nameEdit = MakeNameEdit(ch.Folder);
             nameEdit.TextSubmitted += t => RenameChar(ch, t, nameEdit);
-            card.AddChild(nameEdit);
+            side.AddChild(nameEdit);
+            var hint = new Label
+            {
+                Text = $"{ch.Def.DisplayName} · {ch.Def.Actions.Count} 动作",
+                Modulate = new Color(1, 1, 1, 0.5f),
+                AutowrapMode = TextServer.AutowrapMode.WordSmart,
+            };
+            side.AddChild(hint);
+            card.AddChild(side);
 
             // Photoshop-style insert drag (runtime only): drop BETWEEN cards
             var dragFolder = folder;
@@ -170,6 +173,19 @@ public sealed partial class EditorTabs : Control
         _charPage.AddChild(plus);
     }
 
+    // capped name input: 240px max, text scrolls inside instead of stretching the layout
+    private static LineEdit MakeNameEdit(string text)
+    {
+        var e = new LineEdit
+        {
+            Text = text,
+            // fixed width (Godot has no maximum-size property): text scrolls inside
+            CustomMinimumSize = new Vector2(MaxEditWidth, 0),
+            SizeFlagsHorizontal = SizeFlags.ShrinkBegin,
+        };
+        return e;
+    }
+
     private void RenameChar(EditorChar ch, string t, LineEdit edit)
     {
         t = t.Trim();
@@ -177,6 +193,7 @@ public sealed partial class EditorTabs : Control
         if (Project.Char(t) != null || t.IndexOfAny(System.IO.Path.GetInvalidFileNameChars()) >= 0)
         {
             edit.Text = ch.Folder;
+            Warn("角色名不能为空、重名或含非法字符");
             return;
         }
         Project.PushUndo();
@@ -235,15 +252,19 @@ public sealed partial class EditorTabs : Control
 
         foreach (var a in ch.Def.Actions)
         {
-            var card = MakeCard(selected: Project.SelectedAction == a.Name);
+            var card = MakeCard(selected: Project.SelectedAction == a.Name, height: 64);
             string name = a.Name;
+
+            // info label does NOT expand; the rename box sits beside it, capped and scrollable
             var label = new Label
             {
-                Text = $"{a.Name}  ·  {a.Frames.Count}帧  {(a.IsAttack ? "出招" : "")}{(a.IsThrow ? "投技" : "")}",
-                SizeFlagsHorizontal = SizeFlags.ExpandFill,
+                Text = $"{a.Name} · {a.Frames.Count}帧 {(a.IsAttack ? "· 出招" : "")}{(a.IsThrow ? "· 投技" : "")}",
+                SizeFlagsHorizontal = SizeFlags.ShrinkBegin,
+                TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
+                ClipText = true,
             };
             card.AddChild(label);
-            var edit = new LineEdit { Text = a.Name, CustomMinimumSize = new Vector2(10, 0) };
+            var edit = MakeNameEdit(a.Name);
             edit.TextSubmitted += t => RenameAction(ch, a, t, edit);
             card.AddChild(edit);
 
@@ -288,6 +309,7 @@ public sealed partial class EditorTabs : Control
         if (ch.Action(t) != null || t.IndexOfAny(System.IO.Path.GetInvalidFileNameChars()) >= 0)
         {
             edit.Text = a.Name;
+            Warn("动作名不能为空、重名或含非法字符");
             return;
         }
         Project.PushUndo();
@@ -329,7 +351,7 @@ public sealed partial class EditorTabs : Control
 
     private void DeleteAction(EditorChar ch, HeroActionDef a)
     {
-        if (ch.Def.Actions.Count <= 1) return;   // a character needs at least one action
+        if (ch.Def.Actions.Count <= 1) { Warn("至少要保留一个动作"); return; }
         Project.PushUndo();
         ch.Def.Actions.Remove(a);
         if (Project.SelectedAction == a.Name)
@@ -352,23 +374,26 @@ public sealed partial class EditorTabs : Control
         if (action == null || Project.SelectedFrame >= action.Frames.Count) return;
         var frame = action.Frames[Project.SelectedFrame];
 
-        // sorted by z ascending; the DISPLAY index maps back through this list
+        // display list sorted by z ascending
         var layers = frame.Layers.ToList();
         for (int i = 0; i < layers.Count; i++)
         {
-            int layerIndex = i;
             var l = layers[i];
             var card = MakeCard(selected: Canvas.Selected.Kind == EditorCanvas.SelectionKind.Layer
-                && Canvas.Selected.Index == frame.Layers.IndexOf(l));
-            card.MouseFilter = MouseFilterEnum.Stop;
+                && Canvas.Selected.Index == frame.Layers.IndexOf(l), height: CardHeight);
 
-            var thumb = new TextureRect { CustomMinimumSize = new Vector2(48, 48),
-                StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered };
+            // 200x200 preview, top-aligned
             var info = ch.ImageOf(l.Img);
+            var thumb = new TextureRect
+            {
+                CustomMinimumSize = new Vector2(PreviewSize, PreviewSize),
+                StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
+                SizeFlagsVertical = SizeFlags.ShrinkBegin,
+            };
             if (info != null) thumb.Texture = info.Page;
             card.AddChild(thumb);
 
-            var fields = new VBoxContainer();
+            var fields = new VBoxContainer { SizeFlagsVertical = SizeFlags.ShrinkBegin };
             var zRow = RowOf("Z", out var zEdit);
             zEdit.Value = l.Z;
             zEdit.ValueChanged += v =>
@@ -390,9 +415,7 @@ public sealed partial class EditorTabs : Control
             xEdit.ValueChanged += v => { MarkEditing(); l.Off = new HeroVec((float)v, l.Off?.Y ?? 0); Changed?.Invoke(); };
             yEdit.ValueChanged += v => { MarkEditing(); l.Off = new HeroVec(l.Off?.X ?? 0, (float)v); Changed?.Invoke(); };
             xy.AddChild(xRow); xy.AddChild(yRow);
-            xy.SizeFlagsHorizontal = SizeFlags.ExpandFill;
             fields.AddChild(xy);
-            fields.SizeFlagsHorizontal = SizeFlags.ExpandFill;
             card.AddChild(fields);
 
             // drag onto another card = SWAP the two z values (unlike the character tab's insert)
@@ -411,15 +434,19 @@ public sealed partial class EditorTabs : Control
                     RebuildLayerPage();
                 });
 
-            // OS file drop: replace this layer's image (offsets stay)
-            WireFileDrop(card, (files) =>
+            // OS file drop: replace this layer's image (offsets stay, original name kept)
+            WireFileDrop(card, ".png", files =>
             {
-                string png = files.FirstOrDefault(f => f.ToLower().EndsWith(".png"));
-                if (png == null) return;
-                string rel = ch.ImportImage(png);
-                if (rel == null) return;
+                if (files.Length == 0) return;
+                var res = ch.ImportImage(files[0]);
+                if (res.Result == ImportResult.Collision)
+                {
+                    Warn($"images/ 里已有同名文件：{System.IO.Path.GetFileName(files[0])}");
+                    return;
+                }
+                if (res.Path == null) return;
                 Project.PushUndo();
-                l.Img = rel;
+                l.Img = res.Path;
                 Changed?.Invoke();
                 RebuildLayerPage();
             });
@@ -493,7 +520,6 @@ public sealed partial class EditorTabs : Control
 
         Section(_constPage, $"动作 · {action.Name}");
 
-        // loop + can-act + root readout (root is edited on the canvas via ctrl+drag)
         var loopCheck = Check("循环播放动画", action.Loop, v => { MarkEditing(); action.Loop = v; Changed?.Invoke(); });
         _constPage.AddChild(loopCheck);
 
@@ -504,7 +530,7 @@ public sealed partial class EditorTabs : Control
         if (frame != null)
         {
             var rootBox = new HBoxContainer();
-            rootBox.AddChild(new Label { Text = $"根坐标 (Ctrl+主视图拖动): " });
+            rootBox.AddChild(new Label { Text = "根坐标 (Ctrl+主视图拖动): " });
             var rx = new SpinBox { Value = frame.Root?.X ?? 0, Step = 1, SizeFlagsHorizontal = SizeFlags.ExpandFill };
             var ry = new SpinBox { Value = frame.Root?.Y ?? 0, Step = 1, SizeFlagsHorizontal = SizeFlags.ExpandFill };
             rx.ValueChanged += v => { MarkEditing(); frame.Root = new HeroVec((float)v, frame.Root?.Y ?? 0); Changed?.Invoke(); };
@@ -512,7 +538,7 @@ public sealed partial class EditorTabs : Control
             rootBox.AddChild(rx); rootBox.AddChild(ry);
             _constPage.AddChild(rootBox);
 
-            BuildFxSection(frame);
+            BuildFxSection(ch, frame);
         }
 
         var atkCheck = Check("出招", action.IsAttack, v =>
@@ -588,21 +614,28 @@ public sealed partial class EditorTabs : Control
         _constPage.AddChild(TextRow("CommandLabel (搓招提示)", a.CommandLabel ?? "",
             t => { MarkEditing(); a.CommandLabel = t; Changed?.Invoke(); }));
 
-        // buttons: any subset of the six; 2+ selected = simultaneous press (throw input)
+        // buttons: compact TOGGLE buttons in a row (not checkboxes — they waste width);
+        // 2+ active = simultaneous press (throw input)
         var btnRow = new HBoxContainer();
         btnRow.AddChild(new Label { Text = "按键 " });
         foreach (AttackButton b in System.Enum.GetValues(typeof(AttackButton)))
         {
             AttackButton bb = b;
-            var cb = new CheckBox { Text = bb.ToString(), ButtonPressed = a.Buttons.Contains(bb.ToString()) };
-            cb.Toggled += on =>
+            var btn = new Button
+            {
+                Text = bb.ToString(),
+                ToggleMode = true,
+                ButtonPressed = a.Buttons.Contains(bb.ToString()),
+                CustomMinimumSize = new Vector2(44, 30),
+            };
+            btn.Toggled += on =>
             {
                 MarkEditing();
                 if (on && !a.Buttons.Contains(bb.ToString())) a.Buttons.Add(bb.ToString());
                 if (!on) a.Buttons.RemoveAll(x => x == bb.ToString());
                 Changed?.Invoke();
             };
-            btnRow.AddChild(cb);
+            btnRow.AddChild(btn);
         }
         _constPage.AddChild(btnRow);
         _constPage.AddChild(Check("AnyPunch (任意拳)", a.AnyPunch, v => { MarkEditing(); a.AnyPunch = v; Changed?.Invoke(); }));
@@ -613,28 +646,51 @@ public sealed partial class EditorTabs : Control
         _constPage.AddChild(TextRow("RecoveryCancelInto (逗号分隔)", string.Join(",", a.RecoveryCancelInto ?? new List<string>()),
             t => { MarkEditing(); a.RecoveryCancelInto = SplitList(t); Changed?.Invoke(); }));
 
-        // ---- actives ----
-        Section(_constPage, "Active 区间");
+        // ---- actives: Label header + right-click 复制/删除 ----
+        Section(_constPage, "Active 区间（右键复制/删除）");
         for (int ai = 0; ai < a.Actives.Count; ai++)
         {
             int idx = ai;
             var act = a.Actives[ai];
             var card = MakeCard(false);
+            card.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+
             var head = new HBoxContainer();
-            head.AddChild(new Label { Text = $"区间 {ai}" });
-            var del = new Button { Text = "删除", SizeFlagsHorizontal = SizeFlags.ShrinkEnd };
-            del.Pressed += () =>
+            var headLabel = new Label
             {
-                Project.PushUndo();
-                a.Actives.RemoveAt(idx);
-                RebuildConstantsPage();
-                Changed?.Invoke();
+                Text = $"区间 {ai}  [{act.ActiveRange[0]}..{act.ActiveRange[1]}]{(act.IsGrab ? " · 投技" : "")}",
+                SizeFlagsHorizontal = SizeFlags.ShrinkBegin,
             };
-            head.AddChild(del);
+            head.AddChild(headLabel);
             card.AddChild(head);
+
+            card.GuiInput += @event =>
+            {
+                if (@event is InputEventMouseButton mb && mb.Pressed && mb.ButtonIndex == MouseButton.Right)
+                {
+                    CardContextMenu(card, new (string, System.Action)[]
+                    {
+                        ("复制区间", () =>
+                        {
+                            Project.PushUndo();
+                            var copy = HeroJson.Read<HeroActive>(HeroJson.Write(act));
+                            a.Actives.Insert(idx + 1, copy);
+                            RebuildConstantsPage();
+                            Changed?.Invoke();
+                        }),
+                        ("删除区间", () =>
+                        {
+                            Project.PushUndo();
+                            a.Actives.RemoveAt(idx);
+                            RebuildConstantsPage();
+                            Changed?.Invoke();
+                        }),
+                    });
+                }
+            };
+
             var body = new VBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
             body.AddChild(RangeRow("ActiveRange", act.ActiveRange));
-
             body.AddChild(SpinRow("Damage", act.Damage, 0, 100000, v => { MarkEditing(); act.Damage = v; Changed?.Invoke(); }));
             body.AddChild(Check("ShouldWhiffIfNotHit (空挥打断)", act.ShouldWhiffIfNotHit,
                 v => { MarkEditing(); act.ShouldWhiffIfNotHit = v; RebuildConstantsPage(); Changed?.Invoke(); }));
@@ -647,7 +703,6 @@ public sealed partial class EditorTabs : Control
                 body.AddChild(ActionDropdownRow(ch, "ThrowAction 命中后动作", act.ThrowAction,
                     t => { act.ThrowAction = t; Changed?.Invoke(); }));
 
-            // hitboxes of this interval
             body.AddChild(new Label { Text = "打击盒（主视图可拖动/缩放）" });
             for (int bi = 0; bi < act.Hitboxes.Count; bi++)
             {
@@ -660,7 +715,7 @@ public sealed partial class EditorTabs : Control
                         : new EditorCanvas.Selection();
                     Canvas.QueueRedraw();
                 });
-                var dup = new Button { Text = "复制" };
+                var dup = new Button { Text = "复制", CustomMinimumSize = new Vector2(52, 26) };
                 dup.Pressed += () =>
                 {
                     Project.PushUndo();
@@ -668,7 +723,7 @@ public sealed partial class EditorTabs : Control
                     RebuildConstantsPage();
                 };
                 row.AddChild(dup);
-                var delB = new Button { Text = "删除" };
+                var delB = new Button { Text = "删除", CustomMinimumSize = new Vector2(52, 26) };
                 delB.Pressed += () =>
                 {
                     Project.PushUndo();
@@ -705,27 +760,49 @@ public sealed partial class EditorTabs : Control
         };
         _constPage.AddChild(plusAct);
 
-        // ---- projectiles ----
-        Section(_constPage, "Fireball 生成");
+        // ---- projectiles: Label header + right-click 复制/删除 ----
+        Section(_constPage, "Fireball 生成（右键复制/删除）");
         for (int pi = 0; pi < a.Projectiles.Count; pi++)
         {
             int idx = pi;
             var p = a.Projectiles[pi];
             var card = MakeCard(false);
-            var head = new HBoxContainer();
-            head.AddChild(new Label { Text = $"fireball {pi}" });
-            var del = new Button { Text = "删除" };
-            del.Pressed += () =>
-            {
-                Project.PushUndo();
-                a.Projectiles.RemoveAt(idx);
-                RebuildConstantsPage();
-                Changed?.Invoke();
-            };
-            head.AddChild(del);
-            card.AddChild(head);
-            var body = new VBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
+            card.SizeFlagsHorizontal = SizeFlags.ExpandFill;
 
+            var head = new HBoxContainer();
+            var headLabel = new Label
+            {
+                Text = $"fireball {pi} · {p.Prefab}",
+                SizeFlagsHorizontal = SizeFlags.ShrinkBegin,
+            };
+            head.AddChild(headLabel);
+            card.AddChild(head);
+
+            card.GuiInput += @event =>
+            {
+                if (@event is InputEventMouseButton mb && mb.Pressed && mb.ButtonIndex == MouseButton.Right)
+                {
+                    CardContextMenu(card, new (string, System.Action)[]
+                    {
+                        ("复制 fireball", () =>
+                        {
+                            Project.PushUndo();
+                            a.Projectiles.Insert(idx + 1, HeroJson.Read<HeroProjectileSpawn>(HeroJson.Write(p)));
+                            RebuildConstantsPage();
+                            Changed?.Invoke();
+                        }),
+                        ("删除 fireball", () =>
+                        {
+                            Project.PushUndo();
+                            a.Projectiles.RemoveAt(idx);
+                            RebuildConstantsPage();
+                            Changed?.Invoke();
+                        }),
+                    });
+                }
+            };
+
+            var body = new VBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
             var prefabRow = new HBoxContainer();
             prefabRow.AddChild(new Label { Text = "Prefab " });
             var prefab = new OptionButton();
@@ -795,7 +872,7 @@ public sealed partial class EditorTabs : Control
             int idx = i;
             var h = t.HurtTimeline[i];
             var row = new HBoxContainer();
-            row.AddChild(new Label { Text = $"帧 " });
+            row.AddChild(new Label { Text = "帧 " });
             var f = new SpinBox { Value = h.Frame, MinValue = 0, MaxValue = 9999 };
             f.ValueChanged += v => { MarkEditing(); h.Frame = (int)v; Changed?.Invoke(); };
             row.AddChild(f);
@@ -803,7 +880,7 @@ public sealed partial class EditorTabs : Control
             var d = new SpinBox { Value = h.Damage, MinValue = 0, MaxValue = 1000000 };
             d.ValueChanged += v => { MarkEditing(); h.Damage = (int)v; Changed?.Invoke(); };
             row.AddChild(d);
-            var del = new Button { Text = "删除" };
+            var del = new Button { Text = "删除", CustomMinimumSize = new Vector2(52, 26) };
             del.Pressed += () => { Project.PushUndo(); t.HurtTimeline.RemoveAt(idx); RebuildConstantsPage(); };
             row.AddChild(del);
             _constPage.AddChild(row);
@@ -823,6 +900,31 @@ public sealed partial class EditorTabs : Control
             int idx = i;
             var k = t.VictimBind[i];
             var card = MakeCard(false);
+            card.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+            var head = new HBoxContainer();
+            head.AddChild(new Label { Text = $"绑定 {i} · 帧 {k.Frame}" });
+            card.AddChild(head);
+            card.GuiInput += @event =>
+            {
+                if (@event is InputEventMouseButton mb && mb.Pressed && mb.ButtonIndex == MouseButton.Right)
+                {
+                    CardContextMenu(card, new (string, System.Action)[]
+                    {
+                        ("复制绑定", () =>
+                        {
+                            Project.PushUndo();
+                            t.VictimBind.Insert(idx + 1, HeroJson.Read<HeroBindKey>(HeroJson.Write(k)));
+                            RebuildConstantsPage();
+                        }),
+                        ("删除绑定", () =>
+                        {
+                            Project.PushUndo();
+                            t.VictimBind.RemoveAt(idx);
+                            RebuildConstantsPage();
+                        }),
+                    });
+                }
+            };
             var body = new VBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
             body.AddChild(SpinRow("Frame", k.Frame, 0, 9999, v => { MarkEditing(); k.Frame = v; Changed?.Invoke(); }));
             body.AddChild(FloatRow("BindPos.X (前方为正)", k.BindPos?.X ?? 0,
@@ -832,9 +934,6 @@ public sealed partial class EditorTabs : Control
             body.AddChild(TextRow("VictimAnim", k.VictimAnim ?? "", s2 => { MarkEditing(); k.VictimAnim = s2; Changed?.Invoke(); }));
             body.AddChild(Check("IsResetVictimAnim (同动画重播)", k.IsResetVictimAnim,
                 v => { MarkEditing(); k.IsResetVictimAnim = v; Changed?.Invoke(); }));
-            var del = new Button { Text = "删除" };
-            del.Pressed += () => { Project.PushUndo(); t.VictimBind.RemoveAt(idx); RebuildConstantsPage(); };
-            body.AddChild(del);
             card.AddChild(body);
             _constPage.AddChild(card);
         }
@@ -864,41 +963,77 @@ public sealed partial class EditorTabs : Control
         _constPage.AddChild(prevRow);
     }
 
-    private void BuildFxSection(HeroFrame frame)
+    // ---- FX: OS file drops copy the file in under its original name; the row then shows the
+    // path RELATIVE TO THE GAME ROOT (no res:// prefix). A name clash is refused with a popup.
+    private void BuildFxSection(EditorChar ch, HeroFrame frame)
     {
-        Section(_constPage, "本帧 FX（纯表现）");
+        Section(_constPage, "本帧 FX（纯表现，可拖入 tscn/ogg）");
         var fx = frame.Fx ??= new HeroFx();
         for (int i = 0; i < fx.Particles.Count; i++)
         {
             int idx = i;
             var row = new HBoxContainer();
-            var edit = new LineEdit { Text = fx.Particles[i], SizeFlagsHorizontal = SizeFlags.ExpandFill };
+            var edit = new LineEdit
+            {
+                Text = fx.Particles[i],
+                SizeFlagsHorizontal = SizeFlags.ExpandFill,
+            };
             edit.TextChanged += t => { MarkEditing(); fx.Particles[idx] = t; Changed?.Invoke(); };
             row.AddChild(edit);
-            AddFileDrop(row, ".tscn", f => { fx.Particles[idx] = f; Changed?.Invoke(); RebuildConstantsPage(); });
-            var del = new Button { Text = "删除" };
+            AddFileDrop(row, ".tscn", f =>
+            {
+                var res = Project.ImportSharedAsset(f, "ParticleTSCN");
+                if (res.Result == ImportResult.Collision)
+                {
+                    Warn($"ParticleTSCN/ 已有同名文件：{System.IO.Path.GetFileName(f)}");
+                    return;
+                }
+                if (res.Path == null) return;
+                Project.PushUndo();
+                fx.Particles[idx] = res.Path;
+                Changed?.Invoke();
+                RebuildConstantsPage();
+            });
+            var del = new Button { Text = "删除", CustomMinimumSize = new Vector2(52, 26) };
             del.Pressed += () => { Project.PushUndo(); fx.Particles.RemoveAt(idx); RebuildConstantsPage(); };
             row.AddChild(del);
             _constPage.AddChild(row);
         }
-        var plusP = new Button { Text = "+ 粒子 (可拖入 tscn)" };
-        plusP.Pressed += () => { Project.PushUndo(); fx.Particles.Add("res://ParticleTSCN/FX_Hit.tscn"); RebuildConstantsPage(); };
+        var plusP = new Button { Text = "+ 粒子（可拖入 tscn）" };
+        plusP.Pressed += () => { Project.PushUndo(); fx.Particles.Add("ParticleTSCN/FX_Hit.tscn"); RebuildConstantsPage(); };
         _constPage.AddChild(plusP);
 
         for (int i = 0; i < fx.Sounds.Count; i++)
         {
             int idx = i;
             var row = new HBoxContainer();
-            var edit = new LineEdit { Text = fx.Sounds[i], SizeFlagsHorizontal = SizeFlags.ExpandFill };
+            var edit = new LineEdit
+            {
+                Text = fx.Sounds[i],
+                SizeFlagsHorizontal = SizeFlags.ExpandFill,
+            };
             edit.TextChanged += t => { MarkEditing(); fx.Sounds[idx] = t; Changed?.Invoke(); };
             row.AddChild(edit);
-            AddFileDrop(row, ".ogg", f => { fx.Sounds[idx] = f; Changed?.Invoke(); RebuildConstantsPage(); });
-            var del = new Button { Text = "删除" };
+            AddFileDrop(row, ".ogg", f =>
+            {
+                var res = ch.ImportAudio(f);
+                if (res.Result == ImportResult.Collision)
+                {
+                    Warn($"audio/ 已有同名文件：{System.IO.Path.GetFileName(f)}");
+                    return;
+                }
+                if (res.Path == null) return;
+                Project.PushUndo();
+                fx.Sounds[idx] = res.Path;
+                Changed?.Invoke();
+                RebuildConstantsPage();
+            });
+            var del = new Button { Text = "删除", CustomMinimumSize = new Vector2(52, 26) };
             del.Pressed += () => { Project.PushUndo(); fx.Sounds.RemoveAt(idx); RebuildConstantsPage(); };
             row.AddChild(del);
             _constPage.AddChild(row);
         }
-        var plusS = new Button { Text = "+ 音效 (可拖入 ogg)" };
+        var plusS = new Button { Text = "+ 音效（可拖入 ogg）" };
         plusS.Pressed += () => { Project.PushUndo(); fx.Sounds.Add(""); RebuildConstantsPage(); };
         _constPage.AddChild(plusS);
     }
@@ -912,14 +1047,24 @@ public sealed partial class EditorTabs : Control
         ClearChildren(_onionPage);
         Section(_onionPage, "洋葱皮设置");
 
-        _onionPage.AddChild(SpinRow("前帧数量 (红)", Canvas.OnionBefore, 0, 10,
-            v => { Canvas.OnionBefore = v; Canvas.QueueRedraw(); }));
-        _onionPage.AddChild(SpinRow("后帧数量 (绿)", Canvas.OnionAfter, 0, 10,
-            v => { Canvas.OnionAfter = v; Canvas.QueueRedraw(); }));
+        var beforeRow = SpinRow("前帧数量 (红)", Canvas.OnionBefore, 0, 10, v =>
+        {
+            Canvas.OnionBefore = v;
+            RebuildOnionSliders();
+            Canvas.QueueRedraw();
+        });
+        _onionPage.AddChild(beforeRow);
+        var afterRow = SpinRow("后帧数量 (绿)", Canvas.OnionAfter, 0, 10, v =>
+        {
+            Canvas.OnionAfter = v;
+            RebuildOnionSliders();
+            Canvas.QueueRedraw();
+        });
+        _onionPage.AddChild(afterRow);
 
-        var beforeRow = new HBoxContainer();
-        beforeRow.AddChild(new Label { Text = "前帧颜色 " });
-        var bBtn = new Button { Text = "●" };
+        var beforeColor = new HBoxContainer();
+        beforeColor.AddChild(new Label { Text = "前帧颜色 " });
+        var bBtn = new Button { Text = "●", CustomMinimumSize = new Vector2(40, 28) };
         bBtn.Pressed += () => PickColor(Canvas.OnionBeforeColor, c =>
         {
             Canvas.OnionBeforeColor = c;
@@ -927,12 +1072,12 @@ public sealed partial class EditorTabs : Control
             Canvas.QueueRedraw();
         });
         bBtn.Modulate = Canvas.OnionBeforeColor;
-        beforeRow.AddChild(bBtn);
-        _onionPage.AddChild(beforeRow);
+        beforeColor.AddChild(bBtn);
+        _onionPage.AddChild(beforeColor);
 
-        var afterRow = new HBoxContainer();
-        afterRow.AddChild(new Label { Text = "后帧颜色 " });
-        var aBtn = new Button { Text = "●" };
+        var afterColor = new HBoxContainer();
+        afterColor.AddChild(new Label { Text = "后帧颜色 " });
+        var aBtn = new Button { Text = "●", CustomMinimumSize = new Vector2(40, 28) };
         aBtn.Pressed += () => PickColor(Canvas.OnionAfterColor, c =>
         {
             Canvas.OnionAfterColor = c;
@@ -940,33 +1085,55 @@ public sealed partial class EditorTabs : Control
             Canvas.QueueRedraw();
         });
         aBtn.Modulate = Canvas.OnionAfterColor;
-        afterRow.AddChild(aBtn);
-        _onionPage.AddChild(afterRow);
+        afterColor.AddChild(aBtn);
+        _onionPage.AddChild(afterColor);
 
-        // alpha bars: 10 sliders each, nearest frame = slot 0
-        Section(_onionPage, "透明度（从近到远）");
-        var grid = new GridContainer { Columns = 2 };
-        for (int i = 0; i < 10; i++)
-        {
-            int slot = i;
-            grid.AddChild(new Label { Text = $"前{i + 1}" });
-            var s1 = new HSlider { MinValue = 0, MaxValue = 1, Step = 0.05f, Value = Canvas.OnionBeforeAlpha[i],
-                CustomMinimumSize = new Vector2(120, 16) };
-            s1.ValueChanged += v => { Canvas.OnionBeforeAlpha[slot] = (float)v; Canvas.QueueRedraw(); };
-            grid.AddChild(s1);
-            grid.AddChild(new Label { Text = $"后{i + 1}" });
-            var s2 = new HSlider { MinValue = 0, MaxValue = 1, Step = 0.05f, Value = Canvas.OnionAfterAlpha[i],
-                CustomMinimumSize = new Vector2(120, 16) };
-            s2.ValueChanged += v => { Canvas.OnionAfterAlpha[slot] = (float)v; Canvas.QueueRedraw(); };
-            grid.AddChild(s2);
-        }
-        _onionPage.AddChild(grid);
+        Section(_onionPage, "透明度（从近到远，随数量生成）");
+        _onionSliders = new VBoxContainer();
+        _onionPage.AddChild(_onionSliders);
+        RebuildOnionSliders();
 
         _onionPage.AddChild(Check("循环时考虑首尾相接", Canvas.LoopForOnion, v =>
         {
             Canvas.LoopForOnion = v;
             Canvas.QueueRedraw();
         }));
+    }
+
+    // exactly as many slider rows as the before/after counts ask for, nothing more
+    private void RebuildOnionSliders()
+    {
+        if (_onionSliders == null) return;
+        ClearChildren(_onionSliders);
+        var grid = new GridContainer { Columns = 2 };
+
+        for (int i = 0; i < Canvas.OnionBefore; i++)
+        {
+            int slot = i;
+            grid.AddChild(new Label { Text = $"前{i + 1}" });
+            var s = new HSlider
+            {
+                MinValue = 0, MaxValue = 1, Step = 0.05f,
+                Value = Canvas.OnionBeforeAlpha[slot],
+                CustomMinimumSize = new Vector2(120, 16),
+            };
+            s.ValueChanged += v => { Canvas.OnionBeforeAlpha[slot] = (float)v; Canvas.QueueRedraw(); };
+            grid.AddChild(s);
+        }
+        for (int i = 0; i < Canvas.OnionAfter; i++)
+        {
+            int slot = i;
+            grid.AddChild(new Label { Text = $"后{i + 1}" });
+            var s = new HSlider
+            {
+                MinValue = 0, MaxValue = 1, Step = 0.05f,
+                Value = Canvas.OnionAfterAlpha[slot],
+                CustomMinimumSize = new Vector2(120, 16),
+            };
+            s.ValueChanged += v => { Canvas.OnionAfterAlpha[slot] = (float)v; Canvas.QueueRedraw(); };
+            grid.AddChild(s);
+        }
+        _onionSliders.AddChild(grid);
     }
 
     private void PickColor(Color from, System.Action<Color> set)
@@ -993,13 +1160,14 @@ public sealed partial class EditorTabs : Control
         foreach (var c in box.GetChildren().ToList()) c.QueueFree();
     }
 
-    private static PanelContainer MakeCard(bool selected)
+    private static PanelContainer MakeCard(bool selected, int height = 0)
     {
         var p = new PanelContainer
         {
-            CustomMinimumSize = new Vector2(0, 64),
             MouseFilter = MouseFilterEnum.Stop,
+            SizeFlagsHorizontal = SizeFlags.ExpandFill,
         };
+        if (height > 0) p.CustomMinimumSize = new Vector2(0, height);
         p.AddThemeStyleboxOverride("panel", new StyleBoxFlat
         {
             BgColor = selected ? new Color(0.16f, 0.22f, 0.30f) : new Color(0.10f, 0.11f, 0.14f),
@@ -1027,6 +1195,15 @@ public sealed partial class EditorTabs : Control
         menu.IdPressed += id => items[(int)id].Item2();
         menu.PopupHide += () => menu.QueueFree();
         menu.Popup();
+    }
+
+    private void Warn(string text)
+    {
+        var dlg = new AcceptDialog { Title = "提示", DialogText = text, OkButtonText = "知道了" };
+        AddChild(dlg);
+        dlg.Confirmed += () => dlg.QueueFree();
+        dlg.Canceled += () => dlg.QueueFree();
+        dlg.PopupCentered();
     }
 
     private static HBoxContainer RowOf(string label, out SpinBox box)
@@ -1062,8 +1239,12 @@ public sealed partial class EditorTabs : Control
     private static Control TextRow(string label, string value, System.Action<string> set)
     {
         var row = new HBoxContainer();
-        row.AddChild(new Label { Text = label + " " });
-        var edit = new LineEdit { Text = value, SizeFlagsHorizontal = SizeFlags.ExpandFill };
+        row.AddChild(new Label { Text = label + " ", SizeFlagsHorizontal = SizeFlags.ShrinkBegin });
+        var edit = new LineEdit
+        {
+            Text = value,
+            SizeFlagsHorizontal = SizeFlags.ExpandFill,
+        };
         edit.TextChanged += t => set(t);
         row.AddChild(edit);
         return row;
@@ -1118,20 +1299,21 @@ public sealed partial class EditorTabs : Control
     private Control RangeRow(string label, int[] range)
     {
         var row = new HBoxContainer();
-        row.AddChild(new Label { Text = label + " " });
+        row.AddChild(new Label { Text = label + " ", SizeFlagsHorizontal = SizeFlags.ShrinkBegin });
         var from = new SpinBox { Value = range[0], Step = 1, MinValue = 0, MaxValue = 9999 };
         var to = new SpinBox { Value = range.Length > 1 ? range[1] : range[0], Step = 1, MinValue = 0, MaxValue = 9999 };
+        from.CustomMinimumSize = new Vector2(64, 0);
+        to.CustomMinimumSize = new Vector2(64, 0);
         from.ValueChanged += v => { MarkEditing(); range[0] = (int)v; Changed?.Invoke(); };
         to.ValueChanged += v => { MarkEditing(); if (range.Length > 1) range[1] = (int)v; Changed?.Invoke(); };
         row.AddChild(from); row.AddChild(to);
-        var brush = new Button { Text = "刷选" };
-        brush.Pressed += () => BeginBrush(range);
+        var brush = new Button { Text = "刷选", CustomMinimumSize = new Vector2(56, 26) };
+        brush.Pressed += () => BrushTarget?.Invoke(range);
         row.AddChild(brush);
         return row;
     }
 
     public System.Action<int[]> BrushTarget;          // set by RangeRow; the screen drives it
-    private void BeginBrush(int[] range) => BrushTarget?.Invoke(range);
 
     private static void Section(Node parent, string title)
     {
@@ -1178,7 +1360,6 @@ public sealed partial class EditorTabs : Control
         System.Func<Dictionary<string, Variant>, bool> canDrop,
         System.Action<Dictionary<string, Variant>> drop)
     {
-        // attach a small helper node: Control itself can't be partial-extended here
         var helper = new DragHelper { GetData = getData, CanDrop = canDrop, Drop = drop };
         c.AddChild(helper);
     }
@@ -1223,15 +1404,18 @@ public sealed partial class EditorTabs : Control
     }
 
     // OS file drag & drop onto a control ({"type":"files"} payload)
-    private static void WireFileDrop(Control c, System.Action<string[]> onFiles)
+    private static void WireFileDrop(Control c, string ext, System.Action<string[]> onFiles)
     {
-        var helper = new FileDropHelper { OnFiles = onFiles };
+        var helper = new FileDropHelper
+        {
+            OnFiles = files => onFiles(files.Where(f => f.ToLower().EndsWith(ext)).ToArray()),
+        };
         c.AddChild(helper);
     }
 
     private static void AddFileDrop(Control c, string ext, System.Action<string> onFile)
     {
-        WireFileDrop(c, files =>
+        WireFileDrop(c, ext, files =>
         {
             var f = files.FirstOrDefault(x => x.ToLower().EndsWith(ext));
             if (f != null) onFile(f);

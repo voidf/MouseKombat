@@ -472,13 +472,13 @@ public partial class Player : Node2D
             {
                 DrawSetTransformMatrix(new Transform2D(-1f, 0f, 0f, 1f, 0f, 0f));
                 HeroLibrary.DrawFrame(this, HeroRender, GetHeroAction(_clip),
-                    _heroFrameIndex, Colors.White);
+                    _heroFrameIndex, Colors.White, includeRoot: false);
                 DrawSetTransformMatrix(Transform2D.Identity);
             }
             else
             {
                 HeroLibrary.DrawFrame(this, HeroRender, GetHeroAction(_clip),
-                    _heroFrameIndex, Colors.White);
+                    _heroFrameIndex, Colors.White, includeRoot: false);
             }
         }
 

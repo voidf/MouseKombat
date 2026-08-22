@@ -64,6 +64,28 @@ public sealed class EditorProject
         }
     }
 
+    // A shared asset (particle tscn today) copied into a GAME-ROOT folder such as
+    // ParticleTSCN/ under its original name; clashes refused. Returns the root-relative path.
+    public ImportOutcome ImportSharedAsset(string sourcePath, string folder)
+    {
+        string root = System.IO.Path.GetFullPath(Path.Combine(HeroesRoot, ".."));
+        string dir = System.IO.Path.Combine(root, folder);
+        string fileName = System.IO.Path.GetFileName(sourcePath);
+        string dest = System.IO.Path.Combine(dir, fileName);
+        if (File.Exists(dest)) return new ImportOutcome { Result = ImportResult.Collision };
+        try
+        {
+            Directory.CreateDirectory(dir);
+            File.Copy(sourcePath, dest, overwrite: false);
+            return new ImportOutcome { Result = ImportResult.Ok, Path = $"{folder}/{fileName}" };
+        }
+        catch (System.Exception e)
+        {
+            GD.PushError($"[MKEditor] shared asset import failed: {e.Message}");
+            return new ImportOutcome { Result = ImportResult.Failed };
+        }
+    }
+
     // ---------------- undo / redo ----------------
     // Memento-based on purpose: an operation-specific command graph is where undo bugs breed,
     // and the whole project serializes to a few hundred KB of JSON that gzips to a tenth of
@@ -153,6 +175,17 @@ public sealed class EditorProject
             SelectedFrame = 0;
         }
     }
+}
+
+// Result of an OS-file import (drag & drop): Ok / Collision (same name exists — the UI pops a
+// dialog) / Failed (io error, already logged).
+public enum ImportResult { Ok, Collision, Failed }
+
+public sealed class ImportOutcome
+{
+    public ImportResult Result;
+    public string Path;   // on Ok: char-relative for images ("images/x.png"),
+                          // game-root-relative for shared/audio assets
 }
 
 // Serialization shape of one character inside an undo memento (folder + def; images stay files).
@@ -291,34 +324,49 @@ public sealed class EditorChar
         return info;
     }
 
-    // Import a PNG from OUTSIDE the project (OS drag & drop) into images/ under a unique name.
-    // Returns the new "images/<name>" reference, or null when the import failed.
-    public string ImportImage(string sourcePath, string preferName = null)
+    // Import a PNG from OUTSIDE the project (OS drag & drop) into images/, keeping the
+    // ORIGINAL file name. A name clash is refused (popup in the UI) — never silently renamed
+    // or overwritten, because layers already reference files by name.
+    public ImportOutcome ImportImage(string sourcePath)
     {
+        string imgDir = Path.Combine(Dir, "images");
+        string fileName = Sanitize(Path.GetFileNameWithoutExtension(sourcePath)) + ".png";
+        string dest = Path.Combine(imgDir, fileName);
+        if (File.Exists(dest)) return new ImportOutcome { Result = ImportResult.Collision };
         try
         {
-            string imgDir = Path.Combine(Dir, "images");
             Directory.CreateDirectory(imgDir);
             File.WriteAllText(Path.Combine(imgDir, ".gdignore"), "");
-            string baseName = string.IsNullOrEmpty(preferName)
-                ? Path.GetFileNameWithoutExtension(sourcePath) : preferName;
-            baseName = Sanitize(baseName);
-            string name = EditorProject.UniqueName(ExistingImageNames(), baseName) + ".png";
-            File.Copy(sourcePath, Path.Combine(imgDir, name), overwrite: true);
-            return "images/" + name;
+            File.Copy(sourcePath, dest, overwrite: false);
+            return new ImportOutcome { Result = ImportResult.Ok, Path = "images/" + fileName };
         }
         catch (System.Exception e)
         {
             GD.PushError($"[MKEditor] image import failed: {e.Message}");
-            return null;
+            return new ImportOutcome { Result = ImportResult.Failed };
         }
     }
 
-    private IEnumerable<string> ExistingImageNames()
+    // An ogg into this character's audio/, same original-name + no-clash rules.
+    // Returns the GAME-ROOT-relative path the FX rows display ("Heroes/<char>/audio/x.ogg").
+    public ImportOutcome ImportAudio(string sourcePath)
     {
-        var dir = new DirectoryInfo(Path.Combine(Dir, "images"));
-        if (!dir.Exists) return Enumerable.Empty<string>();
-        return dir.GetFiles("*.png").Select(f => Path.GetFileNameWithoutExtension(f.Name));
+        string fileName = Sanitize(Path.GetFileNameWithoutExtension(sourcePath)) + ".ogg";
+        string dir = Path.Combine(Dir, "audio");
+        string dest = Path.Combine(dir, fileName);
+        if (File.Exists(dest)) return new ImportOutcome { Result = ImportResult.Collision };
+        try
+        {
+            Directory.CreateDirectory(dir);
+            File.Copy(sourcePath, dest, overwrite: false);
+            string rootRel = $"Heroes/{Folder}/audio/{fileName}";
+            return new ImportOutcome { Result = ImportResult.Ok, Path = rootRel };
+        }
+        catch (System.Exception e)
+        {
+            GD.PushError($"[MKEditor] audio import failed: {e.Message}");
+            return new ImportOutcome { Result = ImportResult.Failed };
+        }
     }
 
     private static string Sanitize(string s)

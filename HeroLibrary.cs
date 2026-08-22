@@ -80,7 +80,8 @@ public partial class HeroLibrary : Node
     {
         if (string.IsNullOrEmpty(path)) return null;
         if (_particles.TryGetValue(path, out var cached)) return cached;
-        var scene = ResourceLoader.Exists(path) ? ResourceLoader.Load<PackedScene>(path) : null;
+        string res = ResolveResPath(path);
+        var scene = ResourceLoader.Exists(res) ? ResourceLoader.Load<PackedScene>(res) : null;
         _particles[path] = scene;
         return scene;
     }
@@ -377,21 +378,33 @@ public partial class HeroLibrary : Node
 
     // Draw one hero frame's layers into the CURRENT transform of a CanvasItem. Local space is
     // authored facing LEFT; callers mirror the whole space for a right-facing fighter.
+    //
+    // includeRoot: in the EDITOR the root is part of the picture (no sim runs, so root+off is
+    // where the art belongs). In the GAME the root is already materialized — the sim advanced
+    // the fighter's world position by the compiled root deltas — so drawing layers at `off`
+    // alone is correct; including root there would double every displacement.
     public static void DrawFrame(CanvasItem into, LoadedHero hero, HeroActionDef action, int frame,
-        Color modulate)
+        Color modulate, bool includeRoot = true)
     {
         if (into == null || hero == null || action == null) return;
         if (frame < 0 || frame >= action.Frames.Count) frame = action.Frames.Count - 1;
         var fr = action.Frames[frame];
+        var root = includeRoot ? new Vector2(fr.Root?.X ?? 0, fr.Root?.Y ?? 0) : Vector2.Zero;
         foreach (var l in fr.Layers)   // kept z-sorted at load time
         {
             if (string.IsNullOrEmpty(l.Img) || !hero.Images.TryGetValue(l.Img, out var img)) continue;
-            var center = new Vector2(fr.Root?.X ?? 0, fr.Root?.Y ?? 0)
-                       + new Vector2(l.Off?.X ?? 0, l.Off?.Y ?? 0);
-            // image CENTER sits at (root + off); the trimmed cell keeps its original placement
+            var center = root + new Vector2(l.Off?.X ?? 0, l.Off?.Y ?? 0);
+            // image CENTER sits at the anchor; the trimmed cell keeps its original placement
             var topLeft = center - img.OriginalSize * 0.5f + img.TrimOffset;
             into.DrawTextureRectRegion(img.Page,
                 new Rect2(topLeft, img.Region.Size), img.Region, modulate);
         }
     }
+
+    // Content paths are stored game-root-relative in the editor ("ParticleTSCN/x.tscn",
+    // "Heroes/Hamster/audio/y.ogg"); accept both that and an explicit res:// form.
+    public static string ResolveResPath(string path) =>
+        string.IsNullOrEmpty(path) ? path
+        : path.StartsWith("res://") ? path
+        : "res://" + path;
 }

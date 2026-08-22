@@ -17,8 +17,14 @@ public partial class AspectLock : Node
     private bool _adjusting;      // guards against our own resize re-triggering SizeChanged
     private Vector2I _last;       // previous window size, to tell which edge the user dragged
 
+    // The editor suspends the lock while it is open: it disables content scaling entirely, so a
+    // free-form window is exactly what it wants.
+    public static AspectLock Instance { get; private set; }
+    public bool Suspended;
+
     public override void _Ready()
     {
+        Instance = this;
         var win = GetWindow();
         win.MinSize = MinSize;
         _last = win.Size;
@@ -27,7 +33,7 @@ public partial class AspectLock : Node
 
     private void OnSizeChanged()
     {
-        if (_adjusting) return;
+        if (_adjusting || Suspended) return;
 
         var win = GetWindow();
         Vector2I size = win.Size;
