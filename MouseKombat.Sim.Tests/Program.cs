@@ -22,6 +22,7 @@ internal static partial class Program
     private static int Main()
     {
         FixTests();
+        HeroTests();
 
         // ---- SimMath.RoundToInt must be banker's rounding (ToEven), matching Godot Mathf.RoundToInt ----
         Check(SimMath.RoundToInt(0.5f) == 0, "RoundToInt(0.5)=0 (ToEven)");
@@ -1557,7 +1558,6 @@ internal static partial class Program
             var p = sim.Player(idx);
             _cov.Add("state:" + p.State);
             if (p.JuggleHitCount > 0) _cov.Add("juggleHitCount>0");
-            if (p.ThrowImmune) _cov.Add("throwImmune");
             if (p.IsAirborne) _cov.Add("airborne");
         }
         if (sim.Projectiles.Count > 0) _cov.Add("projectile");
@@ -1567,7 +1567,7 @@ internal static partial class Program
 
     private static void CoverageGate()
     {
-        var want = new List<string> { "juggleHitCount>0", "throwImmune", "airborne", "projectile",
+        var want = new List<string> { "juggleHitCount>0", "airborne", "projectile",
                                      "grabPairing", "matchOver" };
         foreach (PlayerState st in Enum.GetValues(typeof(PlayerState))) want.Add("state:" + st);
 

@@ -1,0 +1,592 @@
+{
+  "name": "THROW_VICTIM",
+  "loop": false,
+  "frames": [
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/AtkO_000.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/AtkO_001.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/AtkO_001.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/AtkO_001.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/AtkO_002.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/AtkO_002.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/AtkO_002.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/AtkO_003.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/AtkO_003.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/AtkO_003.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/AtkO_003.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/AtkO_003.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/AtkO_004.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/AtkO_004.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/AtkO_004.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/AtkO_004.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/AtkO_004.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/AtkO_004.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/AtkO_004.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/AtkO_005.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/AtkO_005.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/AtkO_005.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/AtkO_005.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    }
+  ],
+  "isAttack": false,
+  "attack": {
+    "startupRange": [
+      0,
+      0
+    ],
+    "recoveryRange": [
+      0,
+      0
+    ],
+    "guard": "High",
+    "oh": 14,
+    "ob": 10,
+    "knockback": 0,
+    "knockbackOnBlock": 0,
+    "launches": false,
+    "launchUp": 1250,
+    "launchBack": 120,
+    "canAirJuggle": true,
+    "immuneOnStartup": false,
+    "motion": "",
+    "commandLabel": "",
+    "buttons": [],
+    "anyPunch": false,
+    "anyKick": false,
+    "stance": "Stand",
+    "unblockable": false,
+    "startupCancelInto": [],
+    "recoveryCancelInto": [],
+    "actives": [],
+    "projectiles": []
+  },
+  "isThrow": true,
+  "throw": {
+    "canGrabAirborne": false,
+    "releaseVel": {
+      "x": 300,
+      "y": -900
+    },
+    "releaseToJuggle": false,
+    "hurtTimeline": [
+      {
+        "frame": 22,
+        "damage": 1200
+      }
+    ],
+    "victimBind": [
+      {
+        "frame": 0,
+        "bindPos": {
+          "x": 78,
+          "y": 0
+        },
+        "victimAnim": "HURT",
+        "isResetVictimAnim": false,
+        "victimSameDir": false
+      },
+      {
+        "frame": 9,
+        "bindPos": {
+          "x": 68,
+          "y": -70
+        },
+        "victimAnim": "LAUNCH",
+        "isResetVictimAnim": false,
+        "victimSameDir": false
+      },
+      {
+        "frame": 17,
+        "bindPos": {
+          "x": 26,
+          "y": -125
+        },
+        "victimAnim": "LAUNCH",
+        "isResetVictimAnim": false,
+        "victimSameDir": false
+      }
+    ]
+  },
+  "canActNextActionAt": 23
+}

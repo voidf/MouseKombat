@@ -35,7 +35,7 @@ public sealed class TcpRoomClient : IDisposable
     private readonly byte[] _rx = new byte[8192];
 
     private Stage _stage = Stage.Idle;
-    private string _host, _name, _gameVersion, _password;
+    private string _host, _name, _gameVersion, _password, _assetHash = "";
     private int _port;
     private IPAddress[] _addrs;
     private int _addrIndex;
@@ -67,10 +67,12 @@ public sealed class TcpRoomClient : IDisposable
     // Dns.GetHostAddressesAsync, which passes literals straight through. Every returned address is
     // tried in order, so a machine advertising both A and AAAA records still connects when only one
     // stack actually works.
-    public void Connect(string host, int port, string playerName, string gameVersion, string roomPassword = "")
+    public void Connect(string host, int port, string playerName, string gameVersion,
+        string roomPassword = "", string assetHash = "")
     {
         Disconnect(null);
         _host = host; _port = port; _name = playerName; _gameVersion = gameVersion ?? "";
+        _assetHash = assetHash ?? "";
         _password = roomPassword ?? "";
         LastError = null;
         _stage = Stage.Resolving;
@@ -141,7 +143,14 @@ public sealed class TcpRoomClient : IDisposable
             Name = _name,
             RoomPassword = _password,
             MatchUdpPort = MatchUdpPort,
+            AssetHash = _assetHash,
         });
+    }
+
+    private static string Short(string hash)
+    {
+        hash ??= "";
+        return hash.Length >= 6 ? hash[..6] : (hash.Length > 0 ? hash : "无");
     }
 
     private void NextAddressOrFail(string why)
@@ -201,6 +210,8 @@ public sealed class TcpRoomClient : IDisposable
                         detail += $"（主机 {r.HostGameVersion} / 本机 {_gameVersion}）";
                     else if (r.HostProtocol != NetVersion.Protocol)
                         detail += $"（主机协议 {r.HostProtocol} / 本机 {NetVersion.Protocol}）";
+                    if (!string.IsNullOrEmpty(r.HostAssetHash))
+                        detail += $"（房间 {Short(r.HostAssetHash)} / 本机 {Short(r.YourAssetHash)}）";
                     LastError = detail;
                     Emit(EventKind.Rejected, detail);
                     Shutdown();

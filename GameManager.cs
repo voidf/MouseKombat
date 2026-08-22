@@ -909,8 +909,10 @@ public partial class GameManager : Node2D, IMatchPresenter
         var pr = FindProjectile(id);
         if (pr == null) return;
         var owner = pr.OwnerIndex == 0 ? p1 : p2;
-        if (owner.ProjectileScene == null) return; // no visual; the logic projectile still runs
-        var node = owner.ProjectileScene.Instantiate<Projectile>();
+        // data-driven prefabs win; a legacy character falls back to its scene export
+        var scene = HeroLibrary.Instance?.FireballScene(pr.PrefabId) ?? owner.ProjectileScene;
+        if (scene == null) return; // no visual; the logic projectile still runs
+        var node = scene.Instantiate<Projectile>();
         node.Position = pr.Position.ToGodot();
         AddChild(node);
         node.Init(pr.Dir);

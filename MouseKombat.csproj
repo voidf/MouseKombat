@@ -5,7 +5,7 @@
     <EnableDynamicLoading>true</EnableDynamicLoading>
     <!-- These live inside the repo but are their OWN projects; keep Godot's .cs glob out of them
          (otherwise their sources compile into the game assembly too -> duplicate types). -->
-    <DefaultItemExcludes>$(DefaultItemExcludes);MouseKombat.Sim/**;MouseKombat.Sim.Tests/**;MouseKombat.Net/**</DefaultItemExcludes>
+    <DefaultItemExcludes>$(DefaultItemExcludes);MouseKombat.Sim/**;MouseKombat.Sim.Tests/**;MouseKombat.Net/**;tools/**</DefaultItemExcludes>
   </PropertyGroup>
   <ItemGroup>
     <!-- Pure combat-logic library (no Godot dep), shared with the RL trainer. -->

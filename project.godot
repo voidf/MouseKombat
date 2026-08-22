@@ -16,7 +16,7 @@ config/name_localized={
 "zh": "真鼠快打",
 "zh_CN": "真鼠快打"
 }
-config/version="0.0.9"
+config.version="0.1.0"
 run/main_scene="res://MainMenu.tscn"
 config/features=PackedStringArray("4.6", "C#", "Mobile")
 config/icon="uid://betfal31o5rh8"
@@ -26,6 +26,7 @@ config/icon="uid://betfal31o5rh8"
 AspectLock="*res://AspectLock.cs"
 AppSettings="*res://AppSettings.cs"
 NetSession="*res://NetSession.cs"
+HeroLib="*res://HeroLibrary.cs"
 MCPRuntimeProbe="*uid://bsg12huaf1u5i"
 
 [display]

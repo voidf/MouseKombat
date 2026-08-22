@@ -1,0 +1,578 @@
+{
+  "name": "HURT",
+  "loop": true,
+  "frames": [
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/HURT_000.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/HURT_000.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/HURT_000.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/HURT_000.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/HURT_000.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/HURT_000.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/HURT_001.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/HURT_001.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/HURT_001.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/HURT_001.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/HURT_001.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/HURT_001.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/HURT_002.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/HURT_002.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/HURT_002.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/HURT_002.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/HURT_002.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/HURT_002.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/HURT_003.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/HURT_003.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/HURT_003.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/HURT_003.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/HURT_003.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/HURT_003.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    }
+  ],
+  "isAttack": false,
+  "attack": {
+    "startupRange": [
+      0,
+      0
+    ],
+    "recoveryRange": [
+      0,
+      0
+    ],
+    "guard": "High",
+    "oh": 14,
+    "ob": 10,
+    "knockback": 0,
+    "knockbackOnBlock": 0,
+    "launches": false,
+    "launchUp": 1250,
+    "launchBack": 120,
+    "canAirJuggle": true,
+    "immuneOnStartup": false,
+    "motion": "",
+    "commandLabel": "",
+    "buttons": [],
+    "anyPunch": false,
+    "anyKick": false,
+    "stance": "Stand",
+    "unblockable": false,
+    "startupCancelInto": [],
+    "recoveryCancelInto": [],
+    "actives": [],
+    "projectiles": []
+  },
+  "isThrow": false,
+  "throw": {
+    "canGrabAirborne": false,
+    "releaseVel": {
+      "x": 0,
+      "y": 0
+    },
+    "releaseToJuggle": false,
+    "hurtTimeline": [],
+    "victimBind": []
+  },
+  "canActNextActionAt": -1
+}

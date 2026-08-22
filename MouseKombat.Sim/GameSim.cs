@@ -330,8 +330,8 @@ public sealed class GameSim
 
     private void ProcessSpecials(StepResult res)
     {
-        if (P1.ConsumeProjectileSpawn(out var s1)) SpawnProjectile(0, s1, res);
-        if (P2.ConsumeProjectileSpawn(out var s2)) SpawnProjectile(1, s2, res);
+        while (P1.ConsumeProjectileSpawn(out var s1)) SpawnProjectile(0, s1, res);
+        while (P2.ConsumeProjectileSpawn(out var s2)) SpawnProjectile(1, s2, res);
         if (P1.ConsumeCommandSuccess(out var t1)) res.Popups.Add(new CommandPopup { PlayerIndex = 0, Text = t1 });
         if (P2.ConsumeCommandSuccess(out var t2)) res.Popups.Add(new CommandPopup { PlayerIndex = 1, Text = t2 });
     }
@@ -360,18 +360,50 @@ public sealed class GameSim
         if (defender.State == PlayerState.Dead) return;
         if (defender.IsInvincible) return;
 
-        // throws never resolve as damage here — they take over the defender instead
+        // legacy throws never resolve as damage here — they take over the defender instead
         if (attacker.CurrentMove?.Throw != null) { TryGrab(attacker, defender, defIdx, res); return; }
 
-        var hitBox = attacker.GetWorldHitbox();
-        if (defender.HurtboxOverlaps(hitBox))
+        var win = attacker.CurrentActiveBoxes();
+        if (win == null) return;
+
+        // a grab window: the boxes are grab judgement, resolved against the BODY region only
+        if (win.IsGrab) { TryGrabWindow(attacker, defender, defIdx, res, win); return; }
+
+        foreach (var hitBox in win.WorldBoxes)
         {
+            if (!defender.HurtboxOverlaps(hitBox)) continue;
             int pushDir = attacker.Position.X <= defender.Position.X ? 1 : -1;
-            var r = defender.ApplyDamage(attacker.CurrentMove, pushDir);
+            var r = defender.ApplyDamage(attacker.CurrentMove, pushDir, win.Damage);
             attacker.ConsumeAttackHit();
             ResolveKnockback(defender, attacker);
             res.Hits.Add(new HitFeedback { Result = r, WorldHitbox = hitBox, DefenderIndex = defIdx });
+            break;   // one connection consumes the whole interval
         }
+    }
+
+    // A data-driven grab: the active window connected nothing yet, its boxes are judged as a
+    // grab. On success the ATTACKER immediately plays the configured throw-followup action and
+    // the victim is bound by that action's timeline until its release frame.
+    private void TryGrabWindow(SimPlayer attacker, SimPlayer defender, int defIdx,
+        StepResult res, SimPlayer.ActiveWindowInfo win)
+    {
+        if (_grabAttacker >= 0) return;                              // already holding someone
+        if (string.IsNullOrEmpty(win.ThrowActionId)) return;         // not actually configured
+        if (win.WorldBoxes.Length == 0) return;
+
+        var followup = attacker.MoveById(win.ThrowActionId);
+        if (followup?.Followup == null) return;                      // dangling reference — degrade to nothing
+        if (!followup.Followup.CanGrabAirborne && defender.IsAirborne) return;  // jumping out is the counterplay
+
+        var grabBox = win.WorldBoxes[0];
+        if (!defender.GetWorldHurt(HurtRegion.Body).Intersects(grabBox)) return;
+
+        attacker.ConsumeAttackHit();          // consume the GRAB window (before the move switch)
+        defender.EnterGrabbed();
+        attacker.StartMoveById(win.ThrowActionId);
+        attacker.BeginGrab();                 // StartMove resets _grabbing — re-arm it after the switch
+        _grabAttacker = defIdx == 0 ? 1 : 0;
+        res.Hits.Add(new HitFeedback { Result = HitResult.Grabbed, WorldHitbox = grabBox, DefenderIndex = defIdx });
     }
 
     // A grab attempt during the move's active frames. On success the defender goes to
@@ -381,7 +413,6 @@ public sealed class GameSim
         if (_grabAttacker >= 0) return;                             // already holding someone
         var spec = attacker.CurrentMove.Throw;
         if (!spec.CanGrabAirborne && defender.IsAirborne) return;   // jumping out is the counterplay
-        if (defender.ThrowImmune) return;                           // no throw loops
 
         var grabBox = attacker.GetWorldGrabBox();
         // judged against the BODY region only: a poking arm or leg must not be grabbable
@@ -403,7 +434,16 @@ public sealed class GameSim
         var atk = Player(_grabAttacker);
         int vicIdx = 1 - _grabAttacker;
         var vic = Player(vicIdx);
-        var spec = atk.CurrentMove?.Throw;
+
+        // data-driven path: the attacker is playing a throw-FOLLOWUP action
+        var mv = atk.CurrentMove;
+        if (mv != null && mv.IsThrowFollowup && mv.Followup != null)
+        {
+            TickThrowFollowup(res, atk, vic, vicIdx, mv.Followup);
+            return;
+        }
+
+        var spec = mv?.Throw;
 
         // grab broken: the attacker was hit out of it / died / the move ended, or the victim is gone
         if (spec == null || !atk.IsGrabbing || atk.State != PlayerState.Attack
@@ -421,7 +461,7 @@ public sealed class GameSim
         if (f >= spec.ReleaseFrame)
         {
             var vel = new Vec2(spec.ReleaseVel.X * fwd, spec.ReleaseVel.Y);
-            var r = vic.ReleaseFromGrab(atk.CurrentMove.Damage, vel, spec.ReleaseToJuggle, spec.ThrowImmuneFrames);
+            var r = vic.ReleaseFromGrab(mv.Damage, vel, spec.ReleaseToJuggle);
             res.Hits.Add(new HitFeedback { Result = r, WorldHitbox = atk.GetWorldGrabBox(), DefenderIndex = vicIdx });
             atk.EndGrab();
             _grabAttacker = -1;
@@ -440,7 +480,66 @@ public sealed class GameSim
         if (!found) return;
 
         var pos = atk.Position + new Vec2(use.Offset.X * fwd, use.Offset.Y);
-        vic.ApplyGrabbedPose(pos, use.VictimAnim, use.VictimSameDir ? atk.FacingRight : !atk.FacingRight);
+        vic.ApplyGrabbedPose(pos, use.VictimAnim, use.VictimSameDir ? atk.FacingRight : !atk.FacingRight,
+            use.ResetAnim);
+    }
+
+    // The data-driven throw followup: damage ticks on their frames, the victim bound by
+    // VictimBind, released (and the move ended) at the followup's release frame.
+    private void TickThrowFollowup(StepResult res, SimPlayer atk, SimPlayer vic, int vicIdx,
+        ThrowFollowupSpec spec)
+    {
+        if (!atk.IsGrabbing || atk.State != PlayerState.Attack || vic.State != PlayerState.Grabbed)
+        {
+            if (vic.State == PlayerState.Grabbed) vic.DropFromGrab();
+            atk.EndGrab();
+            _grabAttacker = -1;
+            return;
+        }
+
+        int f = atk.AtkFrame;
+        int fwd = atk.FacingRight ? 1 : -1;
+
+        // multi-hit ticks (exact frames; stateless, so a rollback replays them identically)
+        for (int i = 0; i < spec.HurtFrames.Length; i++)
+        {
+            if (spec.HurtFrames[i] != f) continue;
+            if (!vic.ApplyThrowTick(spec.HurtDamages[i]))
+            {
+                // the victim died mid-throw: break the grab, dead fighters are not juggled
+                res.Hits.Add(new HitFeedback { Result = HitResult.Hit, WorldHitbox = atk.GetWorldGrabBox(), DefenderIndex = vicIdx });
+                atk.EndGrab();
+                _grabAttacker = -1;
+                return;
+            }
+            res.Hits.Add(new HitFeedback { Result = HitResult.Hit, WorldHitbox = atk.GetWorldGrabBox(), DefenderIndex = vicIdx });
+        }
+
+        if (f >= spec.ReleaseFrame)
+        {
+            var vel = new Vec2(spec.ReleaseVel.X * fwd, spec.ReleaseVel.Y);
+            var r = vic.ReleaseFromGrab(0, vel, spec.ReleaseToJuggle);   // damage already ticked
+            res.Hits.Add(new HitFeedback { Result = r, WorldHitbox = atk.GetWorldGrabBox(), DefenderIndex = vicIdx });
+            atk.EndGrab();
+            _grabAttacker = -1;
+            atk.FinishGrabFollowup();   // the followup has run its course — back to neutral
+            return;
+        }
+
+        // resolve the bind key; a frame past the last key holds that key's pose
+        BindKey use = default;
+        bool found = false;
+        for (int i = 0; i < spec.Bind.Length; i++)
+        {
+            var k = spec.Bind[i];
+            if (f >= k.From && f <= k.To) { use = k; found = true; break; }
+            if (k.From <= f) { use = k; found = true; }
+        }
+        if (!found) return;
+
+        var pos = atk.Position + new Vec2(use.Offset.X * fwd, use.Offset.Y);
+        vic.ApplyGrabbedPose(pos, use.VictimAnim, use.VictimSameDir ? atk.FacingRight : !atk.FacingRight,
+            use.ResetAnim);
     }
 
     private void AdvanceProjectiles(StepResult res, int count)

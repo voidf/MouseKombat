@@ -1,0 +1,36 @@
+[gd_scene format=3]
+
+[ext_resource type="Texture2D" uid="uid://8ulh7uuxkehq" path="res://FireballTSCN/csProjectileAtlas.png" id="1_04alh"]
+[ext_resource type="Script" uid="uid://dulhx3ukp0yta" path="res://Projectile.cs" id="proj_script"]
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_onbqb"]
+atlas = ExtResource("1_04alh")
+region = Rect2(0, 0, 169, 109)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_uvx48"]
+atlas = ExtResource("1_04alh")
+region = Rect2(0, 109, 169, 109)
+
+[sub_resource type="SpriteFrames" id="SpriteFrames_vkqvy"]
+animations = [{
+"frames": [{
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_onbqb")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_uvx48")
+}],
+"loop": true,
+"name": &"default",
+"speed": 16.0
+}]
+
+[node name="CsProjectile" type="Node2D" unique_id=1040458690 node_paths=PackedStringArray("anim")]
+script = ExtResource("proj_script")
+anim = NodePath("AnimatedSprite2D")
+Hitbox = Rect2(-55, -40, 110, 80)
+
+[node name="AnimatedSprite2D" type="AnimatedSprite2D" parent="." unique_id=1673249657]
+sprite_frames = SubResource("SpriteFrames_vkqvy")
+frame = 1
+frame_progress = 0.5242252

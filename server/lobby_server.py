@@ -65,7 +65,7 @@ class Member:
 
     __slots__ = ("player_id", "name", "is_host", "reader", "writer", "tcp_ip",
                  "announced_udp_port", "udp_endpoint", "udp_last_rx", "phase", "last_activity",
-                 "room")
+                 "room", "asset_hash")
 
     def __init__(self, writer):
         self.player_id = 0
@@ -83,6 +83,7 @@ class Member:
         self.phase = "hello"        # "hello" -> "op" -> "room" -> "closed"
         self.last_activity = time.monotonic()
         self.room = None
+        self.asset_hash = ""        # Heroes/ content hash from Hello; gates room entry
 
     def touch(self):
         self.last_activity = time.monotonic()
@@ -91,7 +92,8 @@ class Member:
 class Room:
     """A lobby room: RoomState (authority) + the members connected to it + directory metadata."""
 
-    __slots__ = ("id_int", "seq", "state", "password", "searchable", "created_at", "members")
+    __slots__ = ("id_int", "seq", "state", "password", "searchable", "created_at", "members",
+                 "asset_hash")
 
     def __init__(self, id_int: int, max_players: int, password: str, searchable: bool):
         self.id_int = id_int
@@ -103,6 +105,7 @@ class Room:
         self.searchable = searchable
         self.created_at = time.monotonic()
         self.members = {}           # player_id -> Member
+        self.asset_hash = ""        # stamped at creation from the host member's Hello
 
     @property
     def host_member(self):
@@ -216,7 +219,7 @@ class LobbyServer:
         protocol, game_version = body[0], body[1]
         if protocol != self.protocol or game_version != self.game_version:
             reason = "协议版本不一致" if protocol != self.protocol else "游戏版本不一致"
-            self._send_raw(m, encode_frame(MSG_REJECTED, [reason, self.protocol, self.game_version]))
+            self._send_raw(m, encode_frame(MSG_REJECTED, [reason, self.protocol, self.game_version, "", ""]))
             log.info("refused %s: %s (client protocol %r version %r, server %r/%r)",
                      m.tcp_ip, reason, protocol, game_version, self.protocol, self.game_version)
             m.phase = "closed"
@@ -224,6 +227,7 @@ class LobbyServer:
         m.name = sanitize_name(body[2])
         port = body[4] if isinstance(body[4], int) else 0
         m.announced_udp_port = port if 0 < port <= 65535 else 0
+        m.asset_hash = body[5] if len(body) > 5 and isinstance(body[5], str) else ""
         m.phase = "op"
         log.info("connected %s as %r (match udp %d)", m.tcp_ip, m.name, m.announced_udp_port)
 
@@ -242,7 +246,8 @@ class LobbyServer:
             # refuses with 房间已满 — which is exactly what a mid-match fighter's reserved slot looked
             # like ("2/4 人" on a room nobody could enter).
             entries.append([r.state.room_id, host.name if host else "?",
-                            bool(r.password), len(r.state.players), r.state.max_players])
+                            bool(r.password), len(r.state.players), r.state.max_players,
+                            r.asset_hash])
         self._send_raw(m, encode_frame(MSG_LOBBY_ROOMS, [page, total_pages, entries]))
 
     def _on_create(self, m: Member, body):
@@ -263,6 +268,7 @@ class LobbyServer:
             return
         id_int = self._fresh_room_id()
         room = Room(id_int, max_players, password, searchable)
+        room.asset_hash = m.asset_hash
         player = room.state.add_player(m.name, is_host=True)
         room.members[player.player_id] = m
         m.player_id = player.player_id
@@ -290,6 +296,15 @@ class LobbyServer:
             return
         if room.password != (password if isinstance(password, str) else ""):
             self._refuse(m, "密码错误")
+            return
+        if room.asset_hash and m.asset_hash != room.asset_hash:
+            self._send_raw(m, encode_frame(MSG_REJECTED, [
+                "资源版本不一致，无法进房", self.protocol, self.game_version,
+                room.asset_hash, m.asset_hash]))
+            log.info("refused %r join room %s: asset hash %r vs room %r",
+                     m.name, room.state.room_id, m.asset_hash[:6], room.asset_hash[:6])
+            m.phase = "closed"
+            self._close_member(m)
             return
         player = room.state.add_player(m.name, is_host=False)
         if player is None:
@@ -380,7 +395,7 @@ class LobbyServer:
                 if holder is None or holder.announced_udp_port <= 0:
                     self._send_raw(m, encode_frame(
                         MSG_REJECTED, ["另一位玩家没有上报对局端口，无法开始", self.protocol,
-                                       self.game_version]))
+                                       self.game_version, "", ""]))
                     return
         if not state.begin_match():
             return   # both seats not ready; silent like the LAN host
@@ -525,14 +540,14 @@ class LobbyServer:
 
     def _reject(self, m: Member, reason: str):
         """Fatal: send Rejected and close. For handshake/protocol violations only."""
-        self._send_raw(m, encode_frame(MSG_REJECTED, [reason, self.protocol, self.game_version]))
+        self._send_raw(m, encode_frame(MSG_REJECTED, [reason, self.protocol, self.game_version, "", ""]))
         log.info("refused %s: %s", m.tcp_ip, reason)
         m.phase = "closed"
 
     def _refuse(self, m: Member, reason: str):
         """Non-fatal: send Rejected but keep the connection. A wrong password or a full room
         must leave the browser connected so the player can retry or pick another room."""
-        self._send_raw(m, encode_frame(MSG_REJECTED, [reason, self.protocol, self.game_version]))
+        self._send_raw(m, encode_frame(MSG_REJECTED, [reason, self.protocol, self.game_version, "", ""]))
         log.info("refused %s: %s", m.tcp_ip, reason)
 
     def _close_member(self, m: Member):

@@ -56,7 +56,7 @@ public sealed class LobbyRoomClient : IDisposable
     private readonly byte[] _rx = new byte[8192];
 
     private Stage _stage = Stage.Idle;
-    private string _host, _name, _gameVersion;
+    private string _host, _name, _gameVersion, _assetHash = "";
     private int _port;
     private IPAddress[] _addrs;
     private int _addrIndex;
@@ -90,10 +90,12 @@ public sealed class LobbyRoomClient : IDisposable
     }
 
     // `host` may be a domain name, an IPv4 literal or an IPv6 literal (see TcpRoomClient.Connect).
-    public void Connect(string host, int port, string playerName, string gameVersion)
+    public void Connect(string host, int port, string playerName, string gameVersion,
+        string assetHash = "")
     {
         Disconnect(null);
         _host = host; _port = port; _name = playerName; _gameVersion = gameVersion ?? "";
+        _assetHash = assetHash ?? "";
         LastError = null;
         _pendingOp = null;
         _stage = Stage.Resolving;
@@ -166,6 +168,7 @@ public sealed class LobbyRoomClient : IDisposable
             Name = _name,
             RoomPassword = "",
             MatchUdpPort = MatchUdpPort,
+            AssetHash = _assetHash,
         });
         if (_pendingOp.HasValue)
         {
@@ -173,6 +176,12 @@ public sealed class LobbyRoomClient : IDisposable
             _pendingOp = null;
         }
         _stage = Stage.Lobby;
+    }
+
+    private static string Short(string hash)
+    {
+        hash ??= "";
+        return hash.Length >= 6 ? hash[..6] : (hash.Length > 0 ? hash : "无");
     }
 
     private void NextAddressOrFail(string why)
@@ -239,6 +248,8 @@ public sealed class LobbyRoomClient : IDisposable
                     string detail = r.Reason;
                     if (!string.IsNullOrEmpty(r.HostGameVersion) && r.HostGameVersion != _gameVersion)
                         detail += $"（服务器 {r.HostGameVersion} / 本机 {_gameVersion}）";
+                    if (!string.IsNullOrEmpty(r.HostAssetHash))
+                        detail += $"（房间 {Short(r.HostAssetHash)} / 本机 {Short(r.YourAssetHash)}）";
                     LastError = detail;
                     Emit(EventKind.Rejected, detail);
                     bool versionRefused =
@@ -301,7 +312,7 @@ public sealed class LobbyRoomClient : IDisposable
     // ---- browse phase ----
     public void ListRooms(int page) => Send(MsgType.LobbyList, new LobbyList { Page = page });
     public void CreateRoom(int maxPlayers, string password, bool searchable) =>
-        Send(MsgType.LobbyCreate, new LobbyCreate { MaxPlayers = maxPlayers, Password = password ?? "", Searchable = searchable });
+        Send(MsgType.LobbyCreate, new LobbyCreate { MaxPlayers = maxPlayers, Password = password ?? "", Searchable = searchable, AssetHash = _assetHash });
     public void JoinRoom(string roomId, string password) =>
         Send(MsgType.LobbyJoin, new LobbyJoin { RoomId = roomId ?? "", Password = password ?? "" });
 

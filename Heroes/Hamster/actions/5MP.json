@@ -1,0 +1,494 @@
+{
+  "name": "5MP",
+  "loop": false,
+  "frames": [
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -107
+          },
+          "img": "images/AtkI_000.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -107
+          },
+          "img": "images/AtkI_000.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -107
+          },
+          "img": "images/AtkI_000.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -107
+          },
+          "img": "images/AtkI_001.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -107
+          },
+          "img": "images/AtkI_001.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -107
+          },
+          "img": "images/AtkI_002.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -107
+          },
+          "img": "images/AtkI_002.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -107
+          },
+          "img": "images/AtkI_002.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -107
+          },
+          "img": "images/AtkI_002.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -107
+          },
+          "img": "images/AtkI_003.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -107
+          },
+          "img": "images/AtkI_003.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -107
+          },
+          "img": "images/AtkI_003.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -107
+          },
+          "img": "images/AtkI_003.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -107
+          },
+          "img": "images/AtkI_003.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -107
+          },
+          "img": "images/AtkI_004.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -107
+          },
+          "img": "images/AtkI_004.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -107
+          },
+          "img": "images/AtkI_004.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -107
+          },
+          "img": "images/AtkI_004.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -107
+          },
+          "img": "images/AtkI_004.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    }
+  ],
+  "isAttack": true,
+  "attack": {
+    "startupRange": [
+      0,
+      4
+    ],
+    "recoveryRange": [
+      9,
+      18
+    ],
+    "guard": "High",
+    "oh": 19,
+    "ob": 14,
+    "knockback": 14,
+    "knockbackOnBlock": 0,
+    "launches": false,
+    "launchUp": 1250,
+    "launchBack": 120,
+    "canAirJuggle": true,
+    "immuneOnStartup": false,
+    "motion": "",
+    "commandLabel": "",
+    "buttons": [
+      "MP"
+    ],
+    "anyPunch": false,
+    "anyKick": false,
+    "stance": "Stand",
+    "unblockable": false,
+    "startupCancelInto": [],
+    "recoveryCancelInto": [
+      "5HP",
+      "5MK",
+      "5HK"
+    ],
+    "actives": [
+      {
+        "activeRange": [
+          5,
+          8
+        ],
+        "shouldWhiffIfNotHit": false,
+        "whiffAction": "",
+        "isGrab": false,
+        "throwAction": "",
+        "damage": 600,
+        "hitboxes": [
+          {
+            "cx": 87.5,
+            "cy": -107.5,
+            "hw": 37.5,
+            "hh": 37.5
+          }
+        ]
+      }
+    ],
+    "projectiles": []
+  },
+  "isThrow": false,
+  "throw": {
+    "canGrabAirborne": false,
+    "releaseVel": {
+      "x": 0,
+      "y": 0
+    },
+    "releaseToJuggle": false,
+    "hurtTimeline": [],
+    "victimBind": []
+  },
+  "canActNextActionAt": -1
+}

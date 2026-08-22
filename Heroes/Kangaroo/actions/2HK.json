@@ -1,0 +1,514 @@
+{
+  "name": "2HK",
+  "loop": false,
+  "frames": [
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    }
+  ],
+  "isAttack": true,
+  "attack": {
+    "startupRange": [
+      0,
+      8
+    ],
+    "recoveryRange": [
+      15,
+      33
+    ],
+    "guard": "Low",
+    "oh": 27,
+    "ob": 15,
+    "knockback": 10,
+    "knockbackOnBlock": 1,
+    "launches": false,
+    "launchUp": 1250,
+    "launchBack": 120,
+    "canAirJuggle": true,
+    "immuneOnStartup": false,
+    "motion": "",
+    "commandLabel": "",
+    "buttons": [
+      "HK"
+    ],
+    "anyPunch": false,
+    "anyKick": false,
+    "stance": "Crouch",
+    "unblockable": false,
+    "startupCancelInto": [],
+    "recoveryCancelInto": [],
+    "actives": [
+      {
+        "activeRange": [
+          9,
+          14
+        ],
+        "shouldWhiffIfNotHit": false,
+        "whiffAction": "",
+        "isGrab": false,
+        "throwAction": "",
+        "damage": 900,
+        "hitboxes": [
+          {
+            "cx": 110,
+            "cy": -15,
+            "hw": 90,
+            "hh": 25
+          }
+        ]
+      }
+    ],
+    "projectiles": []
+  },
+  "isThrow": false,
+  "throw": {
+    "canGrabAirborne": false,
+    "releaseVel": {
+      "x": 0,
+      "y": 0
+    },
+    "releaseToJuggle": false,
+    "hurtTimeline": [],
+    "victimBind": []
+  },
+  "canActNextActionAt": -1
+}

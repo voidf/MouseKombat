@@ -22,6 +22,8 @@ public sealed class SimProjectile
     private Fix _traveled;
     private readonly SimRect _hitboxLocal;
     private readonly MoveDef _hit;    // synthetic hit data reused by SimPlayer.ApplyDamage
+    private int _age;                 // frames alive
+    private readonly int _lifeTime;   // 0 = unlimited
 
     public SimProjectile(int id, int ownerIndex, Vec2 pos, int dir, ProjectileSpec spec)
     {
@@ -33,6 +35,7 @@ public sealed class SimProjectile
         _speed = spec.Speed;
         _maxDistance = spec.MaxDistance;
         _hitboxLocal = spec.Hitbox;
+        _lifeTime = spec.LifeTimeFrame;
         // non-light so a mid-air target juggles/air-resets like a normal HP hit (matches old Projectile._hit)
         _hit = new MoveDef {
             Damage = spec.Damage,
@@ -47,6 +50,7 @@ public sealed class SimProjectile
 
     public MoveDef Hit => _hit;
     public SimRect HitboxLocal => _hitboxLocal; // for the view's debug draw / flip
+    public string PrefabId => _spec.PrefabId ?? "";   // the view resolves the scene from this
 
     public SimRect GetWorldHitbox()
     {
@@ -61,10 +65,13 @@ public sealed class SimProjectile
         Fix dx = Dir * _speed * SimPlayer.Dt;
         Position += new Vec2(dx, 0);
         _traveled += Fix.Abs(dx);
+        _age++;
     }
 
     public bool Expired(Fix cullMinX, Fix cullMaxX)
-        => _traveled >= _maxDistance || Position.X < cullMinX || Position.X > cullMaxX;
+        => (_lifeTime > 0 && _age >= _lifeTime)
+        || (_maxDistance > 0f && _traveled >= _maxDistance)
+        || Position.X < cullMinX || Position.X > cullMaxX;
 
     // ---- savestate ----
     // Identity (id / owner / dir) + the mutable bits + the whole spec, so Restore re-runs the
@@ -76,6 +83,7 @@ public sealed class SimProjectile
         w.Int(Dir);
         w.Vec(Position);
         w.Fixed(_traveled);
+        w.Int(_age);
         w.Bool(Alive);
 
         w.Fixed(_spec.Speed);
@@ -88,6 +96,8 @@ public sealed class SimProjectile
         w.Fixed(_spec.Knockback);
         w.Int(_spec.oH);
         w.Int(_spec.oB);
+        w.Int(_spec.LifeTimeFrame);
+        w.ShortString(_spec.PrefabId ?? "");
     }
 
     public static SimProjectile Restore(ref SimStateReader r)
@@ -97,6 +107,7 @@ public sealed class SimProjectile
         int dir = r.Int();
         var pos = r.Vec();
         var traveled = r.Fixed();
+        int age = r.Int();
         bool alive = r.Bool();
 
         var spec = new ProjectileSpec
@@ -111,10 +122,13 @@ public sealed class SimProjectile
             Knockback = r.Fixed(),
             oH = r.Int(),
             oB = r.Int(),
+            LifeTimeFrame = r.Int(),
+            PrefabId = r.ShortString(),
         };
 
         var p = new SimProjectile(id, owner, pos, dir, spec) { Alive = alive };
         p._traveled = traveled;
+        p._age = age;
         return p;
     }
 }

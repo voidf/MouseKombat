@@ -46,13 +46,9 @@ public sealed class SimPlayer
     private int _crouchFrame = 0;
     private int _downFrame = 0;
     private int _wakeFrame = 0;
-    private bool _atkHitConsumed = false;
 
     private MoveDef _curMove;
     private bool _airMove = false;
-    private bool _projectileSpawned = false;
-    private bool _pendingProjectile = false;
-    private ProjectileSpec _pendingSpec;
     private bool _pendingPopup = false;
     private string _pendingPopupText = "";
     private readonly InputBuffer _buffer = new InputBuffer(MotionWindow + 2);
@@ -60,6 +56,20 @@ public sealed class SimPlayer
     private int _curCancelFrom, _curCancelTo;
     private SimRect _curHitbox;
     private GuardHeight _curGuard = GuardHeight.High;
+
+    // ---- normalized active-window state (both legacy and compiled moves) ----
+    // Every move gets an ActiveSpec[] in StartMove: compiled tables carry their own, legacy
+    // tables get one synthesized from Startup/Active/Recovery + Hitbox. Combat then has a
+    // single code path; the mask is the savestate identity of per-window consumption.
+    private ActiveSpec[] _curWindows = System.Array.Empty<ActiveSpec>();
+    private int _windowConsumedMask = 0;
+    private int _curStartupFrom = 0, _curStartupTo = -1;
+    private int _curRecoveryFrom = 0, _curRecoveryTo = -1;
+
+    // ---- multi-projectile spawn state (bit i = spawn i) ----
+    private ProjectileSpawnSpec[] _curProjSpawns = System.Array.Empty<ProjectileSpawnSpec>();
+    private int _projFiredMask = 0;    // spawn frame reached (permanent for this move)
+    private int _projPendingMask = 0;  // queued this frame, not yet drained by GameSim
 
     private Fix _vy = 0f;
     private Fix _jumpHVel = 0f;
@@ -79,7 +89,6 @@ public sealed class SimPlayer
     private bool _grabbing = false;          // attacker side: this move's grab connected and is holding
     private bool _throwWhiffApplied = false; // attacker side: whiff recovery already swapped in
     private string _grabbedAnim = null;      // victim side: last pose clip pushed by the binder
-    private int _throwImmune = 0;            // victim side: frames left where a grab can't connect
 
     public bool IsAirborne => Position.Y < _groundY - Fix.Half;
 
@@ -107,10 +116,20 @@ public sealed class SimPlayer
         return 3;
     }
 
-    // Downed/Wakeup are invincible; a grabbed victim is untouchable too (its damage comes from the
-    // throw's release frame, and a stray fireball must not steal it out of the grabber's hands).
+    // The split phase predicates (打康/确反康 groundwork): true while the attack's frame
+    // counter is inside the authored startup / recovery RANGE, independent of the active
+    // windows sitting between them. Legacy moves derive the ranges from the S/A/R triple.
+    public bool IsInStartup =>
+        State == PlayerState.Attack && _atkFrame >= _curStartupFrom && _atkFrame <= _curStartupTo;
+    public bool IsInRecovery =>
+        State == PlayerState.Attack && _atkFrame >= _curRecoveryFrom && _atkFrame <= _curRecoveryTo;
+
+    // Downed/Wakeup are invincible; a grabbed victim is untouchable too (its damage comes from
+    // the throw's release frame, and a stray fireball must not steal it out of the grabber's hands).
+    // ImmuneOnStartup adds armor to a move's startup window.
     public bool IsInvincible => State == PlayerState.Downed || State == PlayerState.Wakeup
-        || State == PlayerState.Grabbed;
+        || State == PlayerState.Grabbed
+        || (State == PlayerState.Attack && _curMove != null && _curMove.ImmuneOnStartup && IsInStartup);
     public bool IsDirectionPressed => InLeft || InRight;
     public bool IsCrouching => State == PlayerState.Crouch;
     public bool IsDefendingInput => FacingRight ? InLeft : InRight;
@@ -118,7 +137,6 @@ public sealed class SimPlayer
     // ---- throw state (see ThrowSpec / GameSim.TickThrowBind) ----
     public bool IsGrabbing => _grabbing;                  // attacker: holding a victim right now
     public bool IsGrabbed => State == PlayerState.Grabbed; // victim: held by the opponent
-    public bool ThrowImmune => _throwImmune > 0;
 
     public int MaxHp => _cfg.MaxHp;                          // for the view's HP bar
     public Fix WalkSpeedPxPerSec => _cfg.WalkSpeedPxPerSec;   // for GameSim.ResolveMovement
@@ -142,11 +160,46 @@ public sealed class SimPlayer
         (State == PlayerState.Idle || State == PlayerState.Walk || State == PlayerState.Crouch || State == PlayerState.CrouchExit)
         && IsDefendingInput;
 
-    public bool IsAttackingActive =>
-        State == PlayerState.Attack
-        && _atkFrame >= _curStartup
-        && _atkFrame < _curStartup + _curActive
-        && !_atkHitConsumed;
+    // True while the frame counter sits inside an UNCONSUMED strike window. This is the melee
+    // hit-test gate for GameSim.TryHit (was: the legacy single-window check).
+    public bool IsAttackingActive => CurrentActiveBoxes() != null;
+
+    // The unconsumed window containing the current frame, or null. `Ordinal` is the index into
+    // the move's window list — the bit position in the consumption mask.
+    public sealed class ActiveWindowInfo
+    {
+        public SimRect[] WorldBoxes;   // mirrored by facing, ready to test
+        public int Damage;
+        public bool IsGrab;
+        public string ThrowActionId;
+        public ActiveSpec Spec;
+        public int Ordinal;
+    }
+
+    // World-space boxes + damage of the CURRENT unconsumed window, for GameSim.TryHit.
+    public ActiveWindowInfo CurrentActiveBoxes()
+    {
+        if (State != PlayerState.Attack || _curWindows == null) return null;
+        int f = _atkFrame;
+        for (int i = 0; i < _curWindows.Length; i++)
+        {
+            var w = _curWindows[i];
+            if (f < w.From || f > w.To) continue;
+            if ((_windowConsumedMask & (1 << i)) != 0) return null;
+            var boxes = new SimRect[w.Hitboxes.Length];
+            for (int b = 0; b < boxes.Length; b++) boxes[b] = ToWorld(w.Hitboxes[b]);
+            return new ActiveWindowInfo
+            {
+                WorldBoxes = boxes,
+                Damage = w.Damage,
+                IsGrab = w.IsGrab,
+                ThrowActionId = w.ThrowActionId,
+                Spec = w,
+                Ordinal = i,
+            };
+        }
+        return null;
+    }
 
     public bool IsBusy => State == PlayerState.Attack || State == PlayerState.Hurt || State == PlayerState.Dead || State == PlayerState.DefenseHit || State == PlayerState.Jump || State == PlayerState.Crouch || State == PlayerState.Juggle || State == PlayerState.AirHurt || State == PlayerState.Downed || State == PlayerState.Wakeup || State == PlayerState.Grabbed;
 
@@ -156,13 +209,29 @@ public sealed class SimPlayer
     public SimPlayer(PlayerConfig cfg)
     {
         _cfg = cfg;
-        _moves = MoveSets.ForCharacter(cfg.Character);
+        _moves = cfg.MoveSetOverride ?? MoveSets.ForCharacter(cfg.Character);
         Position = cfg.StartPos;
         _groundY = cfg.StartPos.Y;
         Hp = cfg.MaxHp;
         FacingRight = cfg.StartFacingRight;
         PlayAnim(_cfg.IdleAnimName);
     }
+
+    // Start a move by action Id (grab -> throw followup, whiff jumps, cancels). Missing Id
+    // degrades to "keep the current move" rather than crashing the sim.
+    public bool StartMoveById(string id)
+    {
+        var m = _moves.ById(id);
+        if (m == null) return false;
+        StartMove(m);
+        return true;
+    }
+
+    public MoveDef MoveById(string id) => _moves.ById(id);
+
+    // GameSim calls this when a throw followup's release frame is reached: the move ends and the
+    // fighter returns to neutral.
+    public void FinishGrabFollowup() => EndCurrentMove();
 
     // Latch one frame of input into the buffer + held state (was Player.LatchInput).
     public void Latch(InputFrame f)
@@ -323,6 +392,7 @@ public sealed class SimPlayer
     public void TickMoves()
     {
         if (State == PlayerState.Grabbed) return; // held: inputs are dead until the release frame
+        if (_grabbing) return;                    // mid-throw: BOTH fighters stop responding (spec)
 
         if (IsAirborne)
         {
@@ -344,13 +414,24 @@ public sealed class SimPlayer
 
         if (State == PlayerState.Attack)
         {
-            if (_curMove != null && _atkFrame >= _curCancelFrom && _atkFrame <= _curCancelTo)
+            // split cancel rules: startup-phase cancels and recovery-phase cancels replace the
+            // legacy single window (kept working for code-authored tables)
+            string[] list = null;
+            if (_curMove != null && _atkFrame >= _curCancelFrom && _atkFrame <= _curCancelTo
+                && _curMove.CancelInto != null && _curMove.CancelInto.Length > 0)
+            {
+                list = _curMove.CancelInto;
+            }
+            else if (IsInStartup && _curMove?.StartupCancelInto is { Length: > 0 } su) list = su;
+            else if (IsInRecovery && _curMove?.RecoveryCancelInto is { Length: > 0 } re) list = re;
+
+            if (list != null)
             {
                 var cb = _buffer.PeekButton(BufferWindow);
                 if (cb.HasValue)
                 {
                     var nm = _moves.Resolve(CurStance(), cb.Value);
-                    if (nm != null && System.Array.IndexOf(_curMove.CancelInto, nm.Id) >= 0)
+                    if (nm != null && System.Array.IndexOf(list, nm.Id) >= 0)
                     {
                         _buffer.ConsumeButton(BufferWindow);
                         StartMove(nm);
@@ -393,9 +474,7 @@ public sealed class SimPlayer
         State = PlayerState.Attack;
         _curMove = m;
         _airMove = m.Stance == Stance.Air;
-        _projectileSpawned = false;
         _atkFrame = 0;
-        _atkHitConsumed = false;
         _curStartup = m.Startup;
         _curActive = m.Active;
         _curRecovery = m.Recovery;
@@ -409,6 +488,47 @@ public sealed class SimPlayer
         _throwWhiffApplied = false;
         PlayAnim(m.AnimName, true);
 
+        // ---- normalize the active-window list (single combat path for both table kinds) ----
+        if (m.ActiveWindows != null && m.ActiveWindows.Length > 0)
+        {
+            _curWindows = m.ActiveWindows;
+        }
+        else
+        {
+            var legacy = new ActiveSpec
+            {
+                From = m.Startup,
+                To = m.Startup + m.Active - 1,
+                Hitboxes = new[] { m.Hitbox },
+                Damage = m.Damage,
+            };
+            _curWindows = new[] { legacy };
+        }
+        _windowConsumedMask = 0;
+
+        // authored phase ranges, falling back to the derived legacy ones
+        _curStartupFrom = m.StartupRange.From >= 0 ? m.StartupRange.From : 0;
+        _curStartupTo = m.StartupRange.To >= 0 ? m.StartupRange.To : Math.Max(m.Startup - 1, -1);
+        int legacyRecoveryFrom = m.Startup + m.Active;
+        _curRecoveryFrom = m.RecoveryRange.From >= 0 ? m.RecoveryRange.From : legacyRecoveryFrom;
+        _curRecoveryTo = m.RecoveryRange.To >= 0 ? m.RecoveryRange.To : TotalOf(m) - 1;
+
+        // ---- normalize the projectile spawn list ----
+        if (m.ProjectileSpawns != null && m.ProjectileSpawns.Length > 0)
+            _curProjSpawns = m.ProjectileSpawns;
+        else if (m.SpawnsProjectile)
+        {
+            _curProjSpawns = new[] { new ProjectileSpawnSpec
+            {
+                SpawnFrame = m.ProjectileSpawnFrame,
+                Spec = m.Projectile,
+            } };
+        }
+        else
+            _curProjSpawns = System.Array.Empty<ProjectileSpawnSpec>();
+        _projFiredMask = 0;
+        _projPendingMask = 0;
+
         if (m.Motion != MotionInput.None)
         {
             _pendingPopup = true;
@@ -416,16 +536,20 @@ public sealed class SimPlayer
         }
     }
 
+    private static int TotalOf(MoveDef m) =>
+        m.TotalFramesOverride > 0 ? m.TotalFramesOverride : m.TotalFrames;
+
     // Both consumers null out the payload as well as the flag. Leaving a spent spec/label behind
     // would be dead state that a savestate has to carry (or silently disagree about) for no reason —
     // the reflection-based rollback parity test flags exactly that.
     public bool ConsumeProjectileSpawn(out ProjectileSpec spec)
     {
-        if (_pendingProjectile)
+        for (int i = 0; i < _curProjSpawns.Length; i++)
         {
-            _pendingProjectile = false;
-            spec = _pendingSpec;
-            _pendingSpec = default;
+            int bit = 1 << i;
+            if ((_projPendingMask & bit) == 0) continue;
+            _projPendingMask &= ~bit;
+            spec = _curProjSpawns[i].Spec;
             return true;
         }
         spec = default;
@@ -472,14 +596,13 @@ public sealed class SimPlayer
 
     public void TickAdvanceTimers()
     {
-        if (_throwImmune > 0) _throwImmune--;
-
         if (State == PlayerState.Attack)
         {
             _atkFrame++;
 
             // throw whiffed: the grab window closed without connecting -> swap in the (punishable)
-            // whiff recovery. Checked once, right after the active frames end.
+            // whiff recovery. Checked once, right after the active frames end. Legacy tables only —
+            // compiled actions whiff through ShouldWhiffIfNotHit -> WhiffAction instead.
             var th = _curMove?.Throw;
             if (th != null && !_grabbing && !_throwWhiffApplied && _atkFrame >= _curStartup + _curActive)
             {
@@ -488,30 +611,43 @@ public sealed class SimPlayer
                 if (!string.IsNullOrEmpty(th.WhiffAnim)) PlayAnim(th.WhiffAnim, true);
             }
 
-            if (_curMove != null && _curMove.SpawnsProjectile && !_projectileSpawned
-                && _atkFrame >= _curMove.ProjectileSpawnFrame)
+            // an active interval ENDED without consuming: whiff-jump to the configured action and
+            // skip whatever windows followed it in this move
+            if (_curMove != null && !_grabbing)
             {
-                _pendingProjectile = true;
-                _pendingSpec = _curMove.Projectile;
-                _projectileSpawned = true;
+                for (int i = 0; i < _curWindows.Length; i++)
+                {
+                    var w = _curWindows[i];
+                    if (w.To != _atkFrame - 1 || w.From > w.To) continue;     // just ended
+                    if ((_windowConsumedMask & (1 << i)) != 0) continue;      // it connected
+                    if (!w.ShouldWhiffIfNotHit) continue;
+                    if (string.IsNullOrEmpty(w.WhiffActionId)) continue;
+                    StartMoveById(w.WhiffActionId);
+                    return;
+                }
             }
-            if (_atkFrame >= _curStartup + _curActive + _curRecovery)
+
+            // projectile spawns: one mask bit per spawn, fired exactly on its frame
+            for (int i = 0; i < _curProjSpawns.Length; i++)
             {
-                bool wasMotion = _curMove != null && _curMove.MotionTimeline.Length > 0;
-                _atkFrame = -1;
-                _airMove = false;
-                _grabbing = false;
-                _throwWhiffApplied = false;
-                if (wasMotion) { var lp = Position; lp.Y = _groundY; Position = lp; }
-                if (!IsAirborne && InDownHeld && !InUpHeld)
+                int bit = 1 << i;
+                if ((_projFiredMask & bit) == 0 && _atkFrame >= _curProjSpawns[i].SpawnFrame)
                 {
-                    State = PlayerState.Crouch;
-                    PlayAnim(_cfg.CrouchIdleAnimName);
+                    _projFiredMask |= bit;
+                    _projPendingMask |= bit;
                 }
-                else
-                {
-                    State = PlayerState.Idle; // grounded: let attack clip tail (view handles it) — no anim command
-                }
+            }
+
+            // from CanActNextActionAt on, the fighter may act as if idle: end the move logically
+            // (the view's attack-tail rule keeps the clip playing out).
+            // While HOLDING a throw the GameSim owns this move's end: it releases the victim at
+            // the followup's release frame and ends the move itself, so the victim can never be
+            // dropped by the move expiring first.
+            bool canActCutoff = _curMove != null && _curMove.CanActNextActionAt >= 0
+                && _atkFrame >= _curMove.CanActNextActionAt;
+            if (!_grabbing && (_atkFrame >= _curStartup + _curActive + _curRecovery || canActCutoff))
+            {
+                EndCurrentMove();
             }
         }
         else if (State == PlayerState.Hurt)
@@ -557,6 +693,26 @@ public sealed class SimPlayer
     private bool WantsWakeup()
         => InLeft || InRight || InUpHeld || InDownHeld || _buffer.PeekButton(2).HasValue;
 
+    // Natural end OR CanActNextActionAt cutoff — the same transition either way.
+    private void EndCurrentMove()
+    {
+        bool wasMotion = _curMove != null && _curMove.MotionTimeline.Length > 0;
+        _atkFrame = -1;
+        _airMove = false;
+        _grabbing = false;
+        _throwWhiffApplied = false;
+        if (wasMotion) { var lp = Position; lp.Y = _groundY; Position = lp; }
+        if (!IsAirborne && InDownHeld && !InUpHeld)
+        {
+            State = PlayerState.Crouch;
+            PlayAnim(_cfg.CrouchIdleAnimName);
+        }
+        else
+        {
+            State = PlayerState.Idle; // grounded: let attack clip tail (view handles it) — no anim command
+        }
+    }
+
     private void EndStunToNeutral()
     {
         if (!IsAirborne && InDownHeld && !InUpHeld)
@@ -586,6 +742,20 @@ public sealed class SimPlayer
 
     public SimRect RegionLocal(HurtRegion r)
     {
+        // a per-frame override replaces the whole defensive set; map the grab's "Body" judgement
+        // onto the override's union so a data-driven victim stays grabbable
+        if (State == PlayerState.Attack && _curMove?.FrameHurtboxes is { Length: > 0 } frames)
+        {
+            int f = _atkFrame;
+            if (f >= 0 && f < frames.Length && frames[f] != null)
+            {
+                if (r != HurtRegion.Body) return new SimRect(0, 0, 0, 0);
+                var merged = frames[f][0];
+                for (int i = 1; i < frames[f].Length; i++) merged = merged.Merge(frames[f][i]);
+                return merged;
+            }
+        }
+
         if (State == PlayerState.Attack && _curMove != null && _curMove.HurtboxTimeline.Length > 0)
         {
             foreach (var k in _curMove.HurtboxTimeline)
@@ -622,22 +792,47 @@ public sealed class SimPlayer
 
     public bool HurtboxOverlaps(SimRect worldHit)
     {
-        return ToWorld(RegionLocal(HurtRegion.Head)).Intersects(worldHit)
-            || ToWorld(RegionLocal(HurtRegion.Body)).Intersects(worldHit)
-            || ToWorld(RegionLocal(HurtRegion.Arms)).Intersects(worldHit)
-            || ToWorld(RegionLocal(HurtRegion.Legs)).Intersects(worldHit);
+        var set = LocalHurtboxSet();
+        for (int i = 0; i < set.Length; i++)
+            if (ToWorld(set[i]).Intersects(worldHit)) return true;
+        return false;
     }
 
     public SimRect GetWorldHurtbox()
     {
-        var a = ToWorld(RegionLocal(HurtRegion.Head));
-        a = a.Merge(ToWorld(RegionLocal(HurtRegion.Body)));
-        a = a.Merge(ToWorld(RegionLocal(HurtRegion.Arms)));
-        a = a.Merge(ToWorld(RegionLocal(HurtRegion.Legs)));
+        var set = LocalHurtboxSet();
+        var a = ToWorld(set[0]);
+        for (int i = 1; i < set.Length; i++) a = a.Merge(ToWorld(set[i]));
         return a;
     }
 
-    public void ConsumeAttackHit() { _atkHitConsumed = true; }
+    // Consume the window the current frame sits in (a connection happened): every other box of
+    // THIS interval dies with it; other intervals keep their own chance.
+    public void ConsumeAttackHit()
+    {
+        if (State != PlayerState.Attack || _curWindows == null) return;
+        int f = _atkFrame;
+        for (int i = 0; i < _curWindows.Length; i++)
+        {
+            var w = _curWindows[i];
+            if (f >= w.From && f <= w.To) { _windowConsumedMask |= 1 << i; return; }
+        }
+    }
+
+    // The defensive box set of the moment: a per-frame override while attacking (empty entries
+    // fall through), else the crouch/stand config regions. This is what hit-tests actually run
+    // against; the per-region view below is for debug drawing and the grab's Body judgement.
+    public SimRect[] LocalHurtboxSet()
+    {
+        if (State == PlayerState.Attack && _curMove?.FrameHurtboxes is { Length: > 0 } frames)
+        {
+            int f = _atkFrame;
+            if (f >= 0 && f < frames.Length && frames[f] != null) return frames[f];
+        }
+        if (IsCrouching)
+            return new[] { _cfg.CrouchHeadBox, _cfg.CrouchBodyBox, _cfg.CrouchArmsBox, _cfg.CrouchLegsBox };
+        return new[] { _cfg.HeadBox, _cfg.BodyBox, _cfg.ArmsBox, _cfg.LegsBox };
+    }
 
     // ================= throws =================
     // Attacker side: GetWorldGrabBox / BeginGrab / EndGrab.
@@ -652,11 +847,11 @@ public sealed class SimPlayer
         return ToWorld(hasBox ? th.GrabBox : _curHitbox);
     }
 
-    // attacker: the grab connected. Consumes the hit so the move can't also land as a strike.
+    // attacker: the grab connected. Consumes the window so the move can't also land as a strike.
     public void BeginGrab()
     {
         _grabbing = true;
-        _atkHitConsumed = true;
+        ConsumeAttackHit();
     }
 
     public void EndGrab() { _grabbing = false; }
@@ -671,6 +866,13 @@ public sealed class SimPlayer
         _defHitFrame = -1;
         _airMove = false;
         _curMove = null;
+        // keep the no-move invariant (_curMove == null <=> no windows/spawns), or a reload of
+        // this state would differ from the in-memory one the parity test compares against
+        _curWindows = System.Array.Empty<ActiveSpec>();
+        _windowConsumedMask = 0;
+        _curProjSpawns = System.Array.Empty<ProjectileSpawnSpec>();
+        _projFiredMask = 0;
+        _projPendingMask = 0;
         _vy = 0f;
         _jumpHVel = 0f;
         DesiredDeltaX = 0f;
@@ -678,26 +880,26 @@ public sealed class SimPlayer
 
     // victim: called every held frame with the attacker's bind key resolved to world space.
     // The pose clip is only (re)played when it actually changes, so a multi-frame hold does not
-    // restart the animation every tick.
-    public void ApplyGrabbedPose(Vec2 worldPos, string anim, bool facingRight)
+    // restart the animation every tick — unless the key asked for a restart (IsResetVictimAnim).
+    public void ApplyGrabbedPose(Vec2 worldPos, string anim, bool facingRight, bool resetAnim = false)
     {
         Position = worldPos;
         FacingRight = facingRight;
-        if (!string.IsNullOrEmpty(anim) && anim != _grabbedAnim)
+        if (!string.IsNullOrEmpty(anim) && (resetAnim || anim != _grabbedAnim))
         {
             _grabbedAnim = anim;
             PlayAnim(anim, true);
         }
     }
 
-    // victim: the release frame. Damage lands here, then the victim is thrown ballistically and
-    // reuses the existing Juggle -> land -> Downed path (so KNOCKDOWN/WAKEUP just work).
+    // victim: the release frame. Damage lands here (data-driven throws tick it earlier via
+    // HurtTimeline, so they pass 0), then the victim is thrown ballistically and reuses the
+    // existing Juggle -> land -> Downed path (so KNOCKDOWN/WAKEUP just work).
     // vel.X is already WORLD-space here; vel.Y negative = up.
     // juggleFollowUp=false pre-fills the juggle counter so further air hits air-reset instead.
-    public HitResult ReleaseFromGrab(int damage, Vec2 vel, bool juggleFollowUp, int immuneFrames)
+    public HitResult ReleaseFromGrab(int damage, Vec2 vel, bool juggleFollowUp)
     {
         _grabbedAnim = null;
-        _throwImmune = immuneFrames;
 
         if (damage > 0)
         {
@@ -718,6 +920,18 @@ public sealed class SimPlayer
         return HitResult.Hit;
     }
 
+    // victim: a multi-hit throw's damage tick while still held. Returns false when this killed
+    // the victim (the grabber must then break the grab — the dead cannot be juggled).
+    public bool ApplyThrowTick(int damage)
+    {
+        if (damage <= 0 || State != PlayerState.Grabbed) return true;
+        Hp = Math.Max(0, Hp - damage);
+        if (Hp > 0) return true;
+        State = PlayerState.Dead;
+        StopAnim();
+        return false;
+    }
+
     // victim: the grab broke before the release frame (the attacker got hit / died). No damage —
     // just set the victim back down on its feet.
     public void DropFromGrab()
@@ -733,10 +947,13 @@ public sealed class SimPlayer
     }
 
     // pushDir: +1 shove toward +x (away from attacker), -1 toward -x. Returns Hit/Blocked/None.
-    public HitResult ApplyDamage(MoveDef move, int pushDir)
+    // damageOverride: the connecting active-interval's damage (data-driven moves); -1 = move.Damage.
+    public HitResult ApplyDamage(MoveDef move, int pushDir, int damageOverride = -1)
     {
         if (State == PlayerState.Dead) return HitResult.None;
         if (IsInvincible) return HitResult.None;
+
+        int rawDamage = damageOverride >= 0 ? damageOverride : move.Damage;
 
         bool airborne = IsAirborne || State == PlayerState.Juggle || State == PlayerState.AirHurt;
 
@@ -751,7 +968,7 @@ public sealed class SimPlayer
         };
         if (move.Unblockable) blocked = false;
 
-        int finalDamage = blocked ? Math.Max(1, SimMath.RoundToInt(move.Damage * _cfg.DefDamageMultiplier)) : move.Damage;
+        int finalDamage = blocked ? Math.Max(1, SimMath.RoundToInt(rawDamage * _cfg.DefDamageMultiplier)) : rawDamage;
         Hp = Math.Max(0, Hp - finalDamage);
         if (Hp == 0)
         {
@@ -828,7 +1045,7 @@ public sealed class SimPlayer
     //  * CurrentAtkAnim is stored as the INDEX of the move it came from, not rederived from
     //    _curMove: the view still needs it after the move ends (the attack-tail rule), and _curMove
     //    is null by then. The reflection-based parity test caught this.
-    //  * _pendingProjectile / _pendingPopup are set in TickAdvanceTimers and consumed by
+    //  * _projPendingMask / _pendingPopup are set in TickAdvanceTimers and consumed by
     //    ProcessSpecials within the SAME Step, so they never actually straddle a frame boundary.
     //    They are still written, with their payloads rederived from _curMove, rather than relying on
     //    that ordering staying true.
@@ -854,13 +1071,10 @@ public sealed class SimPlayer
         w.Int(_crouchFrame);
         w.Int(_downFrame);
         w.Int(_wakeFrame);
-        w.Bool(_atkHitConsumed);
 
         w.Int(_moves.IndexOf(_curMove));
         w.Int(_moves.IndexOf(_atkAnimMove));
         w.Bool(_airMove);
-        w.Bool(_projectileSpawned);
-        w.Bool(_pendingProjectile);
         w.Bool(_pendingPopup);
 
         _buffer.SaveTo(ref w);
@@ -869,6 +1083,13 @@ public sealed class SimPlayer
         w.Int(_curCancelFrom); w.Int(_curCancelTo);
         w.Rect(_curHitbox);
         w.Int((int)_curGuard);
+
+        // normalized window state (consumption) + projectile spawn masks
+        w.Int(_windowConsumedMask);
+        w.Int(_curStartupFrom); w.Int(_curStartupTo);
+        w.Int(_curRecoveryFrom); w.Int(_curRecoveryTo);
+        w.Int(_projFiredMask);
+        w.Int(_projPendingMask);
 
         w.Fixed(_vy);
         w.Fixed(_jumpHVel);
@@ -882,7 +1103,6 @@ public sealed class SimPlayer
         w.Bool(_grabbing);
         w.Bool(_throwWhiffApplied);
         w.ShortString(_grabbedAnim);
-        w.Int(_throwImmune);
     }
 
     public void LoadFrom(ref SimStateReader r)
@@ -901,17 +1121,13 @@ public sealed class SimPlayer
         _crouchFrame = r.Int();
         _downFrame = r.Int();
         _wakeFrame = r.Int();
-        _atkHitConsumed = r.Bool();
 
         _curMove = _moves.ByIndex(r.Int());
         _atkAnimMove = _moves.ByIndex(r.Int());
         _airMove = r.Bool();
-        _projectileSpawned = r.Bool();
-        _pendingProjectile = r.Bool();
         _pendingPopup = r.Bool();
 
         // rederived rather than stored — see the note on SaveTo
-        _pendingSpec = _pendingProjectile && _curMove != null ? _curMove.Projectile : default;
         _pendingPopupText = _pendingPopup && _curMove != null ? _curMove.CommandLabel : "";
 
         _buffer.LoadFrom(ref r);
@@ -920,6 +1136,16 @@ public sealed class SimPlayer
         _curCancelFrom = r.Int(); _curCancelTo = r.Int();
         _curHitbox = r.Rect();
         _curGuard = (GuardHeight)r.Int();
+
+        _windowConsumedMask = r.Int();
+        _curStartupFrom = r.Int(); _curStartupTo = r.Int();
+        _curRecoveryFrom = r.Int(); _curRecoveryTo = r.Int();
+        _projFiredMask = r.Int();
+        _projPendingMask = r.Int();
+
+        // the window list + spawn list are immutable per-move config: rebuild them the way
+        // StartMove does rather than serializing them again
+        RestoreNormalizedWindows();
 
         _vy = r.Fixed();
         _jumpHVel = r.Fixed();
@@ -933,11 +1159,47 @@ public sealed class SimPlayer
         _grabbing = r.Bool();
         _throwWhiffApplied = r.Bool();
         _grabbedAnim = r.ShortString();
-        _throwImmune = r.Int();
 
         // A load replaces the frame's presentation intent entirely: anything queued before the
         // rewind describes a frame that no longer happened.
         AnimEvents.Clear();
+    }
+
+    // Rebuild _curWindows/_curProjSpawns for the loaded _curMove (identical to StartMove's
+    // normalization, minus the per-move runtime resets).
+    private void RestoreNormalizedWindows()
+    {
+        var m = _curMove;
+        if (m == null)
+        {
+            _curWindows = System.Array.Empty<ActiveSpec>();
+            _curProjSpawns = System.Array.Empty<ProjectileSpawnSpec>();
+            return;
+        }
+        if (m.ActiveWindows != null && m.ActiveWindows.Length > 0)
+            _curWindows = m.ActiveWindows;
+        else
+        {
+            _curWindows = new[] { new ActiveSpec
+            {
+                From = m.Startup,
+                To = m.Startup + m.Active - 1,
+                Hitboxes = new[] { m.Hitbox },
+                Damage = m.Damage,
+            } };
+        }
+        if (m.ProjectileSpawns != null && m.ProjectileSpawns.Length > 0)
+            _curProjSpawns = m.ProjectileSpawns;
+        else if (m.SpawnsProjectile)
+        {
+            _curProjSpawns = new[] { new ProjectileSpawnSpec
+            {
+                SpawnFrame = m.ProjectileSpawnFrame,
+                Spec = m.Projectile,
+            } };
+        }
+        else
+            _curProjSpawns = System.Array.Empty<ProjectileSpawnSpec>();
     }
 
     public void ResetForNewRound()
@@ -953,7 +1215,6 @@ public sealed class SimPlayer
         _crouchFrame = 0;
         _downFrame = 0;
         _wakeFrame = 0;
-        _atkHitConsumed = false;
         _vy = 0f;
         _jumpHVel = 0f;
         _juggleHitCount = 0;
@@ -962,14 +1223,16 @@ public sealed class SimPlayer
         _curMove = null;
         _atkAnimMove = null;
         _airMove = false;
-        _projectileSpawned = false;
-        _pendingProjectile = false;
         _pendingPopup = false;
         _grabbing = false;
         _throwWhiffApplied = false;
         _grabbedAnim = null;
-        _throwImmune = 0;
         _pendingPushX = 0f;
+        _curWindows = System.Array.Empty<ActiveSpec>();
+        _windowConsumedMask = 0;
+        _curProjSpawns = System.Array.Empty<ProjectileSpawnSpec>();
+        _projFiredMask = 0;
+        _projPendingMask = 0;
         _buffer.Clear();
         InLeft = InRight = InUpHeld = InDownHeld = false;
         DesiredDeltaX = 0;

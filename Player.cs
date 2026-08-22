@@ -27,6 +27,12 @@ public partial class Player : Node2D
     // The logic object this view mirrors; created + bound by GameManager after the sim exists.
     public SimPlayer Sim;
 
+    // Data-driven render mode: set when this character has a Heroes/ folder. The frames+layers
+    // data replaces the AnimatedSprite2D clip entirely (see WriteSpriteFrame / _Draw); the sim
+    // side gets the compiled table through BuildConfig's MoveSetOverride.
+    public HeroLibrary.LoadedHero HeroRender;
+    private readonly System.Collections.Generic.Dictionary<string, ClipTimeline> _heroClips = new();
+
     [Export] public string IdleAnimName = "IDLE";
     [Export] public string WalkAnimName = "WALK";
     // when on, walking backward (away from the opponent) plays WALK in reverse; off = always forward.
@@ -94,7 +100,20 @@ public partial class Player : Node2D
 
     // Build the sim config from the exported tuning. GameManager overrides StartPos/facing
     // with its own P1/P2 start values to match the original reset convention.
-    public PlayerConfig BuildConfig() => new PlayerConfig
+    public PlayerConfig BuildConfig()
+    {
+        // data-driven path: the Heroes/ folder owns physics, hurtboxes, anim names and the
+        // compiled move table; the scene exports only carry what the folder does not replace
+        var hero = HeroLibrary.Instance?.Hero(Character);
+        if (hero != null)
+        {
+            var cfg = HeroCompiler.BuildConfig(hero.Def, Position.X, Position.Y, StartFacingRight);
+            cfg.Character = Character;
+            cfg.MoveSetOverride = hero.Compiled;
+            return cfg;
+        }
+
+        return new PlayerConfig
     {
         Character = Character,
         StartPos = Position.ToSim(),
@@ -134,14 +153,17 @@ public partial class Player : Node2D
         FallAnimName = FallAnimName,
         KnockdownAnimName = KnockdownAnimName,
         WakeupAnimName = WakeupAnimName,
-        AirHurtAnimName = AirHurtAnimName,
-    };
+            AirHurtAnimName = AirHurtAnimName,
+        };
+    }
 
     public void Bind(SimPlayer sim)
     {
         Sim = sim;
+        HeroRender = HeroLibrary.Instance?.Hero(Character);
         // Godot must never advance the clip itself — TickAnimation writes the frame explicitly.
         anim?.Stop();
+        if (HeroRender != null && anim != null) anim.Visible = false;
         SyncFromSim();   // initial position + the ctor's IDLE command
         TickAnimation(); // show frame 0 immediately rather than a blank first tick
     }
@@ -240,7 +262,22 @@ public partial class Player : Node2D
         if (string.IsNullOrEmpty(clip)) return null;
         if (_timelines.TryGetValue(clip, out var cached)) return cached;
 
-        ClipTimeline built = null;
+        // hero mode: actions ARE the clips — one authored frame per logic frame
+        if (HeroRender != null)
+        {
+            if (HeroRender.Actions.TryGetValue(clip, out var action) && action.Frames.Count > 0)
+            {
+                var map = new int[action.Frames.Count];
+                for (int i = 0; i < map.Length; i++) map[i] = i;
+                var built = new ClipTimeline { FrameAt = map, Loop = action.Loop };
+                _timelines[clip] = built;
+                return built;
+            }
+            _timelines[clip] = null;
+            return null;
+        }
+
+        ClipTimeline built2 = null;
         var sf = anim?.SpriteFrames;
         if (sf != null && sf.HasAnimation(clip))
         {
@@ -257,11 +294,11 @@ public partial class Player : Node2D
                     int hold = Mathf.Max(1, Mathf.RoundToInt((float)logicFrames));
                     for (int k = 0; k < hold; k++) map.Add(i);
                 }
-                built = new ClipTimeline { FrameAt = map.ToArray(), Loop = sf.GetAnimationLoop(clip) };
+                built2 = new ClipTimeline { FrameAt = map.ToArray(), Loop = sf.GetAnimationLoop(clip) };
             }
         }
-        _timelines[clip] = built; // cache misses too: a missing clip must not re-probe every frame
-        return built;
+        _timelines[clip] = built2; // cache misses too: a missing clip must not re-probe every frame
+        return built2;
     }
 
     private static float LogicFps => Engine.PhysicsTicksPerSecond;
@@ -348,9 +385,22 @@ public partial class Player : Node2D
         else if (i >= t.LogicLength) i = t.LogicLength - 1;   // one-shot: hold the last frame
 
         int sprite = _clipReverse ? t.FrameAt[t.LogicLength - 1 - i] : t.FrameAt[i];
+
+        if (HeroRender != null)
+        {
+            // frame-layers mode: remember the frame index and paint it in _Draw
+            _heroFrameIndex = sprite;
+            QueueRedraw();
+            return;
+        }
         if (anim.Animation != _clip) anim.Animation = _clip;
         anim.SetFrameAndProgress(sprite, 0f);
     }
+
+    private int _heroFrameIndex;
+
+    private HeroActionDef GetHeroAction(string clip) =>
+        clip != null && HeroRender.Actions.TryGetValue(clip, out var a) ? a : null;
 
     // Clips the sim does NOT emit an event for, because they are steady-state rather than a
     // transition: looping locomotion, the settle after a transition clip, and the juggle rise/fall
@@ -406,12 +456,33 @@ public partial class Player : Node2D
     public override void _Process(double delta)
     {
         if (Sim == null) return;
-        if (DebugDrawBoxes) QueueRedraw();
+        if (DebugDrawBoxes || HeroRender != null) QueueRedraw();
     }
 
     public override void _Draw()
     {
-        if (!DebugDrawBoxes || Sim == null) return;
+        if (Sim == null) return;
+
+        // ---- frame layers (data-driven characters) ----
+        if (HeroRender != null)
+        {
+            // local space is authored facing LEFT; mirror the whole space when facing right,
+            // which is the same convention the sim's ToWorld uses for its rects
+            if (Sim.FacingRight)
+            {
+                DrawSetTransformMatrix(new Transform2D(-1f, 0f, 0f, 1f, 0f, 0f));
+                HeroLibrary.DrawFrame(this, HeroRender, GetHeroAction(_clip),
+                    _heroFrameIndex, Colors.White);
+                DrawSetTransformMatrix(Transform2D.Identity);
+            }
+            else
+            {
+                HeroLibrary.DrawFrame(this, HeroRender, GetHeroAction(_clip),
+                    _heroFrameIndex, Colors.White);
+            }
+        }
+
+        if (!DebugDrawBoxes) return;
 
         // hurt regions (local space; flip X by facing to match the sim's ToWorld)
         DrawHurtRegion(HurtRegion.Head, new Color(0.2f, 1f, 0.4f));

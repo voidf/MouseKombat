@@ -9,6 +9,11 @@ public sealed class PlayerConfig
     public Vec2 StartPos;             // world spawn position (== node position; identity parent)
     public bool StartFacingRight = true;
 
+    // Data-driven override: the compiled MoveSet from this character's Heroes/ folder. When
+    // null the character runs its code table (MoveSets.ForCharacter), which is what headless
+    // tests and the RL bridge do.
+    public MoveSet MoveSetOverride = null;
+
     public int MaxHp = 100;
     public Fix WalkSpeedPxPerSec = 220f;
     public Fix DefDamageMultiplier = 0.1f;

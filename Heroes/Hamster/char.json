@@ -1,0 +1,90 @@
+{
+  "formatVersion": 1,
+  "name": "Hamster",
+  "displayName": "\u4ED3\u9F20",
+  "physics": {
+    "maxHp": 10000,
+    "walkSpeed": 220,
+    "defDamageMultiplier": 0.1,
+    "cornerPushbackScale": 1,
+    "hurtStunFrames": 14,
+    "defHitStunFrames": 10,
+    "crouchEnterFrames": 3,
+    "downedFrames": 30,
+    "downedMinFrames": 12,
+    "wakeupFrames": 24,
+    "airResetPop": 350,
+    "jumpVelocity": 1350,
+    "gravity": 3600,
+    "forwardJumpSpeed": 420,
+    "backJumpSpeed": 380,
+    "standBoxes": {
+      "head": {
+        "cx": -40,
+        "cy": -172,
+        "hw": 40,
+        "hh": 27
+      },
+      "body": {
+        "cx": 0,
+        "cy": -102,
+        "hw": 55,
+        "hh": 47
+      },
+      "arms": {
+        "cx": 0,
+        "cy": -135,
+        "hw": 65,
+        "hh": 30
+      },
+      "legs": {
+        "cx": 0,
+        "cy": -35,
+        "hw": 45,
+        "hh": 35
+      }
+    },
+    "crouchBoxes": {
+      "head": {
+        "cx": -40,
+        "cy": -172,
+        "hw": 40,
+        "hh": 27
+      },
+      "body": {
+        "cx": 0,
+        "cy": -102,
+        "hw": 55,
+        "hh": 47
+      },
+      "arms": {
+        "cx": 0,
+        "cy": -135,
+        "hw": 65,
+        "hh": 30
+      },
+      "legs": {
+        "cx": 0,
+        "cy": -35,
+        "hw": 45,
+        "hh": 35
+      }
+    }
+  },
+  "animNames": {
+    "idle": "IDLE",
+    "walk": "WALK",
+    "hurt": "HURT",
+    "def": "DEF",
+    "crouchDef": "CROUCHDEF",
+    "jump": "JUMP",
+    "enterCrouch": "ENTER_CROUCH",
+    "crouchIdle": "CROUCH",
+    "launchRise": "LAUNCH",
+    "fall": "FALL",
+    "knockdown": "KNOCKDOWN",
+    "wakeup": "WAKEUP",
+    "airHurt": "AIR_HURT"
+  },
+  "actions": null
+}

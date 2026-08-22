@@ -1,0 +1,670 @@
+{
+  "name": "5MP",
+  "loop": false,
+  "frames": [
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/AtkI_000.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/AtkI_000.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/AtkI_000.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/AtkI_000.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/AtkI_000.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/AtkI_001.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/AtkI_001.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/AtkI_001.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/AtkI_002.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/AtkI_002.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/AtkI_002.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/AtkI_002.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/AtkI_003.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/AtkI_003.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/AtkI_003.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/AtkI_003.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/AtkI_003.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/AtkI_003.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/AtkI_003.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/AtkI_003.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/AtkI_003.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/AtkI_003.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/AtkI_003.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/AtkI_003.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/AtkI_003.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/AtkI_003.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    },
+    {
+      "root": {
+        "x": 0,
+        "y": 0
+      },
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": 0,
+            "y": -167
+          },
+          "img": "images/AtkI_003.png"
+        }
+      ],
+      "fx": {
+        "particles": [],
+        "sounds": []
+      },
+      "hurtboxes": [],
+      "hurtDamage": 0
+    }
+  ],
+  "isAttack": true,
+  "attack": {
+    "startupRange": [
+      0,
+      7
+    ],
+    "recoveryRange": [
+      12,
+      26
+    ],
+    "guard": "High",
+    "oh": 20,
+    "ob": 15,
+    "knockback": 12,
+    "knockbackOnBlock": 0,
+    "launches": false,
+    "launchUp": 1250,
+    "launchBack": 120,
+    "canAirJuggle": true,
+    "immuneOnStartup": false,
+    "motion": "",
+    "commandLabel": "",
+    "buttons": [
+      "MP"
+    ],
+    "anyPunch": false,
+    "anyKick": false,
+    "stance": "Stand",
+    "unblockable": false,
+    "startupCancelInto": [],
+    "recoveryCancelInto": [
+      "5HP",
+      "5MK",
+      "5HK"
+    ],
+    "actives": [
+      {
+        "activeRange": [
+          8,
+          11
+        ],
+        "shouldWhiffIfNotHit": false,
+        "whiffAction": "",
+        "isGrab": false,
+        "throwAction": "",
+        "damage": 600,
+        "hitboxes": [
+          {
+            "cx": 85,
+            "cy": -125,
+            "hw": 35,
+            "hh": 25
+          }
+        ]
+      }
+    ],
+    "projectiles": []
+  },
+  "isThrow": false,
+  "throw": {
+    "canGrabAirborne": false,
+    "releaseVel": {
+      "x": 0,
+      "y": 0
+    },
+    "releaseToJuggle": false,
+    "hurtTimeline": [],
+    "victimBind": []
+  },
+  "canActNextActionAt": -1
+}

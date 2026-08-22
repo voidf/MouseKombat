@@ -351,3 +351,20 @@ itself, never relayed). TCP is not byte-relayed — the server implements the ro
 MessagePack's default resolver generates code at runtime, which is fine under JIT — every desktop
 Godot export uses it. An iOS export is AOT and would need the source-generated resolver instead.
 That is a resolver registration change; **the wire format is unaffected.**
+
+## Asset hash (v0.1.0)
+
+Every build computes an md5 over `Heroes/` + `FireballTSCN/` + `ParticleTSCN/`
+(`HeroLibrary`, sorted relative paths + file bytes). The FULL hash rides the wire;
+UIs show the first 6 hex digits.
+
+* `Hello.AssetId` (key 5) — announced by every client. The LAN host and the lobby
+  server both learn the peer's hash here.
+* `LobbyCreate.AssetHash` (key 3) — stamps the room with the host player's hash.
+* `LobbyRoomEntry.AssetHash` (key 5) — the room list shows `[first 6]` next to each room.
+* A join with a mismatched hash is refused before touching the room. `Rejected`
+  (keys 3/4) carries `HostAssetHash` + `YourAssetHash` so the popup can show both
+  sides. Empty-string hashes (tests, headless) never gate.
+
+Rationale: two machines with different frame data would desync on the first active
+frame; refusing at the door says the true thing instead.

@@ -233,7 +233,8 @@ public partial class LobbyMenuScreen : Control
             var b = new Button
             {
                 Text = $"{e.HostName}  ·  #{e.RoomId}  ·  {(e.HasPassword ? "有密码" : "无密码")}"
-                       + $"  ·  {e.Players}/{e.MaxPlayers} 人",
+                       + $"  ·  {e.Players}/{e.MaxPlayers} 人"
+                       + (e.AssetHash != null && e.AssetHash.Length >= 6 ? $"  ·  [{e.AssetHash[..6]}]" : ""),
                 Alignment = HorizontalAlignment.Left,
                 SizeFlagsHorizontal = SizeFlags.ExpandFill,
             };

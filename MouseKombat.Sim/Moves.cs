@@ -21,6 +21,48 @@ public struct ProjectileSpec
     public Fix Knockback;      // horizontal knockback on hit (px)
     public int oH;             // stun frames on hit (0 → use config default)
     public int oB;             // stun frames on block (0 → use config default)
+    public int LifeTimeFrame;  // 0 = unlimited
+    public string PrefabId;    // FireballTSCN/<id>.tscn — the view resolves the scene from this
+}
+
+// One fireball of a multi-projectile move: which frame it leaves on, and its spec.
+public sealed class ProjectileSpawnSpec
+{
+    public int SpawnFrame;
+    public ProjectileSpec Spec;
+}
+
+// One strike window of a move. A move may have ANY number of these (the legacy single
+// Startup/Active/Recovery triple is compiled into exactly one). Frames are absolute within
+// the move, inclusive on both ends.
+//
+// Consumption rule: the first connection consumes the WHOLE interval — its remaining boxes
+// stop checking for the rest of the move — but other intervals keep their own chance.
+public sealed class ActiveSpec
+{
+    public int From, To;
+    public SimRect[] Hitboxes = System.Array.Empty<SimRect>();
+    public int Damage;                 // melee damage dealt by this interval
+    public bool ShouldWhiffIfNotHit;   // interval ended without connecting -> whiff
+    public string WhiffActionId = "";  // ... and jump here instead of playing the rest out
+    public bool IsGrab;                // boxes are grab judgement, not strike
+    public string ThrowActionId = "";  // grab connected -> start this action (IsThrowFollowup)
+}
+
+// Data of a throw-FOLLOWUP action (MoveDef.IsThrowFollowup): what happens to the victim while
+// the attacker plays this action out. Replaces the legacy ThrowSpec for data-driven heroes.
+public sealed class ThrowFollowupSpec
+{
+    public bool CanGrabAirborne = false;  // checked at grab time (the grab move resolves this)
+    public int ReleaseFrame;              // attacker frame the victim is let go on
+    public Vec2 ReleaseVel;               // X = FORWARD-relative px/s, Y NEGATIVE = up
+    public bool ReleaseToJuggle = false;  // false => further air hits air-reset instead of juggling
+
+    // multi-hit throws: damage ticks at absolute frames of this action (sorted ascending)
+    public int[] HurtFrames = System.Array.Empty<int>();
+    public int[] HurtDamages = System.Array.Empty<int>();
+
+    public BindKey[] Bind = System.Array.Empty<BindKey>();
 }
 
 // One entry of a move's optional per-frame hurtbox timeline.
@@ -61,6 +103,7 @@ public struct BindKey
     public string VictimAnim;   // generic pose clip on the victim (e.g. HURT / LAUNCH / FALL)
     public Vec2 Offset;         // victim anchor relative to the attacker's anchor (both = feet)
     public bool VictimSameDir;  // false = victim faces the attacker (default); true = same way (back throws)
+    public bool ResetAnim;      // true = re-play the clip even when VictimAnim is unchanged this key
 }
 
 // Throw data hung off a MoveDef. Non-null => the move grabs instead of striking: it never calls
@@ -136,6 +179,7 @@ public sealed class MoveDef
     // AnyPunch = any of LP/MP/HP triggers it (the classic "236+P").
     public MotionInput Motion = MotionInput.None;
     public bool AnyPunch = false;
+    public bool AnyKick = false;   // AnyPunch's kick twin (e.g. "236+K"); mutually exclusive in practice
     public string CommandLabel = ""; // shown in the training-room style success popup, e.g. "↓↘→+P"
 
     // Projectile: spawn one at ProjectileSpawnFrame during this move (no melee hitbox needed).
@@ -157,6 +201,55 @@ public sealed class MoveDef
     public int CancelTo = -1;
 
     public int TotalFrames => Startup + Active + Recovery;
+
+    // ================= Heroes data-driven extensions =================
+    // Populated by HeroCompiler (and usable by hand-authored tables). Everything is
+    // optional: null/empty/-1 keeps the legacy single-window behavior, which is what the
+    // built-in code tables and the test fixtures exercise.
+
+    // false = this entry is a BANK action (idle/walk/hurt/throw-followup/...): present in the
+    // ordered list and by-Id lookup, but never resolved from an input command.
+    public bool IsCommandMove = true;
+
+    // presentation: cycle the clip instead of holding the last frame (view-side concern)
+    public bool LoopAnim = false;
+
+    // exact action length in frames when it is not Startup+Active+Recovery (it still must equal
+    // S+A+R after compile; this documents the authored length and guards drift) — reserved.
+    public int TotalFramesOverride = -1;
+
+    // from this frame on, the fighter may act as if idle (the clip tail keeps playing in view)
+    public int CanActNextActionAt = -1;
+
+    // split cancel rules (replaces CancelInto for data-driven tables):
+    //   StartupCancelInto  — may cancel into these while IsInStartup
+    //   RecoveryCancelInto — may cancel into these while IsInRecovery
+    // null = none configured.
+    public string[] StartupCancelInto = null;
+    public string[] RecoveryCancelInto = null;
+
+    // invincible while in startup (callout-beating armor style property)
+    public bool ImmuneOnStartup = false;
+
+    // authored phase ranges (inclusive), replacing the derived ones when set. Legacy tables
+    // leave these at (-1,-1) and derive from the triple.
+    public (int From, int To) StartupRange = (-1, -1);
+    public (int From, int To) RecoveryRange = (-1, -1);
+
+    // multi strike/grab windows. null => synthesize one from Startup/Active/Recovery+Hitbox.
+    public ActiveSpec[] ActiveWindows = null;
+
+    // per-frame defensive boxes, indexed by atk frame; a null entry = the base config boxes.
+    public SimRect[][] FrameHurtboxes = null;
+
+    // multi fireball spawns. null => legacy single (SpawnsProjectile + ProjectileSpawnFrame +
+    // Projectile).
+    public ProjectileSpawnSpec[] ProjectileSpawns = null;
+
+    // this action is what a GRAB jumps to when it connects (IsThrow == true in the JSON):
+    // the attacker plays it out while the victim is bound by Followup.
+    public bool IsThrowFollowup = false;
+    public ThrowFollowupSpec Followup = null;
     public int ResolvedCancelFrom => CancelFrom >= 0 ? CancelFrom : Startup;
     public int ResolvedCancelTo => CancelTo >= 0 ? CancelTo : TotalFrames;
 }
@@ -189,6 +282,7 @@ public sealed class MoveSet
             _indexOf[m] = _ordered.Count;
             _ordered.Add(m);
             _byId[m.Id] = m;
+            if (!m.IsCommandMove) continue;   // bank actions (idle/walk/followups): Id-only
             if (m.ComboButtons != null) _combos.Add(m);
             else if (m.Motion != MotionInput.None) _specials.Add(m);
             else _byCommand[Key(m.Stance, m.Button)] = m;
@@ -197,6 +291,9 @@ public sealed class MoveSet
         // Qcf recognizer, so DP must be checked before a QCF fireball or it gets eaten.
         _specials.Sort((a, b) => MotionPriority(a.Motion).CompareTo(MotionPriority(b.Motion)));
     }
+
+    // the authoring order, for the migration tool + editor round-trips
+    public IReadOnlyList<MoveDef> OrderedMoves => _ordered;
 
     private static int MotionPriority(MotionInput m) => m == MotionInput.Dp ? 0 : 1;
 
@@ -214,7 +311,7 @@ public sealed class MoveSet
         bool isPunch = button == AttackButton.LP || button == AttackButton.MP || button == AttackButton.HP;
         foreach (var sp in _specials)
         {
-            bool btnOk = sp.AnyPunch ? isPunch : sp.Button == button;
+            bool btnOk = sp.AnyPunch ? isPunch : sp.AnyKick ? !isPunch : sp.Button == button;
             if (btnOk && buffer.HasMotion(sp.Motion, window)) return sp;
         }
         return null;

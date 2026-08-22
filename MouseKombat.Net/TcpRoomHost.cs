@@ -59,6 +59,10 @@ public sealed class TcpRoomHost : IDisposable
     // socket. Its id is what AddAi checks against.
     public int HostPlayerId { get; private set; }
 
+    // This host's Heroes/ content hash; a joining Hello carrying a different one is refused
+    // before it can reach the room (two different frame-data sets would desync immediately).
+    public string AssetHash { get; private set; } = "";
+
     public bool TryDequeueEvent(out HostEvent e)
     {
         if (_events.Count == 0) { e = default; return false; }
@@ -68,9 +72,11 @@ public sealed class TcpRoomHost : IDisposable
 
     // bindAddress "" or "0.0.0.0" listens on every interface. An IPv6 dual-mode socket is used for
     // that case so a client reaching us over either stack works without a second listener.
-    public void Start(string bindAddress, int port, string hostName, string gameVersion)
+    public void Start(string bindAddress, int port, string hostName, string gameVersion,
+        string assetHash = "")
     {
         GameVersion = gameVersion ?? "";
+        AssetHash = assetHash ?? "";
         var host = Room.AddPlayer(hostName, isHost: true);
         HostPlayerId = host.PlayerId;
 
@@ -228,6 +234,19 @@ public sealed class TcpRoomHost : IDisposable
         if (h.Protocol != NetVersion.Protocol || h.GameVersion != GameVersion)
         {
             Reject(c, h.Protocol != NetVersion.Protocol ? "协议版本不一致" : "游戏版本不一致");
+            return;
+        }
+        if (AssetHash.Length > 0 && h.AssetHash != AssetHash)
+        {
+            Send(c, MsgType.Rejected, new Rejected
+            {
+                Reason = "资源版本不一致，无法进房",
+                HostProtocol = NetVersion.Protocol,
+                HostGameVersion = GameVersion,
+                HostAssetHash = AssetHash,
+                YourAssetHash = h.AssetHash ?? "",
+            });
+            Close(c, "asset hash mismatch");
             return;
         }
 

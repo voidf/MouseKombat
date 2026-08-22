@@ -144,6 +144,10 @@ public partial class NetSession : Node
     public static string GameVersion =>
         (string)ProjectSettings.GetSetting("application/config/version", "");
 
+    // md5 over Heroes/ + FireballTSCN/ + ParticleTSCN/ (HeroLibrary). Empty when the library
+    // has not scanned — tests and headless runs — which turns every gate into a no-op.
+    public static string AssetHash => HeroLibrary.Instance?.AssetHash ?? "";
+
     public override void _Ready()
     {
         Instance = this;
@@ -161,7 +165,7 @@ public partial class NetSession : Node
         try
         {
             Host = new TcpRoomHost();
-            Host.Start(bindAddress, port, PlayerName, GameVersion);
+            Host.Start(bindAddress, port, PlayerName, GameVersion, AssetHash);
             Port = Host.Port;
             Room = Host.Room.Snapshot();
             RoomChanged?.Invoke();
@@ -197,7 +201,7 @@ public partial class NetSession : Node
             return;
         }
         Client.MatchUdpPort = MatchSocket.Port;
-        Client.Connect(host, port, PlayerName, GameVersion, password);
+        Client.Connect(host, port, PlayerName, GameVersion, password, AssetHash);
     }
 
     // Connects to the lobby server for BROWSING. The lobby menu then pages through the room list
@@ -218,7 +222,7 @@ public partial class NetSession : Node
             return;
         }
         Lobby = new LobbyRoomClient { MatchUdpPort = MatchSocket.Port };
-        Lobby.Connect(host, port, PlayerName, GameVersion);
+        Lobby.Connect(host, port, PlayerName, GameVersion, AssetHash);
     }
 
     // ---- lobby browse phase (the lobby menu) ----

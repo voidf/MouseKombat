@@ -68,10 +68,14 @@ public sealed class Hello
     // Set when joining a lobby room that has a password. Empty for LAN.
     [Key(3)] public string RoomPassword { get; set; } = "";
     // UDP port this client has ALREADY BOUND for match traffic. The host pairs it with the source
-    // address of this TCP connection to get a full endpoint, which is how it can put the client into a
-    // rollback session (or a relay) without any discovery step. Announced rather than negotiated, and
+    // address of this TCP connection to get a full endpoint, which is how it can put the client into
+    // a rollback session (or a relay) without any discovery step. Announced rather than negotiated, and
     // bound before it is announced, so the number cannot be stolen in between.
     [Key(4)] public int MatchUdpPort { get; set; }
+    // md5 of this machine's Heroes/ + FireballTSCN/ + ParticleTSCN/ content (HeroLibrary). The
+    // host/room compares it and refuses a mismatch — two machines with different frame data
+    // would desync on frame 1. "" = built without a HeroLibrary (tests).
+    [Key(5)] public string AssetHash { get; set; } = "";
 }
 
 [MessagePackObject]
@@ -89,6 +93,10 @@ public sealed class Rejected
     // Filled in on a version mismatch so the client can show BOTH numbers instead of a vague message.
     [Key(1)] public int HostProtocol { get; set; }
     [Key(2)] public string HostGameVersion { get; set; } = "";
+    // Filled in on an ASSET-hash mismatch (different Heroes/ content): the room's hash and the
+    // joiner's own, so the popup can show both sides.
+    [Key(3)] public string HostAssetHash { get; set; } = "";
+    [Key(4)] public string YourAssetHash { get; set; } = "";
 }
 
 [MessagePackObject]
@@ -297,6 +305,7 @@ public sealed class LobbyRoomEntry
     [Key(2)] public bool HasPassword { get; set; }
     [Key(3)] public int Players { get; set; }   // humans; AI seats never count
     [Key(4)] public int MaxPlayers { get; set; }
+    [Key(5)] public string AssetHash { get; set; } = "";   // shown as the first 6 hex digits
 }
 
 [MessagePackObject]
@@ -313,6 +322,8 @@ public sealed class LobbyCreate
     [Key(0)] public int MaxPlayers { get; set; } = 4;   // 2..4 (spec: 房间人数限制 2~4)
     [Key(1)] public string Password { get; set; } = ""; // "" or exactly 4 digits
     [Key(2)] public bool Searchable { get; set; } = true;
+    [Key(3)] public string AssetHash { get; set; } = ""; // stamps the room; joins with a
+                                                          // different hash are refused
 }
 
 [MessagePackObject]

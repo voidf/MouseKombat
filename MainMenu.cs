@@ -13,6 +13,7 @@ public partial class MainMenu : Control
     [Export] public string LanScenePath = "res://LanMenu.tscn";
     [Export] public string LobbyScenePath = "res://LobbyMenu.tscn";
     [Export] public string ReplayScenePath = "res://ReplayList.tscn";
+    [Export] public string EditorScenePath = "res://MKEditor.tscn";
 
     [Export] public Label StatusLabel;   // transient "not built yet" line under the buttons
 
@@ -40,7 +41,17 @@ public partial class MainMenu : Control
         Wire("LanButton", () => Go(LanScenePath, "局域网联机"));
         Wire("LocalButton", () => Go(ReadyScenePath, "本地游戏"));
         Wire("ReplayButton", () => Go(ReplayScenePath, "回放"));
+        Wire("EditorButton", () => Go(EditorScenePath, "招式编辑器"));
         Wire("SettingsButton", () => _settings.Open());
+
+        // version + Heroes/ content hash (first 6 of the md5) — the identity the lobby gates on
+        var version = FindChild("VersionLabel", recursive: true, owned: false) as Label;
+        if (version != null)
+        {
+            string v = (string)ProjectSettings.GetSetting("application/config/version", "");
+            string hash = HeroLibrary.Instance?.AssetHashShort ?? "";
+            version.Text = string.IsNullOrEmpty(hash) ? $"v{v}" : $"v{v} · 资源 {hash}";
+        }
 
         // keyboard/gamepad users land on the first mode rather than nothing
         GetNodeOrNull<Button>("Layout/Buttons/LobbyButton")?.GrabFocus();

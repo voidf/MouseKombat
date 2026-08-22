@@ -806,8 +806,9 @@ internal static partial class Program
         // ---- create: the connection becomes the host player ----
         using var host = new LobbyProbe("房主");
         host.Connect("127.0.0.1", port);
-        host.Send(MsgType.Hello, new Hello { Protocol = NetVersion.Protocol, GameVersion = ver, Name = "房主", MatchUdpPort = host.MatchUdpPort });
-        host.Send(MsgType.LobbyCreate, new LobbyCreate { MaxPlayers = 4, Password = "", Searchable = true });
+        string hostHash = new string('a', 32) + "deadbeef";   // stand-in Heroes/ md5
+        host.Send(MsgType.Hello, new Hello { Protocol = NetVersion.Protocol, GameVersion = ver, Name = "房主", MatchUdpPort = host.MatchUdpPort, AssetHash = hostHash });
+        host.Send(MsgType.LobbyCreate, new LobbyCreate { MaxPlayers = 4, Password = "", Searchable = true, AssetHash = hostHash });
         var w = host.Wait<Welcome>(MsgType.Welcome, ww => ww.IsHost);
         Check(w.Body != null, "lobby: create is answered with Welcome isHost=true");
         int hostId = w.As<Welcome>().PlayerId;
@@ -815,10 +816,34 @@ internal static partial class Program
         Check(roomId.Length == 6 && int.TryParse(roomId, out _), "lobby: room id is 6 digits");
         Check(w.As<Welcome>().Room.MaxPlayers == 4, "lobby: snapshot carries maxPlayers=4");
 
+        // ---- asset-hash gate: a different Heroes/ hash is refused with BOTH hashes ----
+        using (var stranger = new LobbyProbe("外乡人"))
+        {
+            stranger.Connect("127.0.0.1", port);
+            string badHash = new string('f', 32) + "123456";
+            stranger.Send(MsgType.Hello, new Hello { Protocol = NetVersion.Protocol, GameVersion = ver, Name = "外乡人", MatchUdpPort = stranger.MatchUdpPort, AssetHash = badHash });
+            stranger.Send(MsgType.LobbyJoin, new LobbyJoin { RoomId = roomId, Password = "" });
+            var rej = stranger.Wait<Rejected>(MsgType.Rejected);
+            var r = rej.As<Rejected>();
+            Check(r.Reason == "资源版本不一致，无法进房", "lobby: an asset-hash mismatch refuses the join");
+            Check(r.HostAssetHash == hostHash && r.YourAssetHash == badHash,
+                "lobby: the rejection carries both sides' hashes for the popup");
+        }
+        // the room list shows the room's hash (a browsing connection, not the in-room host)
+        using (var hashLister = new LobbyProbe("看房"))
+        {
+            hashLister.Connect("127.0.0.1", port);
+            hashLister.Send(MsgType.Hello, new Hello { Protocol = NetVersion.Protocol, GameVersion = ver, Name = "看房", MatchUdpPort = hashLister.MatchUdpPort, AssetHash = hostHash });
+            hashLister.Send(MsgType.LobbyList, new LobbyList { Page = 0 });
+            var listed = hashLister.Wait<LobbyRooms>(MsgType.LobbyRooms, f => f.Entries.Length > 0);
+            Check(listed.Body != null && listed.As<LobbyRooms>().Entries[0].AssetHash == hostHash,
+                "lobby: the room list entry carries the full asset hash");
+        }
+
         // ---- join + the host player's LobbyPlayerJoined hook ----
         using var mem = new LobbyProbe("玩家乙");
         mem.Connect("127.0.0.1", port);
-        mem.Send(MsgType.Hello, new Hello { Protocol = NetVersion.Protocol, GameVersion = ver, Name = "玩家乙", MatchUdpPort = mem.MatchUdpPort });
+        mem.Send(MsgType.Hello, new Hello { Protocol = NetVersion.Protocol, GameVersion = ver, Name = "玩家乙", MatchUdpPort = mem.MatchUdpPort, AssetHash = hostHash });
         mem.Send(MsgType.LobbyJoin, new LobbyJoin { RoomId = roomId, Password = "" });
         w = mem.Wait<Welcome>(MsgType.Welcome, ww => !ww.IsHost);
         Check(w.Body != null, "lobby: join is answered with Welcome isHost=false");
