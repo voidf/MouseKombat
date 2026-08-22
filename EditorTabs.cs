@@ -1,5 +1,6 @@
 using Godot;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using MouseKombat.Sim;
 
@@ -28,14 +29,16 @@ public sealed partial class EditorTabs : Control
     // runtime-only character order on the 角色 tab (drag reorder, never saved)
     private readonly List<string> _charOrder = new();
 
-    // ---- live refresh plumbing (frame switch / canvas drag <-> tab spinboxes) ----
+    // ---- live refresh plumbing (frame switch / canvas drag <-> tab editors) ----
     // The canvas drags and the timeline frame step mutate the model without going through this
-    // control; instead of rebuilding whole pages on every mouse motion (janky) the spinboxes
-    // that mirror model numbers register here and get SetValueNoSignal'd on demand.
-    private readonly List<(Range widget, System.Func<double> read)> _liveLayerNums = new();
-    private readonly List<(Range widget, System.Func<double> read)> _liveConstNums = new();
+    // control; instead of rebuilding whole pages on every mouse motion (janky) the numeric
+    // editors that mirror model numbers register here and get SetText'd on demand.
+    private readonly List<(LineEdit widget, System.Func<double> read)> _liveLayerNums = new();
+    private readonly List<(LineEdit widget, System.Func<double> read)> _liveConstNums = new();
+    private readonly List<(Range widget, System.Func<double> read)> _liveRangeNums = new();
     private string _syncChar, _syncAction = "";
     private int _syncFrame = -1;
+    private int _syncHurtCount = -1;            // fallback hurtboxes -> first edit materializes the list
     private int _syncSelKind = -1, _syncSelIndex = -1, _syncSelActive = -1;
     private bool _pendingRebuild;               // set while playing; rebuild on pause
 
@@ -93,16 +96,27 @@ public sealed partial class EditorTabs : Control
     }
 
     // Record what the tab pages were built for, so OnModelChanged can tell "frame moved /
-    // selection moved" (rebuild the affected page) from "numbers changed in place" (live-sync).
+    // selection moved / hurtbox list materialized" (rebuild) from "numbers changed in place"
+    // (live-sync).
     private void CaptureSyncState()
     {
         _syncChar = Project?.SelectedChar;
         _syncAction = Project?.SelectedAction ?? "";
         _syncFrame = Project != null ? Project.SelectedFrame : -1;
+        var frame = CurrentFrame();
+        _syncHurtCount = frame?.Hurtboxes.Count ?? -1;
         var s = Canvas?.Selected;
         _syncSelKind = s == null ? -1 : (int)s.Kind;
         _syncSelIndex = s?.Index ?? -1;
         _syncSelActive = s?.ActiveIndex ?? -1;
+    }
+
+    private HeroFrame CurrentFrame()
+    {
+        var ch = Project?.Current;
+        var action = ch?.Action(Project.SelectedAction);
+        return action != null && Project.SelectedFrame >= 0 && Project.SelectedFrame < action.Frames.Count
+            ? action.Frames[Project.SelectedFrame] : null;
     }
 
     // The screen calls this for every model mutation (canvas drag, timeline step, field edit).
@@ -116,6 +130,8 @@ public sealed partial class EditorTabs : Control
         bool frameMoved = _syncChar != Project.SelectedChar
                        || _syncAction != (Project.SelectedAction ?? "")
                        || _syncFrame != Project.SelectedFrame;
+        var frame = CurrentFrame();
+        bool hurtStruct = _syncHurtCount != (frame?.Hurtboxes.Count ?? -1);
         var s = Canvas?.Selected;
         bool selMoved = s == null ? _syncSelKind != -1
             : _syncSelKind != (int)s.Kind || _syncSelIndex != s.Index || _syncSelActive != s.ActiveIndex;
@@ -128,6 +144,13 @@ public sealed partial class EditorTabs : Control
             RebuildLayerPage();
             RebuildConstantsPage();
         }
+        else if (hurtStruct)
+        {
+            // dragging a BASE hurtbox materialized the per-frame override list: refresh the
+            // constants page so the new boxes and their editors appear immediately
+            CaptureSyncState();
+            RebuildConstantsPage();
+        }
         else if (selMoved)
         {
             CaptureSyncState();
@@ -138,8 +161,12 @@ public sealed partial class EditorTabs : Control
 
     private void SyncLiveNumbers()
     {
-        foreach (var (widget, read) in _liveLayerNums) widget.SetValueNoSignal(read());
-        foreach (var (widget, read) in _liveConstNums) widget.SetValueNoSignal(read());
+        foreach (var (widget, read) in _liveLayerNums)
+            if (GodotObject.IsInstanceValid(widget)) widget.Text = FmtFloat(read());
+        foreach (var (widget, read) in _liveConstNums)
+            if (GodotObject.IsInstanceValid(widget)) widget.Text = FmtFloat(read());
+        foreach (var (widget, read) in _liveRangeNums)
+            if (GodotObject.IsInstanceValid(widget)) widget.SetValueNoSignal(read());
     }
 
     // Route an OS file drop (Window.FilesDropped) to the zone under the mouse, if any.
@@ -159,6 +186,14 @@ public sealed partial class EditorTabs : Control
     {
         _dropZones.RemoveAll(z => !GodotObject.IsInstanceValid(z.C));
         _dropZones.Add(new FileDropZone { C = c, Ext = ext, OnFiles = onFiles });
+    }
+
+    // Drop zones are registered while a page builds; queued-free rows from the PREVIOUS build
+    // are still IsInstanceValid until end-of-frame and were stealing drops aimed at the new
+    // rows (they shared the same screen rect). Drop every zone inside a page before rebuilding.
+    private void ClearDropZonesUnder(Control page)
+    {
+        _dropZones.RemoveAll(z => !GodotObject.IsInstanceValid(z.C) || page.IsAncestorOf(z.C));
     }
 
     // =====================================================================
@@ -197,7 +232,11 @@ public sealed partial class EditorTabs : Control
                 box.AddChild(thumb);
             }
 
-            var side = new VBoxContainer { SizeFlagsVertical = SizeFlags.ShrinkBegin };
+            var side = new VBoxContainer
+            {
+                SizeFlagsVertical = SizeFlags.ShrinkBegin,
+                MouseFilter = MouseFilterEnum.Ignore,   // blank area of the text column -> card click
+            };
             var nameEdit = MakeNameEdit(ch.Folder);
             nameEdit.TextSubmitted += t => RenameChar(ch, t, nameEdit);
             side.AddChild(nameEdit);
@@ -206,6 +245,7 @@ public sealed partial class EditorTabs : Control
                 Text = $"{ch.Def.DisplayName} · {ch.Def.Actions.Count} 动作",
                 Modulate = new Color(1, 1, 1, 0.5f),
                 AutowrapMode = TextServer.AutowrapMode.WordSmart,
+                MouseFilter = MouseFilterEnum.Ignore,
             };
             side.AddChild(hint);
             box.AddChild(side);
@@ -456,6 +496,7 @@ public sealed partial class EditorTabs : Control
 
     private void RebuildLayerPage()
     {
+        ClearDropZonesUnder(_layerPage);
         ClearChildren(_layerPage);
         _liveLayerNums.Clear();
         var ch = Project.Current;
@@ -484,7 +525,11 @@ public sealed partial class EditorTabs : Control
             if (info != null) thumb.Texture = info.Page;
             box.AddChild(thumb);
 
-            var fields = new VBoxContainer { SizeFlagsVertical = SizeFlags.ShrinkBegin };
+            var fields = new VBoxContainer
+            {
+                SizeFlagsVertical = SizeFlags.ShrinkBegin,
+                MouseFilter = MouseFilterEnum.Ignore,   // blanks fall through; buttons/editors stay clickable
+            };
             var zRow = RowOf("Z", out var zEdit, "渲染顺序：Z 小的先画（在下层）。拖动到另一图层上=交换两者 Z。");
             zEdit.Value = l.Z;
             zEdit.ValueChanged += v =>
@@ -498,13 +543,16 @@ public sealed partial class EditorTabs : Control
             fields.AddChild(zRow);
 
             var xy = new HBoxContainer();
-            var xRow = RowOf("X", out var xEdit, "图层中心相对本帧根坐标的 X 偏移（可在主视图拖动图层修改）");
-            var yRow = RowOf("Y", out var yEdit, "图层中心相对本帧根坐标的 Y 偏移（上为负）");
-            xEdit.Value = l.Off?.X ?? 0;
-            yEdit.Value = l.Off?.Y ?? 0;
-            xEdit.Step = 1; yEdit.Step = 1;
-            xEdit.ValueChanged += v => { MarkEditing(); l.Off = new HeroVec((float)v, l.Off?.Y ?? 0); Changed?.Invoke(); };
-            yEdit.ValueChanged += v => { MarkEditing(); l.Off = new HeroVec(l.Off?.X ?? 0, (float)v); Changed?.Invoke(); };
+            var xRow = FloatRowOf("X", out var xEdit,
+                "图层中心相对本帧根坐标的 X 偏移（浮点，三位小数；可在主视图拖动图层修改）");
+            var yRow = FloatRowOf("Y", out var yEdit,
+                "图层中心相对本帧根坐标的 Y 偏移（浮点，三位小数；上为负）");
+            xEdit.Text = FmtFloat(l.Off?.X ?? 0);
+            yEdit.Text = FmtFloat(l.Off?.Y ?? 0);
+            xEdit.TextSubmitted += t => { MarkEditing(); if (TryParseFloat(t, out float v)) l.Off = new HeroVec(v, l.Off?.Y ?? 0); Changed?.Invoke(); };
+            yEdit.TextSubmitted += t => { MarkEditing(); if (TryParseFloat(t, out float v)) l.Off = new HeroVec(l.Off?.X ?? 0, v); Changed?.Invoke(); };
+            xEdit.FocusExited += () => { if (TryParseFloat(xEdit.Text, out float v)) { MarkEditing(); l.Off = new HeroVec(v, l.Off?.Y ?? 0); Changed?.Invoke(); } };
+            yEdit.FocusExited += () => { if (TryParseFloat(yEdit.Text, out float v)) { MarkEditing(); l.Off = new HeroVec(l.Off?.X ?? 0, v); Changed?.Invoke(); } };
             _liveLayerNums.Add((xEdit, () => l.Off?.X ?? 0));
             _liveLayerNums.Add((yEdit, () => l.Off?.Y ?? 0));
             xy.AddChild(xRow); xy.AddChild(yRow);
@@ -610,8 +658,10 @@ public sealed partial class EditorTabs : Control
 
     private void RebuildConstantsPage()
     {
+        ClearDropZonesUnder(_constPage);
         ClearChildren(_constPage);
         _liveConstNums.Clear();
+        _liveRangeNums.Clear();
         var ch = Project.Current;
         var action = ch?.Action(Project.SelectedAction);
         if (action == null)
@@ -640,10 +690,13 @@ public sealed partial class EditorTabs : Control
                     + "影响本帧所有图层与碰撞盒。运行时引擎按相邻两帧的差值移动角色（根位移）。",
             };
             rootBox.AddChild(new Label { Text = "根坐标 " });
-            var rx = new SpinBox { Value = frame.Root?.X ?? 0, Step = 1, SizeFlagsHorizontal = SizeFlags.ExpandFill };
-            var ry = new SpinBox { Value = frame.Root?.Y ?? 0, Step = 1, SizeFlagsHorizontal = SizeFlags.ExpandFill };
-            rx.ValueChanged += v => { MarkEditing(); frame.Root = new HeroVec((float)v, frame.Root?.Y ?? 0); Changed?.Invoke(); };
-            ry.ValueChanged += v => { MarkEditing(); frame.Root = new HeroVec(frame.Root?.X ?? 0, (float)v); Changed?.Invoke(); };
+            var rx = FloatEdit(frame.Root?.X ?? 0,
+                v => { MarkEditing(); frame.Root = new HeroVec(v, frame.Root?.Y ?? 0); Changed?.Invoke(); },
+                "本帧角色锚点相对原点的偏移（累计值，浮点，无范围限制）。按住 Ctrl 在主视图拖动可修改；"
+                + "影响本帧所有图层与碰撞盒。运行时引擎按相邻两帧的差值移动角色（根位移）。");
+            var ry = FloatEdit(frame.Root?.Y ?? 0,
+                v => { MarkEditing(); frame.Root = new HeroVec(frame.Root?.X ?? 0, v); Changed?.Invoke(); },
+                "根坐标 Y（浮点，无范围限制；上为负）");
             _liveConstNums.Add((rx, () => frame.Root?.X ?? 0));
             _liveConstNums.Add((ry, () => frame.Root?.Y ?? 0));
             rootBox.AddChild(rx); rootBox.AddChild(ry);
@@ -1411,13 +1464,14 @@ public sealed partial class EditorTabs : Control
         foreach (var c in box.GetChildren().ToList()) c.QueueFree();
     }
 
-    // A card is a PanelContainer with EXACTLY ONE content container (HBox by default, VBox for
-    // the tall form cards). Adding a second child to a PanelContainer stacks both in the same
-    // rect — that was the 叠字/点不中 bug (an empty HBox + a 200x200 TextureRect with
-    // MouseFilter.Stop ate every click).
-    private static PanelContainer MakeCard(bool selected, int height = 0, bool vertical = false)
+    // A card is a PanelContainer subclass with EXACTLY ONE content container (HBox by default,
+    // VBox for the tall form cards). Drag behaviour is implemented ON THE CARD itself rather
+    // than as a second PanelContainer child — a second child is fit into the same rect and
+    // becomes an invisible full-card MouseFilter.Stop shield that eats every click on the
+    // name input, spinboxes, buttons and the card body (the 角色/图层 card click bug).
+    private static DragCard MakeCard(bool selected, int height = 0, bool vertical = false)
     {
-        var p = new PanelContainer
+        var p = new DragCard
         {
             MouseFilter = MouseFilterEnum.Stop,
             SizeFlagsHorizontal = SizeFlags.ExpandFill,
@@ -1432,6 +1486,9 @@ public sealed partial class EditorTabs : Control
         });
         BoxContainer content = vertical ? new VBoxContainer() : new HBoxContainer();
         content.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+        // The content box itself must not swallow clicks: only interactive children (LineEdit,
+        // Button, SpinBox) should consume them, everything else falls through to the card.
+        content.MouseFilter = MouseFilterEnum.Ignore;
         p.AddChild(content);
         return p;
     }
@@ -1504,6 +1561,42 @@ public sealed partial class EditorTabs : Control
         return row;
     }
 
+    // Float fields are plain LineEdits: three decimals, no up/down arrows, no range clamping.
+    // They commit on Enter or focus loss and are live-updated by canvas drags via SyncLiveNumbers.
+    private static string FmtFloat(double v) => v.ToString("0.000", CultureInfo.InvariantCulture);
+
+    private static bool TryParseFloat(string text, out float v) =>
+        float.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out v);
+
+    private static LineEdit FloatEdit(float value, System.Action<float> set, string tip = null)
+    {
+        var edit = new LineEdit
+        {
+            Text = FmtFloat(value),
+            SizeFlagsHorizontal = SizeFlags.ExpandFill,
+            TooltipText = tip,
+        };
+        float last = value;
+        void Commit(string t)
+        {
+            if (TryParseFloat(t, out float v)) { last = v; set(v); }
+            else edit.Text = FmtFloat(last);
+        }
+        edit.TextSubmitted += Commit;
+        edit.FocusExited += () => Commit(edit.Text);
+        return edit;
+    }
+
+    private static HBoxContainer FloatRowOf(string label, out LineEdit edit, string tip = null)
+    {
+        var row = new HBoxContainer();
+        row.AddChild(new Label { Text = label + " " });
+        edit = FloatEdit(0, _ => { });
+        row.AddChild(edit);
+        if (tip != null) row.TooltipText = tip;
+        return row;
+    }
+
     private static Control SpinRow(string label, int value, int min, int max, System.Action<int> set, string tip = null)
     {
         var row = RowOf(label, out var box, tip);
@@ -1516,12 +1609,10 @@ public sealed partial class EditorTabs : Control
 
     private static Control FloatRow(string label, float value, System.Action<float> set, string tip = null)
     {
-        var row = RowOf(label, out var box, tip);
-        box.MinValue = -100000;
-        box.MaxValue = 100000;
-        box.Step = 1;
-        box.Value = value;
-        box.ValueChanged += v => set((float)v);
+        var row = FloatRowOf(label, out var edit, tip);
+        edit.Text = FmtFloat(value);
+        edit.TextSubmitted += t => { if (TryParseFloat(t, out float v)) set(v); };
+        edit.FocusExited += () => { if (TryParseFloat(edit.Text, out float v)) set(v); };
         return row;
     }
 
@@ -1623,18 +1714,18 @@ public sealed partial class EditorTabs : Control
     }
 
     // one row of a box list: center X/Y editors + hover highlight toward the canvas.
-    // Registers with the live-sync list so canvas drags update these spinboxes in place.
+    // Floats are plain LineEdits (3 decimals, no up/down arrows); canvas drags live-sync them.
     private HBoxContainer BoxRow(HeroBox box, System.Action<bool> hover)
     {
         var row = new HBoxContainer
         {
-            TooltipText = "碰撞盒中心坐标（相对角色锚点）。在主视图拖动盒内移动、拖角缩放，改动双向同步。",
+            TooltipText = "碰撞盒中心坐标（相对角色锚点，浮点）。在主视图拖动盒内移动、拖角缩放，改动双向同步。",
         };
         row.AddChild(new Label { Text = "中心 " });
-        var x = new SpinBox { Value = box.Cx, Step = 1, MinValue = -10000, MaxValue = 10000, SizeFlagsHorizontal = SizeFlags.ExpandFill };
-        var y = new SpinBox { Value = box.Cy, Step = 1, MinValue = -10000, MaxValue = 10000, SizeFlagsHorizontal = SizeFlags.ExpandFill };
-        x.ValueChanged += v => { MarkEditing(); box.Cx = (float)v; Changed?.Invoke(); };
-        y.ValueChanged += v => { MarkEditing(); box.Cy = (float)v; Changed?.Invoke(); };
+        var x = FloatEdit(box.Cx,
+            v => { MarkEditing(); box.Cx = v; Changed?.Invoke(); });
+        var y = FloatEdit(box.Cy,
+            v => { MarkEditing(); box.Cy = v; Changed?.Invoke(); });
         _liveConstNums.Add((x, () => box.Cx));
         _liveConstNums.Add((y, () => box.Cy));
         row.AddChild(x); row.AddChild(y);
@@ -1656,14 +1747,15 @@ public sealed partial class EditorTabs : Control
         to.CustomMinimumSize = new Vector2(64, 0);
         from.ValueChanged += v => { MarkEditing(); range[0] = (int)v; Changed?.Invoke(); };
         to.ValueChanged += v => { MarkEditing(); if (range.Length > 1) range[1] = (int)v; Changed?.Invoke(); };
-        _liveConstNums.Add((from, () => range[0]));
-        _liveConstNums.Add((to, () => range.Length > 1 ? range[1] : range[0]));
+        _liveRangeNums.Add((from, () => range[0]));
+        _liveRangeNums.Add((to, () => range.Length > 1 ? range[1] : range[0]));
         row.AddChild(from); row.AddChild(to);
         var brush = new Button
         {
             Text = "刷选",
             CustomMinimumSize = new Vector2(56, 26),
-            TooltipText = "按下后在时间轴格子上拖动来选出 [起,止] 帧范围（Esc 取消）",
+            TooltipText = "进入刷选后指针变为十字：在时间轴格子上按下选左端点、拖动、松开选右端点"
+                + "（按在格子外或 Esc 取消）",
         };
         brush.Pressed += () => BrushTarget?.Invoke(range);
         row.AddChild(brush);
@@ -1715,11 +1807,20 @@ public sealed partial class EditorTabs : Control
         System.Func<Dictionary<string, Variant>, bool> canDrop,
         System.Action<Dictionary<string, Variant>> drop)
     {
-        var helper = new DragHelper { GetData = getData, CanDrop = canDrop, Drop = drop };
-        c.AddChild(helper);
+        if (c is not DragCard card)
+        {
+            GD.PushWarning("[MKEditor] WireDrag used on a non-card control");
+            return;
+        }
+        card.GetData = getData;
+        card.CanDrop = canDrop;
+        card.Drop = drop;
     }
 
-    private sealed partial class DragHelper : Control
+    // PanelContainer with drag callbacks baked in. It must be the ONLY content-carrying child
+    // container; the drag callbacks live on the card itself, so no invisible overlay Control is
+    // ever added on top of the interactive card contents.
+    private sealed partial class DragCard : PanelContainer
     {
         public System.Func<Dictionary<string, Variant>> GetData;
         public System.Func<Dictionary<string, Variant>, bool> CanDrop;

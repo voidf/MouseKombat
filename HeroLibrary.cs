@@ -24,6 +24,14 @@ public partial class HeroLibrary : Node
 {
     public static HeroLibrary Instance { get; private set; }
 
+    // In a dev (Godot Editor) run, user:// shadow copies must NOT participate in hashing/loading:
+    // they may be leftovers from an exported build on the same machine, and letting a stale
+    // user:// tree override res:// is exactly the "editor hash and Out hash never agree" trap.
+    // Exported builds scan res:// (the pck) and then user://, with user:// winning.
+    private static bool IsExportedBuild => OS.HasFeature("template");
+    private static IEnumerable<string> ContentSchemes =>
+        IsExportedBuild ? new[] { "res://", "user://" } : new[] { "res://" };
+
     public string AssetHash { get; private set; } = "";
     public string AssetHashShort => AssetHash.Length >= 6 ? AssetHash[..6] : AssetHash;
     public bool Scanned { get; private set; }
@@ -123,7 +131,7 @@ public partial class HeroLibrary : Node
         // normalized paths is what makes a dev build (res:// only) and an exported build with
         // byte-identical shadow copies produce the SAME asset hash.
         var files = new Dictionary<string, string>();
-        foreach (string scheme in new[] { "res://", "user://" })
+        foreach (string scheme in ContentSchemes)
             foreach (string root in Roots)
                 CollectDir(scheme + root, files);
 
@@ -184,9 +192,9 @@ public partial class HeroLibrary : Node
 
     private void LoadHeroes()
     {
-        // folder name -> best root path (user:// beats res://)
+        // folder name -> best root path (user:// beats res:// in exported builds)
         var folders = new Dictionary<string, string>();
-        foreach (string scheme in new[] { "res://", "user://" })
+        foreach (string scheme in ContentSchemes)
         {
             var da = DirAccess.Open(scheme + "Heroes");
             if (da == null) continue;
@@ -265,7 +273,7 @@ public partial class HeroLibrary : Node
 
     private void LoadFireballs()
     {
-        foreach (string scheme in new[] { "res://", "user://" })
+        foreach (string scheme in ContentSchemes)
         {
             var da = DirAccess.Open(scheme + "FireballTSCN");
             if (da == null) continue;
@@ -336,14 +344,37 @@ public partial class HeroLibrary : Node
         var cells = new List<(string path, Image img, Vector2 trimOff, Vector2 origSize)>();
         foreach (string rel in wanted)
         {
+            Image img = null;
+
+            // Preferred: a real OS file (dev res:// on disk, or an exported build's user://
+            // shadow). This keeps .gdignore'd raw PNG folders loadable in the editor.
             string abs = ProjectSettings.GlobalizePath(hero.RootPath + "/" + rel);
-            if (!File.Exists(abs))
+            if (File.Exists(abs)) img = Image.LoadFromFile(abs);
+
+            // Fallback: the path lives inside an embedded pck where GlobalizePath cannot produce
+            // a real OS file. Read through Godot's VFS — this is what was failing in exports
+            // (previews/animations vanished while JSON-loaded collision boxes kept working).
+            if (img == null)
             {
-                GD.PushWarning($"[HeroLibrary] {hero.Folder}: missing image {rel}");
-                continue;
+                byte[] png;
+                using (var fa = Godot.FileAccess.Open(hero.RootPath + "/" + rel,
+                           Godot.FileAccess.ModeFlags.Read))
+                {
+                    if (fa == null)
+                    {
+                        GD.PushWarning($"[HeroLibrary] {hero.Folder}: missing image {rel}");
+                        continue;
+                    }
+                    png = fa.GetBuffer((int)fa.GetLength());
+                }
+                img = new Image();
+                if (img.LoadPngFromBuffer(png) != Error.Ok)
+                {
+                    GD.PushWarning($"[HeroLibrary] {hero.Folder}: bad image {rel}");
+                    continue;
+                }
             }
-            var img = Image.LoadFromFile(abs);
-            if (img == null) continue;
+
             var used = img.GetUsedRect();
             if (used.Size.X <= 0 || used.Size.Y <= 0) used = new Rect2I(0, 0, img.GetWidth(), img.GetHeight());
             var trimmed = img.GetRegion(used);

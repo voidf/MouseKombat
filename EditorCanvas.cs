@@ -61,6 +61,15 @@ public sealed partial class EditorCanvas : Control
     private int _dragEdgeMask;             // bit0 left bit1 right bit2 top bit3 bottom (canvas space)
     private bool _dragSnapshotted;         // one undo memento per drag, taken pre-mutation
 
+    // Click and drag are separate gestures: a press+release whose positions differ by <= ClickSlop
+    // is a CLICK (select/cycle), only motion beyond the slop starts a drag. This is what lets
+    // repeated clicks on an already-selected overlapping box cycle to the box underneath.
+    private const float ClickSlop = 3f;
+    private bool _leftDown;
+    private bool _didDrag;
+    private bool _pressInsideSelected;
+    private Vector2 _pressPos;
+
     private static readonly Color GridMajor = new(1f, 1f, 1f, 0.10f);
     private static readonly Color AxisColor = new(1f, 1f, 1f, 0.45f);
     private static readonly Color HurtColor = new(0.2f, 1f, 0.4f);
@@ -216,23 +225,15 @@ public sealed partial class EditorCanvas : Control
         var root = FrameRoot;
 
         // hurtboxes of this frame; an empty per-frame list means the character's BASE boxes
-        // (char.json) are in force — draw those instead (read-only, dimmer) so every frame of
-        // every action always shows hurtboxes, exactly like the game plays it
-        bool fallback = frame.Hurtboxes.Count == 0;
+        // (char.json) are in force. They are still pickable/editable: the first drag or resize
+        // materializes them into frame.Hurtboxes (see GetHeroBox), which the constants tab then
+        // shows as this frame's override list.
         var hurt = EffectiveHurtboxes(action, frame);
         for (int i = 0; i < hurt.Count; i++)
         {
-            var color = HurtColor;
-            bool sel = !fallback && IsSel(SelectionKind.Hurtbox, i, -1);
-            bool hov = !fallback && IsHover(SelectionKind.Hurtbox, i, -1);
-            var viewRect = HeroBoxRect(hurt[i], root);
-            if (fallback)
-            {
-                // base boxes are not editable data — plain, transparent outlines
-                DrawRect(viewRect, new Color(HurtColor, 0.08f), true);
-                DrawRect(viewRect, new Color(HurtColor, 0.5f), false, 1f);
-            }
-            else DrawBox(viewRect, color, sel, hov);
+            bool sel = IsSel(SelectionKind.Hurtbox, i, -1);
+            bool hov = IsHover(SelectionKind.Hurtbox, i, -1);
+            DrawBox(HeroBoxRect(hurt[i], root), HurtColor, sel, hov);
         }
 
         // strike/grab boxes of actives covering this frame (also anchored at the frame root —
@@ -441,10 +442,11 @@ public sealed partial class EditorCanvas : Control
                     OnLeftDown(mb.Position);
                     break;
                 case MouseButton.Left when !mb.Pressed:
-                    OnLeftUp();
+                    OnLeftUp(mb.Position);
                     break;
                 case MouseButton.Middle when mb.Pressed:
                     _panning = true;
+                    _leftDown = false;
                     break;
                 case MouseButton.Middle when !mb.Pressed:
                     _panning = false;
@@ -469,6 +471,7 @@ public sealed partial class EditorCanvas : Control
             if (_panning)
             {
                 _pan += mm.Relative;
+                _didDrag = true;
                 QueueRedraw();
             }
             else if (_rootDragging)
@@ -479,19 +482,32 @@ public sealed partial class EditorCanvas : Control
                     DragSnapshotOnce();
                     var d = CanvasToData(ToCanvas(mm.Position));
                     frame.Root = new HeroVec(Round001(d.X), Round001(d.Y));
+                    _didDrag = true;
                     QueueRedraw();
                     Changed?.Invoke();
                 }
-            }
-            else if (_boxDragging)
-            {
-                DragSnapshotOnce();
-                DragMoveBox(mm.Position);
             }
             else if (_resizeDragging)
             {
                 DragSnapshotOnce();
                 DragResizeBox(mm.Position);
+                _didDrag = true;
+            }
+            else if (_leftDown && !_didDrag && _pressInsideSelected
+                     && mm.Position.DistanceTo(_pressPos) > ClickSlop)
+            {
+                // movement beyond the click slop turns the press into a drag of the item
+                // that was selected at press time (box or layer)
+                _boxDragging = true;
+                _didDrag = true;
+                DragSnapshotOnce();
+                DragMoveBox(mm.Position);
+            }
+            else if (_boxDragging)
+            {
+                DragSnapshotOnce();
+                DragMoveBox(mm.Position);
+                _didDrag = true;
             }
             else
             {
@@ -520,6 +536,11 @@ public sealed partial class EditorCanvas : Control
 
     private void OnLeftDown(Vector2 pos)
     {
+        _leftDown = true;
+        _didDrag = false;
+        _pressPos = pos;
+        _pressInsideSelected = false;
+
         // pan has priority while space is held (release without dragging = play/pause)
         if (SpaceHeld)
         {
@@ -532,7 +553,8 @@ public sealed partial class EditorCanvas : Control
             return;
         }
 
-        // resize handle of the selected box?
+        // resize handle of the selected box is a drag from the very first motion; a pure click
+        // on a handle does not change selection or data.
         if (Selected.Kind is SelectionKind.Hurtbox or SelectionKind.Hitbox)
         {
             var rect = SelBoxRect();
@@ -545,52 +567,68 @@ public sealed partial class EditorCanvas : Control
                     _dragEdgeMask = handle;
                     return;
                 }
-                if (rect.Value.HasPoint(pos))
-                {
-                    _boxDragging = true;
-                    return;
-                }
             }
         }
 
-        // layer gizmo: drag to move the layer's offset
-        var frame2 = Frame;
-        if (frame2 != null && Selected.Kind == SelectionKind.Layer && frame2.Layers.Count > Selected.Index)
-        {
-            var l = frame2.Layers[Selected.Index];
-            var info = Char.ImageOf(l.Img);
-            if (info != null && LayerViewRect(frame2, l, info).HasPoint(pos))
-            {
-                _boxDragging = true;
-                return;
-            }
-        }
-
-        // click-to-select: everything under the cursor in a stable order (hurtboxes, hitboxes,
-        // layers). A fresh spot picks the front candidate; clicking again where the CURRENT
-        // selection still applies cycles to the next one, wrapping around.
-        var hits = PickAllAt(pos);
-        if (hits.Count > 0)
-        {
-            int cur = hits.FindIndex(h => SameSelection(h, Selected));
-            SetSelection(cur >= 0 ? hits[(cur + 1) % hits.Count] : hits[0]);
-            if (Selected.Kind is SelectionKind.Hurtbox or SelectionKind.Hitbox
-                && SelBoxRect() != null) _boxDragging = true;
-            else if (Selected.Kind == SelectionKind.Layer) _boxDragging = true;
-            return;
-        }
-
-        SetSelection(new Selection { Kind = SelectionKind.None });
+        // remember whether the press landed inside the CURRENT selection so the motion handler
+        // knows a drag is legal; selection itself (and click-cycling) happens on release.
+        _pressInsideSelected = SelectedContainsPoint(pos);
     }
 
-    private void OnLeftUp()
+    private void OnLeftUp(Vector2 pos)
     {
+        bool moved = pos.DistanceTo(_pressPos) > ClickSlop;
+
+        // press and release at (almost) the same point = a click, never a drag
+        if (_leftDown && !_didDrag && !moved && !_panning && !_rootDragging && !_resizeDragging)
+        {
+            OnClick(_pressPos);
+        }
+
+        _leftDown = false;
         _panning = false;
         _rootDragging = false;
         _boxDragging = false;
         _resizeDragging = false;
         _dragEdgeMask = 0;
         _dragSnapshotted = false;
+        _didDrag = false;
+        _pressInsideSelected = false;
+    }
+
+    // true when the view point is inside the currently selected box or layer image
+    private bool SelectedContainsPoint(Vector2 pos)
+    {
+        if (Selected.Kind is SelectionKind.Hurtbox or SelectionKind.Hitbox)
+        {
+            var rect = SelBoxRect();
+            return rect != null && rect.Value.HasPoint(pos);
+        }
+        if (Selected.Kind == SelectionKind.Layer)
+        {
+            var frame = Frame;
+            if (frame == null || Selected.Index < 0 || Selected.Index >= frame.Layers.Count) return false;
+            var l = frame.Layers[Selected.Index];
+            var info = Char.ImageOf(l.Img);
+            return info != null && LayerViewRect(frame, l, info).HasPoint(pos);
+        }
+        return false;
+    }
+
+    // click-to-select: everything under the cursor in a stable order (hurtboxes — including the
+    // character's BASE boxes when this frame has no override — hitboxes, then layers topmost-z
+    // first). A fresh spot picks the front candidate; clicking again where the CURRENT selection
+    // still applies cycles to the next one, wrapping around.
+    private void OnClick(Vector2 pos)
+    {
+        var hits = PickAllAt(pos);
+        if (hits.Count > 0)
+        {
+            int cur = hits.FindIndex(h => SameSelection(h, Selected));
+            SetSelection(cur >= 0 ? hits[(cur + 1) % hits.Count] : hits[0]);
+            return;
+        }
+        SetSelection(new Selection { Kind = SelectionKind.None });
     }
 
     private void DragMoveBox(Vector2 viewPos)
@@ -600,36 +638,24 @@ public sealed partial class EditorCanvas : Control
         var root = FrameRoot;
         var data = CanvasToData(ToCanvas(viewPos)) - root;   // store LOCAL to the anchor
 
-        switch (Selected.Kind)
+        if (Selected.Kind == SelectionKind.Layer)
         {
-            case SelectionKind.Hurtbox when Selected.Index < frame.Hurtboxes.Count:
-            {
-                var b = frame.Hurtboxes[Selected.Index];
-                b.Cx = Round001(data.X);
-                b.Cy = Round001(data.Y);
-                frame.Hurtboxes[Selected.Index] = b;
-                break;
-            }
-            case SelectionKind.Hitbox:
-            {
-                var act = ActiveOf(Selected);
-                if (act != null && Selected.Index < act.Hitboxes.Count)
-                {
-                    var b = act.Hitboxes[Selected.Index];
-                    b.Cx = Round001(data.X);
-                    b.Cy = Round001(data.Y);
-                    act.Hitboxes[Selected.Index] = b;
-                }
-                break;
-            }
-            case SelectionKind.Layer when Selected.Index < frame.Layers.Count:
+            if (Selected.Index < frame.Layers.Count)
             {
                 var l = frame.Layers[Selected.Index];
-                var off = data;
-                l.Off = new HeroVec(Round001(off.X), Round001(off.Y));
+                l.Off = new HeroVec(Round001(data.X), Round001(data.Y));
                 frame.Layers[Selected.Index] = l;
-                break;
             }
+        }
+        else
+        {
+            // GetHeroBox(materialize) materializes base hurtboxes into frame.Hurtboxes on the
+            // first edit, so the default 4 boxes become an authored per-frame override.
+            var box = GetHeroBox(Selected, materialize: true);
+            if (box == null || !box.Has) return;
+            box.Box.Cx = Round001(data.X);
+            box.Box.Cy = Round001(data.Y);
+            SetHeroBox(Selected, box.Box);
         }
         QueueRedraw();
         Changed?.Invoke();
@@ -639,7 +665,7 @@ public sealed partial class EditorCanvas : Control
     {
         var frame = Frame;
         if (frame == null) return;
-        var box = GetHeroBox(Selected);
+        var box = GetHeroBox(Selected, materialize: true);
         if (box == null) return;
 
         // work in CANVAS space edges (where the drag lives), then convert back; the root
@@ -678,31 +704,70 @@ public sealed partial class EditorCanvas : Control
         public bool Has;
     }
 
-    private BoxRef GetHeroBox(Selection s)
+    private BoxRef GetHeroBox(Selection s, bool materialize = false)
     {
         var frame = Frame;
         if (frame == null) return null;
-        if (s.Kind == SelectionKind.Hurtbox && s.Index < frame.Hurtboxes.Count)
-            return new BoxRef { Box = frame.Hurtboxes[s.Index], Has = true };
+
+        if (s.Kind == SelectionKind.Hurtbox)
+        {
+            // base-box fallback becomes a real per-frame override only when an EDIT is about to
+            // mutate it (materialize: true) — hit-testing/drawing must not create data.
+            if (materialize && frame.Hurtboxes.Count == 0)
+            {
+                var action = Action;
+                var physics = Char?.Def.Physics;
+                if (action != null && physics != null)
+                {
+                    var set = action.Attack?.Stance == "Crouch" ? physics.CrouchBoxes : physics.StandBoxes;
+                    if (set != null)
+                        frame.Hurtboxes.AddRange(new[]
+                        {
+                            CloneBox(set.Head), CloneBox(set.Body), CloneBox(set.Arms), CloneBox(set.Legs),
+                        });
+                }
+            }
+            if (s.Index >= 0 && s.Index < frame.Hurtboxes.Count)
+                return new BoxRef { Box = frame.Hurtboxes[s.Index], Has = true };
+            return null;
+        }
+
         var act = ActiveOf(s);
-        if (s.Kind == SelectionKind.Hitbox && act != null && s.Index < act.Hitboxes.Count)
+        if (s.Kind == SelectionKind.Hitbox && act != null && s.Index >= 0 && s.Index < act.Hitboxes.Count)
             return new BoxRef { Box = act.Hitboxes[s.Index], Has = true };
         return null;
     }
+
+    private static HeroBox CloneBox(HeroBox b) =>
+        b == null ? new HeroBox(0, 0, 0, 0) : new HeroBox(b.Cx, b.Cy, b.Hw, b.Hh);
 
     private void SetHeroBox(Selection s, HeroBox b)
     {
         var frame = Frame;
         if (frame == null) return;
-        if (s.Kind == SelectionKind.Hurtbox && s.Index < frame.Hurtboxes.Count)
-            frame.Hurtboxes[s.Index] = b;
+        if (s.Kind == SelectionKind.Hurtbox)
+        {
+            if (frame.Hurtboxes.Count == 0) GetHeroBox(s, materialize: true);   // materialize first, then write
+            if (s.Index >= 0 && s.Index < frame.Hurtboxes.Count) frame.Hurtboxes[s.Index] = b;
+        }
         var act = ActiveOf(s);
-        if (s.Kind == SelectionKind.Hitbox && act != null && s.Index < act.Hitboxes.Count)
+        if (s.Kind == SelectionKind.Hitbox && act != null && s.Index >= 0 && s.Index < act.Hitboxes.Count)
             act.Hitboxes[s.Index] = b;
     }
 
     private Rect2? SelBoxRect()
     {
+        // never materialize here: hit-testing and drawing the base boxes must stay read-only
+        // until the user actually drags/resizes one of them
+        if (Selected.Kind == SelectionKind.Hurtbox)
+        {
+            var action = Action;
+            var frame = Frame;
+            if (action == null || frame == null) return null;
+            var hurt = EffectiveHurtboxes(action, frame);
+            return Selected.Index >= 0 && Selected.Index < hurt.Count
+                ? HeroBoxRect(hurt[Selected.Index], FrameRoot) : null;
+        }
         var b = GetHeroBox(Selected);
         return b != null ? HeroBoxRect(b.Box, FrameRoot) : null;
     }
@@ -728,8 +793,11 @@ public sealed partial class EditorCanvas : Control
         if (action == null || frame == null) return hits;
         var root = FrameRoot;
 
-        for (int i = 0; i < frame.Hurtboxes.Count; i++)
-            if (HeroBoxRect(frame.Hurtboxes[i], root).HasPoint(pos))
+        // frame hurtboxes when overridden, otherwise the character's BASE boxes — they are
+        // pickable either way (first edit materializes the override list)
+        var hurt = EffectiveHurtboxes(action, frame);
+        for (int i = 0; i < hurt.Count; i++)
+            if (HeroBoxRect(hurt[i], root).HasPoint(pos))
                 hits.Add(new Selection { Kind = SelectionKind.Hurtbox, Index = i, ActiveIndex = -1 });
         if (action.Attack != null)
             for (int a = 0; a < action.Attack.Actives.Count; a++)

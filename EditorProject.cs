@@ -55,27 +55,27 @@ public sealed class EditorProject
     }
 
     // First editor run in an exported build: copy the shipped content out of the pck into
-    // user:// so it becomes editable (byte-identical, so the asset hash starts out equal to
-    // the dev build's). Later runs reuse the copies — the user's edits live in them.
+    // user:// so it becomes editable. Later runs only fill MISSING entries — existing user
+    // files are the user's edits and are never overwritten. This also heals a shadow folder
+    // bootstrapped by an older build that lacked newly added assets (e.g. WALK_006.png).
     private static void BootstrapShadowCopies()
     {
         foreach (string folder in new[] { "Heroes", "FireballTSCN", "ParticleTSCN" })
         {
-            string userDir = ProjectSettings.GlobalizePath("user://" + folder);
-            if (Directory.Exists(userDir) && Directory.GetFileSystemEntries(userDir).Length > 0) continue;
-            var resDir = DirAccess.Open("res://" + folder);
-            if (resDir == null) continue;
-            CopyResTree("res://" + folder, "user://" + folder);
-            GD.Print($"[MKEditor] bootstrapped user://{folder} from the packaged content");
+            int copied = SyncResTree("res://" + folder, "user://" + folder);
+            if (copied > 0)
+                GD.Print($"[MKEditor] shadow-copied {copied} missing file(s) into user://{folder}");
         }
     }
 
-    // res:// may live inside a pck, so this copy goes through Godot's file APIs, not System.IO
-    private static void CopyResTree(string from, string to)
+    // res:// may live inside a pck, so this copy goes through Godot's file APIs, not System.IO.
+    // Existing user:// files are left untouched (they may be the user's edits).
+    private static int SyncResTree(string from, string to)
     {
-        DirAccess.MakeDirRecursiveAbsolute(ProjectSettings.GlobalizePath(to));
         var da = DirAccess.Open(from);
-        if (da == null) return;
+        if (da == null) return 0;
+        DirAccess.MakeDirRecursiveAbsolute(ProjectSettings.GlobalizePath(to));
+        int copied = 0;
         da.ListDirBegin();
         string entry = da.GetNext();
         while (!string.IsNullOrEmpty(entry))
@@ -83,20 +83,25 @@ public sealed class EditorProject
             if (!entry.StartsWith("."))
             {
                 string src = from + "/" + entry;
-                if (da.CurrentIsDir()) CopyResTree(src, to + "/" + entry);
-                else
+                string dst = to + "/" + entry;
+                if (da.CurrentIsDir()) copied += SyncResTree(src, dst);
+                else if (!Godot.FileAccess.FileExists(dst))
                 {
                     using var reader = Godot.FileAccess.Open(src, Godot.FileAccess.ModeFlags.Read);
-                    if (reader == null) continue;
+                    if (reader == null) { entry = da.GetNext(); continue; }
                     var bytes = reader.GetBuffer((int)reader.GetLength());
-                    using var writer = Godot.FileAccess.Open(to + "/" + entry,
-                        Godot.FileAccess.ModeFlags.Write);
-                    writer?.StoreBuffer(bytes);
+                    using var writer = Godot.FileAccess.Open(dst, Godot.FileAccess.ModeFlags.Write);
+                    if (writer != null)
+                    {
+                        writer.StoreBuffer(bytes);
+                        copied++;
+                    }
                 }
             }
             entry = da.GetNext();
         }
         da.ListDirEnd();
+        return copied;
     }
 
     public void SaveAll()

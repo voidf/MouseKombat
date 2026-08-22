@@ -33,10 +33,16 @@ def main():
 
     ckpt_dir = os.path.join(os.path.dirname(__file__), "checkpoints")
     os.makedirs(ckpt_dir, exist_ok=True)
-    cb = CheckpointCallback(save_freq=max(1, 100_000 // n_envs), save_path=ckpt_dir, name_prefix="ppo_hamster")
 
+    # Custom-hero runs must not clobber the legacy hamster checkpoints: derive the run name
+    # from the agent spec (hero:<Folder> -> folder name), so every hero gets its own files.
+    tag = os.environ.get("MK_RUN_TAG", "").strip() or (
+        agent_char.split(":", 1)[1] if agent_char.startswith("hero:") else agent_char.lower())
+    safe_tag = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in tag) or "run"
+    cb = CheckpointCallback(save_freq=max(1, 100_000 // n_envs), save_path=ckpt_dir,
+                            name_prefix=f"ppo_{safe_tag}")
     model.learn(total_timesteps=total, callback=cb, progress_bar=False)
-    out = os.path.join(ckpt_dir, "ppo_hamster_v0")
+    out = os.path.join(ckpt_dir, f"ppo_{safe_tag}_v0")
     model.save(out)
     print(f"saved {out}.zip")
 

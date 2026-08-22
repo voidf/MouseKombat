@@ -24,15 +24,33 @@ public sealed partial class EditorTimeline : Control
     public bool Playing;
     public bool ReversePlayback;
 
-    // non-null while a Range field is being BRUSHED from the constants tab: timeline drags
-    // then paint [min,max] into this array instead of selecting frames (Esc cancels)
-    public int[] BrushRange;
+    // non-null while a Range field is being BRUSHED from the constants tab. Brush semantics:
+    // left-press on a cell = left endpoint, drag live-updates, left-release = right endpoint
+    // (release outside the cells collapses to the left endpoint), then brush mode exits.
+    // Pressing left anywhere outside the cells exits brush mode immediately. Esc cancels.
+    private int[] _brushRange;
+    public int[] BrushRange
+    {
+        get => _brushRange;
+        set
+        {
+            if (_brushRange == value) return;
+            _brushRange = value;
+            _brushActive = false;
+            _brushAnchor = -1;
+            MouseDefaultCursorShape = value != null ? Control.CursorShape.Cross : Control.CursorShape.Arrow;
+            QueueRedraw();
+        }
+    }
 
     private float _scrollTarget;                     // x offset of the strip in view px
     private readonly Dictionary<int, ImageTexture> _thumbCache = new();
     private int _thumbCacheAction = -1;              // rebuild all thumbs when the action changes
     private bool _dragSelecting;
     private int _dragAnchor = -1;
+    private bool _brushActive;
+    private int _brushAnchor = -1;
+    private bool _middlePanning;
 
     private EditorChar Char => Project?.Current;
     private HeroActionDef Action => Char?.Action(Project.SelectedAction);
@@ -153,19 +171,34 @@ public sealed partial class EditorTimeline : Control
     {
         const float stripH = 5f;
         float y = cell.End.Y - 3f;
+
+        // every phase/active covering this frame shares the bottom strip EQUALLY (the design
+        // feedback: overlapping ranges must show all colors side by side, not stack/overwrite)
+        var bands = new List<Color>();
         if (action.Attack != null)
         {
             var a = action.Attack;
             if (i >= a.StartupRange[0] && i <= a.StartupRange[1])
-                DrawRect(new Rect2(cell.Position.X + 2, y - stripH, cell.Size.X - 4, stripH),
-                    new Color(0.35f, 0.65f, 1f, 0.85f), true);
+                bands.Add(new Color(0.35f, 0.65f, 1f, 0.85f));                       // startup blue
             foreach (var act in a.Actives)
                 if (i >= act.ActiveRange[0] && i <= act.ActiveRange[1])
-                    DrawRect(new Rect2(cell.Position.X + 2, y - stripH, cell.Size.X - 4, stripH),
-                        act.IsGrab ? new Color(1f, 0.8f, 0.2f, 0.9f) : new Color(1f, 0.3f, 0.25f, 0.9f), true);
+                    bands.Add(act.IsGrab
+                        ? new Color(1f, 0.8f, 0.2f, 0.9f)                           // grab yellow
+                        : new Color(1f, 0.3f, 0.25f, 0.9f));                        // active red
             if (i >= a.RecoveryRange[0] && i <= a.RecoveryRange[1])
-                DrawRect(new Rect2(cell.Position.X + 2, y - stripH, cell.Size.X - 4, stripH),
-                    new Color(0.35f, 0.9f, 0.45f, 0.85f), true);
+                bands.Add(new Color(0.35f, 0.9f, 0.45f, 0.85f));                    // recovery green
+        }
+        if (bands.Count > 0)
+        {
+            float bandW = (cell.Size.X - 4f) / bands.Count;
+            for (int b = 0; b < bands.Count; b++)
+                DrawRect(new Rect2(cell.Position.X + 2f + b * bandW, y - stripH, bandW, stripH),
+                    bands[b], true);
+        }
+
+        if (action.Attack != null)
+        {
+            var a = action.Attack;
             foreach (var p in a.Projectiles)
                 if (i == p.SpawnFrame)
                     DrawRect(new Rect2(cell.Position.X + 2, y - stripH - 6, cell.Size.X - 4, 3),
@@ -237,15 +270,43 @@ public sealed partial class EditorTimeline : Control
         {
             if (mb.ButtonIndex == MouseButton.Left)
             {
+                // Range-brush mode (armed from the constants tab) takes the left button over
+                // completely: down on a cell picks the LEFT endpoint, up picks the RIGHT one.
+                if (BrushRange != null)
+                {
+                    int idx = CellAt(mb.Position);
+                    if (idx < 0)
+                    {
+                        // pressed outside the frame cells: abort brushing right now
+                        BrushRange = null;
+                        AcceptEvent();
+                        return;
+                    }
+                    _brushActive = true;
+                    _brushAnchor = idx;
+                    if (BrushRange.Length > 0) BrushRange[0] = idx;
+                    if (BrushRange.Length > 1) BrushRange[1] = idx;
+                    Changed?.Invoke();
+                    QueueRedraw();
+                    AcceptEvent();
+                    return;
+                }
+
                 if (PlusAt(mb.Position)) { AppendFrame(); return; }
-                int idx = CellAt(mb.Position);
-                if (idx < 0) { Project.MultiSelect.Clear(); Changed?.Invoke(); QueueRedraw(); return; }
+                int cell = CellAt(mb.Position);
+                if (cell < 0) { Project.MultiSelect.Clear(); Changed?.Invoke(); QueueRedraw(); return; }
                 bool additive = mb.ShiftPressed || mb.CtrlPressed;
-                if (!additive && !Project.MultiSelect.Contains(idx)) Project.MultiSelect.Clear();
-                Project.MultiSelect.Add(idx);
-                _dragAnchor = idx;
+                if (!additive && !Project.MultiSelect.Contains(cell)) Project.MultiSelect.Clear();
+                Project.MultiSelect.Add(cell);
+                _dragAnchor = cell;
                 _dragSelecting = true;
-                SelectFrame(idx);
+                SelectFrame(cell);
+                AcceptEvent();
+            }
+            else if (mb.ButtonIndex == MouseButton.Middle)
+            {
+                // drag-navigation: same semantic as ctrl+wheel, but a hand drag
+                _middlePanning = true;
                 AcceptEvent();
             }
             else if (mb.ButtonIndex == MouseButton.Right)
@@ -294,22 +355,52 @@ public sealed partial class EditorTimeline : Control
                 AcceptEvent();
             }
         }
-        else if (@event is InputEventMouseButton mbu && !mbu.Pressed
-                 && mbu.ButtonIndex == MouseButton.Left)
+        else if (@event is InputEventMouseButton mbu && !mbu.Pressed)
         {
-            _dragSelecting = false;
-            _dragAnchor = -1;
+            if (mbu.ButtonIndex == MouseButton.Left)
+            {
+                _dragSelecting = false;
+                _dragAnchor = -1;
+
+                // finish a brush: the release cell is the RIGHT endpoint; released outside the
+                // cells = [left, left], then exit brush mode
+                if (BrushRange != null)
+                {
+                    if (_brushActive && _brushAnchor >= 0)
+                    {
+                        int idx = CellAt(mbu.Position);
+                        int right = idx >= 0 ? idx : _brushAnchor;
+                        if (BrushRange.Length > 0) BrushRange[0] = Mathf.Min(_brushAnchor, right);
+                        if (BrushRange.Length > 1) BrushRange[1] = Mathf.Max(_brushAnchor, right);
+                        Changed?.Invoke();
+                        QueueRedraw();
+                    }
+                    BrushRange = null;   // always leave brush mode after one stroke
+                    AcceptEvent();
+                }
+            }
+            else if (mbu.ButtonIndex == MouseButton.Middle)
+            {
+                _middlePanning = false;
+            }
         }
         else if (@event is InputEventMouseMotion mm)
         {
-            if (BrushRange != null)
+            if (_middlePanning)
+            {
+                // dragging right pushes the strip right (view moves backwards through time)
+                _scrollTarget = Mathf.Clamp(_scrollTarget - mm.Relative.X, 0,
+                    Mathf.Max(0, ContentWidth - Size.X));
+                Scroll = _scrollTarget;
+                QueueRedraw();
+            }
+            else if (BrushRange != null && _brushActive && _brushAnchor >= 0)
             {
                 int idx = CellAt(mm.Position);
                 if (idx >= 0)
                 {
-                    int cur = Project.SelectedFrame;
-                    BrushRange[0] = Mathf.Min(cur, idx);
-                    BrushRange[1] = Mathf.Max(cur, idx);
+                    if (BrushRange.Length > 0) BrushRange[0] = Mathf.Min(_brushAnchor, idx);
+                    if (BrushRange.Length > 1) BrushRange[1] = Mathf.Max(_brushAnchor, idx);
                     Changed?.Invoke();
                     QueueRedraw();
                 }
