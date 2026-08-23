@@ -43,7 +43,13 @@ public sealed partial class EditorTabs : Control
     private bool _pendingRebuild;               // set while playing; rebuild on pause
 
     // ---- OS file drop zones (Window.FilesDropped is dispatched here by the screen) ----
-    private sealed class FileDropZone { public Control C; public string Ext; public System.Action<string[]> OnFiles; }
+    private sealed class FileDropZone
+    {
+        public Control C;
+        public string Ext;
+        public int Page = -1;      // tab index the zone belongs to; -1 = any visible page
+        public System.Action<string[]> OnFiles;
+    }
     private readonly List<FileDropZone> _dropZones = new();
 
     public const int CardHeight = 200;            // 角色/图层 card height, preview 200x200
@@ -171,12 +177,17 @@ public sealed partial class EditorTabs : Control
 
     // Route an OS file drop (Window.FilesDropped) to the zone under the mouse, if any. A zone
     // that does not accept ANY of the dropped extensions is skipped — otherwise a particle row
-    // under the cursor would swallow an .ogg drop (and vice versa).
+    // under the cursor would swallow an .ogg drop (and vice versa). Zones also belong to a tab:
+    // PNG drops only work on the visible 图层 tab, tscn/ogg only on the visible 常数 tab, even
+    // though hidden tab pages may still report overlapping global rects.
     public void DispatchFilesDropped(string[] files, Vector2 globalMouse)
     {
+        if (Tabs == null) return;
         _dropZones.RemoveAll(z => !GodotObject.IsInstanceValid(z.C));
         foreach (var z in _dropZones)
         {
+            if (z.Page >= 0 && z.Page != Tabs.CurrentTab) continue;
+            if (!z.C.IsVisibleInTree()) continue;
             if (!z.C.GetGlobalRect().HasPoint(globalMouse)) continue;
             var matching = files.Where(f => f.ToLower().EndsWith(z.Ext)).ToArray();
             if (matching.Length == 0) continue;
@@ -185,10 +196,10 @@ public sealed partial class EditorTabs : Control
         }
     }
 
-    private void RegisterDropZone(Control c, string ext, System.Action<string[]> onFiles)
+    private void RegisterDropZone(Control c, string ext, System.Action<string[]> onFiles, int page = -1)
     {
         _dropZones.RemoveAll(z => !GodotObject.IsInstanceValid(z.C));
-        _dropZones.Add(new FileDropZone { C = c, Ext = ext, OnFiles = onFiles });
+        _dropZones.Add(new FileDropZone { C = c, Ext = ext, Page = page, OnFiles = onFiles });
     }
 
     // Drop zones are registered while a page builds; queued-free rows from the PREVIOUS build
@@ -600,9 +611,9 @@ public sealed partial class EditorTabs : Control
                 });
 
             // OS file drop (routed via Window.FilesDropped): replace this layer's image,
-            // offsets stay, the original file name is kept
+            // offsets stay, the original file name is kept. Page 1 = 图层 tab.
             RegisterDropZone(card, ".png", files =>
-                ApplyLayerImage(ch.ImportImage(files[0], overwrite: true)));
+                ApplyLayerImage(ch.ImportImage(files[0], overwrite: true)), page: 1);
 
             card.GuiInput += @event =>
             {
@@ -1287,7 +1298,7 @@ public sealed partial class EditorTabs : Control
             {
                 var res = Project.ImportSharedAsset(files[0], "ParticleTSCN", overwrite: true);
                 ApplyFxAsset(() => fx.Particles[idx], v => fx.Particles[idx] = v, res, "ParticleTSCN");
-            });
+            }, page: 3);
             var del = new Button { Text = "删除", CustomMinimumSize = new Vector2(52, 26) };
             del.Pressed += () => { Project.PushUndo(); fx.Particles.RemoveAt(idx); RebuildConstantsPage(); };
             row.AddChild(del);
@@ -1322,7 +1333,7 @@ public sealed partial class EditorTabs : Control
             {
                 var res = ch.ImportAudio(files[0], overwrite: true);
                 ApplyFxAsset(() => fx.Sounds[idx], v => fx.Sounds[idx] = v, res, "SoundFXOGG");
-            });
+            }, page: 3);
             var del = new Button { Text = "删除", CustomMinimumSize = new Vector2(52, 26) };
             del.Pressed += () => { Project.PushUndo(); fx.Sounds.RemoveAt(idx); RebuildConstantsPage(); };
             row.AddChild(del);
@@ -1336,8 +1347,9 @@ public sealed partial class EditorTabs : Control
 
         // fallback drop targets registered AFTER the row targets: if the drop lands on empty FX
         // space (or on a row whose extension does not match), it creates new entries.
-        RegisterDropZone(fxPanel, ".tscn", files => AddDroppedParticles(files, fx));
-        RegisterDropZone(fxPanel, ".ogg", files => AddDroppedSounds(ch, files, fx));
+        // Page 3 = 常数 tab.
+        RegisterDropZone(fxPanel, ".tscn", files => AddDroppedParticles(files, fx), page: 3);
+        RegisterDropZone(fxPanel, ".ogg", files => AddDroppedSounds(ch, files, fx), page: 3);
     }
 
     private void AddDroppedParticles(string[] files, HeroFx fx)

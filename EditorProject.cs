@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 using MouseKombat.Sim;
 
@@ -132,7 +133,13 @@ public sealed class EditorProject
         string dir = System.IO.Path.Combine(WritableGameRoot(), folder);
         string fileName = System.IO.Path.GetFileName(sourcePath);
         string dest = System.IO.Path.Combine(dir, fileName);
+
+        // Same path + same bytes (md5) = the asset is already imported: keep going with the
+        // returned path, don't complain, don't copy.
+        if (File.Exists(dest) && FilesIdentical(sourcePath, dest))
+            return new ImportOutcome { Result = ImportResult.Ok, Path = $"{folder}/{fileName}" };
         if (!overwrite && File.Exists(dest)) return new ImportOutcome { Result = ImportResult.Collision };
+
         try
         {
             Directory.CreateDirectory(dir);
@@ -233,6 +240,25 @@ public sealed class EditorProject
             SelectedChar = Chars.Count > 0 ? Chars[0].Folder : null;
             SelectedAction = Current?.Def.Actions.FirstOrDefault()?.Name;
             SelectedFrame = 0;
+        }
+    }
+
+    // md5 over the file bytes — the import "same name already exists" rule: identical content
+    // means already-imported (Ok), different content follows the overwrite flag.
+    public static bool FilesIdentical(string pathA, string pathB)
+    {
+        try
+        {
+            if (!File.Exists(pathA) || !File.Exists(pathB)) return false;
+            using var a = File.OpenRead(pathA);
+            using var b = File.OpenRead(pathB);
+            if (a.Length != b.Length) return false;
+            using var md5 = MD5.Create();
+            return md5.ComputeHash(a).SequenceEqual(md5.ComputeHash(b));
+        }
+        catch (System.Exception)
+        {
+            return false;
         }
     }
 }
@@ -392,7 +418,11 @@ public sealed class EditorChar
         string imgDir = Path.Combine(Dir, "images");
         string fileName = Sanitize(Path.GetFileNameWithoutExtension(sourcePath)) + ".png";
         string dest = Path.Combine(imgDir, fileName);
+
+        if (File.Exists(dest) && EditorProject.FilesIdentical(sourcePath, dest))
+            return new ImportOutcome { Result = ImportResult.Ok, Path = "images/" + fileName };
         if (!overwrite && File.Exists(dest)) return new ImportOutcome { Result = ImportResult.Collision };
+
         try
         {
             Directory.CreateDirectory(imgDir);
@@ -414,6 +444,9 @@ public sealed class EditorChar
         string fileName = Sanitize(Path.GetFileNameWithoutExtension(sourcePath)) + ".ogg";
         string dir = System.IO.Path.Combine(EditorProject.WritableGameRoot(), "SoundFXOGG");
         string dest = System.IO.Path.Combine(dir, fileName);
+
+        if (File.Exists(dest) && EditorProject.FilesIdentical(sourcePath, dest))
+            return new ImportOutcome { Result = ImportResult.Ok, Path = $"SoundFXOGG/{fileName}" };
         if (!overwrite && File.Exists(dest)) return new ImportOutcome { Result = ImportResult.Collision };
         try
         {
