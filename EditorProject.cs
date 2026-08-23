@@ -60,7 +60,7 @@ public sealed class EditorProject
     // bootstrapped by an older build that lacked newly added assets (e.g. WALK_006.png).
     private static void BootstrapShadowCopies()
     {
-        foreach (string folder in new[] { "Heroes", "FireballTSCN", "ParticleTSCN" })
+        foreach (string folder in new[] { "Heroes", "FireballTSCN", "ParticleTSCN", "SoundFXOGG" })
         {
             int copied = SyncResTree("res://" + folder, "user://" + folder);
             if (copied > 0)
@@ -407,20 +407,19 @@ public sealed class EditorChar
         }
     }
 
-    // An ogg into this character's audio/, same original-name rules.
-    // Returns the GAME-ROOT-relative path the FX rows display ("Heroes/<char>/audio/x.ogg").
+    // An ogg into the SHARED game-root SoundFXOGG/ folder (per the editor design: sound FX are
+    // not per-character assets). Returns the game-root-relative path ("SoundFXOGG/x.ogg").
     public ImportOutcome ImportAudio(string sourcePath, bool overwrite = false)
     {
         string fileName = Sanitize(Path.GetFileNameWithoutExtension(sourcePath)) + ".ogg";
-        string dir = Path.Combine(Dir, "audio");
-        string dest = Path.Combine(dir, fileName);
+        string dir = System.IO.Path.Combine(EditorProject.WritableGameRoot(), "SoundFXOGG");
+        string dest = System.IO.Path.Combine(dir, fileName);
         if (!overwrite && File.Exists(dest)) return new ImportOutcome { Result = ImportResult.Collision };
         try
         {
             Directory.CreateDirectory(dir);
             File.Copy(sourcePath, dest, overwrite: true);
-            string rootRel = $"Heroes/{Folder}/audio/{fileName}";
-            return new ImportOutcome { Result = ImportResult.Ok, Path = rootRel };
+            return new ImportOutcome { Result = ImportResult.Ok, Path = $"SoundFXOGG/{fileName}" };
         }
         catch (System.Exception e)
         {

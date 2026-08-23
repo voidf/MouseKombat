@@ -48,7 +48,8 @@ public partial class HeroLibrary : Node
     {
         public HeroCharDef Def;
         public string Folder;                          // "Hamster"
-        public string RootPath;                        // "res://Heroes/Hamster"
+        public string RootPath;                        // "res://Heroes/Hamster" or user:// shadow
+        public string ResRootPath;                     // the packaged res:// copy, for per-file fallback
         public MoveSet Compiled;
         public Dictionary<string, HeroActionDef> Actions = new();
         public Dictionary<string, HeroFrameImage> Images = new();   // "images/x.png" -> packed
@@ -117,7 +118,7 @@ public partial class HeroLibrary : Node
 
     // ============================== scanning & hashing ==============================
 
-    private static readonly string[] Roots = { "Heroes", "FireballTSCN", "ParticleTSCN" };
+    private static readonly string[] Roots = { "Heroes", "FireballTSCN", "ParticleTSCN", "SoundFXOGG" };
 
     public void Scan()
     {
@@ -194,6 +195,7 @@ public partial class HeroLibrary : Node
     {
         // folder name -> best root path (user:// beats res:// in exported builds)
         var folders = new Dictionary<string, string>();
+        var resFolders = new Dictionary<string, string>();
         foreach (string scheme in ContentSchemes)
         {
             var da = DirAccess.Open(scheme + "Heroes");
@@ -203,7 +205,11 @@ public partial class HeroLibrary : Node
             while (!string.IsNullOrEmpty(entry))
             {
                 if (!entry.StartsWith(".") && da.CurrentIsDir())
-                    folders[entry] = scheme + "Heroes/" + entry;
+                {
+                    string path = scheme + "Heroes/" + entry;
+                    folders[entry] = path;
+                    if (scheme == "res://") resFolders[entry] = path;
+                }
                 entry = da.GetNext();
             }
             da.ListDirEnd();
@@ -212,6 +218,7 @@ public partial class HeroLibrary : Node
         foreach (var kv in folders)
         {
             string folder = kv.Key, rootPath = kv.Value;
+            string resRoot = resFolders.TryGetValue(folder, out var rr) ? rr : rootPath;
             string charJson = ReadText(rootPath + "/char.json");
             if (charJson == null)
             {
@@ -226,7 +233,13 @@ public partial class HeroLibrary : Node
                 continue;
             }
 
-            var hero = new LoadedHero { Def = def, Folder = folder, RootPath = rootPath };
+            var hero = new LoadedHero
+            {
+                Def = def,
+                Folder = folder,
+                RootPath = rootPath,
+                ResRootPath = resRoot,
+            };
             var actions = new Dictionary<string, HeroActionDef>();
             var ada = DirAccess.Open(rootPath + "/actions");
             if (ada != null)
@@ -344,35 +357,16 @@ public partial class HeroLibrary : Node
         var cells = new List<(string path, Image img, Vector2 trimOff, Vector2 origSize)>();
         foreach (string rel in wanted)
         {
-            Image img = null;
-
-            // Preferred: a real OS file (dev res:// on disk, or an exported build's user://
-            // shadow). This keeps .gdignore'd raw PNG folders loadable in the editor.
-            string abs = ProjectSettings.GlobalizePath(hero.RootPath + "/" + rel);
-            if (File.Exists(abs)) img = Image.LoadFromFile(abs);
-
-            // Fallback: the path lives inside an embedded pck where GlobalizePath cannot produce
-            // a real OS file. Read through Godot's VFS — this is what was failing in exports
-            // (previews/animations vanished while JSON-loaded collision boxes kept working).
+            Image img = LoadImageFor(hero, rel, out bool found);
+            if (!found)
+            {
+                GD.PushWarning($"[HeroLibrary] {hero.Folder}: missing image {rel}");
+                continue;
+            }
             if (img == null)
             {
-                byte[] png;
-                using (var fa = Godot.FileAccess.Open(hero.RootPath + "/" + rel,
-                           Godot.FileAccess.ModeFlags.Read))
-                {
-                    if (fa == null)
-                    {
-                        GD.PushWarning($"[HeroLibrary] {hero.Folder}: missing image {rel}");
-                        continue;
-                    }
-                    png = fa.GetBuffer((int)fa.GetLength());
-                }
-                img = new Image();
-                if (img.LoadPngFromBuffer(png) != Error.Ok)
-                {
-                    GD.PushWarning($"[HeroLibrary] {hero.Folder}: bad image {rel}");
-                    continue;
-                }
+                GD.PushWarning($"[HeroLibrary] {hero.Folder}: bad image {rel}");
+                continue;
             }
 
             var used = img.GetUsedRect();
@@ -418,6 +412,43 @@ public partial class HeroLibrary : Node
                 TrimOffset = c.trimOff,
             };
         }
+    }
+
+    // Try the hero's chosen root (user:// shadow wins for JSON edits), then fall back to the
+    // packaged res:// copy. Old exported runs bootstrapped a user:// shadow WITHOUT images; a
+    // per-file fallback heals those installs without nuking the user's edits.
+    private static Image LoadImageFor(LoadedHero hero, string rel, out bool found)
+    {
+        var roots = hero.RootPath == hero.ResRootPath
+            ? new[] { hero.RootPath }
+            : new[] { hero.RootPath, hero.ResRootPath };
+        foreach (string root in roots)
+        {
+            string resPath = root + "/" + rel;
+
+            // Preferred: a real OS file (dev res:// on disk, or an exported build's user://
+            // shadow). This keeps .gdignore'd raw PNG folders loadable in the editor.
+            string abs = ProjectSettings.GlobalizePath(resPath);
+            if (File.Exists(abs))
+            {
+                found = true;
+                return Image.LoadFromFile(abs);
+            }
+
+            // Fallback: the path lives inside an embedded pck where GlobalizePath cannot produce
+            // a real OS file. Read through Godot's VFS — this is what was failing in exports.
+            byte[] png;
+            using (var fa = Godot.FileAccess.Open(resPath, Godot.FileAccess.ModeFlags.Read))
+            {
+                if (fa == null) continue;
+                png = fa.GetBuffer((int)fa.GetLength());
+            }
+            var img = new Image();
+            found = true;
+            return img.LoadPngFromBuffer(png) == Error.Ok ? img : null;
+        }
+        found = false;
+        return null;
     }
 
     // ============================== view helpers ==============================

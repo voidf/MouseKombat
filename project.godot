@@ -16,18 +16,18 @@ config/name_localized={
 "zh": "真鼠快打",
 "zh_CN": "真鼠快打"
 }
-config.version="0.1.0"
 run/main_scene="res://MainMenu.tscn"
 config/features=PackedStringArray("4.6", "C#", "Mobile")
 config/icon="uid://betfal31o5rh8"
+config.version="0.1.0"
 
 [autoload]
 
 AspectLock="*res://AspectLock.cs"
 AppSettings="*res://AppSettings.cs"
 NetSession="*res://NetSession.cs"
-HeroLib="*res://HeroLibrary.cs"
 MCPRuntimeProbe="*uid://bsg12huaf1u5i"
+HeroLib="*res://HeroLibrary.cs"
 
 [display]
 
@@ -45,7 +45,7 @@ export/convert_text_resources_to_binary=false
 
 [editor_plugins]
 
-enabled=PackedStringArray("godot_mcp")
+enabled=PackedStringArray("res://addons/godot_mcp/plugin.cfg", "res://addons/mk_hero_export/plugin.cfg")
 
 [input]
 

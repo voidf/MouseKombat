@@ -296,22 +296,23 @@ public partial class MKEditorScreen : Control
 
     public override void _UnhandledKeyInput(InputEvent @event)
     {
+        if (_project == null) return;
         if (@event is not InputEventKey k || !k.Pressed || k.Echo) return;
 
         if (k.CtrlPressed && k.Keycode == Key.Z)
         {
             if (_project.Undo()) AfterHistory();
-            GetViewport().SetInputAsHandled();
+            GetViewport()?.SetInputAsHandled();
         }
         else if (k.CtrlPressed && k.Keycode == Key.Y)
         {
             if (_project.Redo()) AfterHistory();
-            GetViewport().SetInputAsHandled();
+            GetViewport()?.SetInputAsHandled();
         }
         else if (k.CtrlPressed && k.Keycode == Key.S)
         {
             Save();
-            GetViewport().SetInputAsHandled();
+            GetViewport()?.SetInputAsHandled();
         }
         else if (k.Keycode == Key.Escape)
         {
@@ -321,12 +322,15 @@ public partial class MKEditorScreen : Control
                 _timeline.QueueRedraw();
             }
             else RequestExit();
-            GetViewport().SetInputAsHandled();
+            // ChangeSceneToFile inside RequestExit may already detach this node from the tree,
+            // making GetViewport() null — never dereference it unconditionally here.
+            GetViewport()?.SetInputAsHandled();
         }
     }
 
     private void AfterHistory()
     {
+        if (_project == null || _tabs == null || _timeline == null || _canvas == null) return;
         _tabs.RebuildAll();
         _timeline.InvalidateThumbnails();
         _timeline.FrameChangedExternally();
@@ -336,6 +340,7 @@ public partial class MKEditorScreen : Control
 
     private void Save()
     {
+        if (_project == null) return;
         _project.SaveAll();
         UpdateStatus();
     }

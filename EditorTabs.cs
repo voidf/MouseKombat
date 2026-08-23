@@ -169,7 +169,9 @@ public sealed partial class EditorTabs : Control
             if (GodotObject.IsInstanceValid(widget)) widget.SetValueNoSignal(read());
     }
 
-    // Route an OS file drop (Window.FilesDropped) to the zone under the mouse, if any.
+    // Route an OS file drop (Window.FilesDropped) to the zone under the mouse, if any. A zone
+    // that does not accept ANY of the dropped extensions is skipped — otherwise a particle row
+    // under the cursor would swallow an .ogg drop (and vice versa).
     public void DispatchFilesDropped(string[] files, Vector2 globalMouse)
     {
         _dropZones.RemoveAll(z => !GodotObject.IsInstanceValid(z.C));
@@ -177,7 +179,8 @@ public sealed partial class EditorTabs : Control
         {
             if (!z.C.GetGlobalRect().HasPoint(globalMouse)) continue;
             var matching = files.Where(f => f.ToLower().EndsWith(z.Ext)).ToArray();
-            if (matching.Length > 0) z.OnFiles(matching);
+            if (matching.Length == 0) continue;
+            z.OnFiles(matching);
             return;
         }
     }
@@ -1251,10 +1254,14 @@ public sealed partial class EditorTabs : Control
 
     // ---- FX: OS file drops (Window.FilesDropped routed to zones) or 选择… buttons copy the
     // file in under its original name; the row shows the path RELATIVE TO THE GAME ROOT.
+    // Each row is a replacement drop target; the whole FX panel is a fallback target that
+    // creates NEW entries, so dropping tscn/ogg onto the section (even the + buttons) works.
     private void BuildFxSection(EditorChar ch, HeroFrame frame)
     {
-        Section(_constPage, "本帧 FX（纯表现，可拖入或选择 tscn/ogg）");
+        var fxPanel = new VBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
+        Section(fxPanel, "本帧 FX（纯表现，可拖入或选择 tscn/ogg；拖到空白区=新建条目）");
         var fx = frame.Fx ??= new HeroFx();
+
         for (int i = 0; i < fx.Particles.Count; i++)
         {
             int idx = i;
@@ -1284,16 +1291,19 @@ public sealed partial class EditorTabs : Control
             var del = new Button { Text = "删除", CustomMinimumSize = new Vector2(52, 26) };
             del.Pressed += () => { Project.PushUndo(); fx.Particles.RemoveAt(idx); RebuildConstantsPage(); };
             row.AddChild(del);
-            _constPage.AddChild(row);
+            fxPanel.AddChild(row);
         }
         var plusP = new Button { Text = "+ 粒子（可拖入或选择 tscn）" };
         plusP.Pressed += () => { Project.PushUndo(); fx.Particles.Add("ParticleTSCN/FX_Hit.tscn"); RebuildConstantsPage(); };
-        _constPage.AddChild(plusP);
+        fxPanel.AddChild(plusP);
 
         for (int i = 0; i < fx.Sounds.Count; i++)
         {
             int idx = i;
-            var row = new HBoxContainer { TooltipText = "在本帧播放的音效（当前角色 audio/ 下的 ogg）" };
+            var row = new HBoxContainer
+            {
+                TooltipText = "在本帧播放的音效（游戏根目录 SoundFXOGG/ 下的 ogg，任何角色可引用）",
+            };
             var edit = new LineEdit
             {
                 Text = fx.Sounds[i],
@@ -1305,22 +1315,55 @@ public sealed partial class EditorTabs : Control
             pick.Pressed += () => PickFile("*.ogg ; Ogg 音频", "选择音效 ogg", f =>
             {
                 var res = ch.ImportAudio(f, overwrite: true);
-                ApplyFxAsset(() => fx.Sounds[idx], v => fx.Sounds[idx] = v, res, "audio");
+                ApplyFxAsset(() => fx.Sounds[idx], v => fx.Sounds[idx] = v, res, "SoundFXOGG");
             });
             row.AddChild(pick);
             RegisterDropZone(row, ".ogg", files =>
             {
                 var res = ch.ImportAudio(files[0], overwrite: true);
-                ApplyFxAsset(() => fx.Sounds[idx], v => fx.Sounds[idx] = v, res, "audio");
+                ApplyFxAsset(() => fx.Sounds[idx], v => fx.Sounds[idx] = v, res, "SoundFXOGG");
             });
             var del = new Button { Text = "删除", CustomMinimumSize = new Vector2(52, 26) };
             del.Pressed += () => { Project.PushUndo(); fx.Sounds.RemoveAt(idx); RebuildConstantsPage(); };
             row.AddChild(del);
-            _constPage.AddChild(row);
+            fxPanel.AddChild(row);
         }
         var plusS = new Button { Text = "+ 音效（可拖入或选择 ogg）" };
         plusS.Pressed += () => { Project.PushUndo(); fx.Sounds.Add(""); RebuildConstantsPage(); };
-        _constPage.AddChild(plusS);
+        fxPanel.AddChild(plusS);
+
+        _constPage.AddChild(fxPanel);
+
+        // fallback drop targets registered AFTER the row targets: if the drop lands on empty FX
+        // space (or on a row whose extension does not match), it creates new entries.
+        RegisterDropZone(fxPanel, ".tscn", files => AddDroppedParticles(files, fx));
+        RegisterDropZone(fxPanel, ".ogg", files => AddDroppedSounds(ch, files, fx));
+    }
+
+    private void AddDroppedParticles(string[] files, HeroFx fx)
+    {
+        bool pushed = false;
+        foreach (var f in files.Where(f => f.ToLower().EndsWith(".tscn")))
+        {
+            var res = Project.ImportSharedAsset(f, "ParticleTSCN", overwrite: true);
+            if (res.Path == null) continue;
+            if (!pushed) { Project.PushUndo(); pushed = true; }
+            fx.Particles.Add(res.Path);
+        }
+        if (pushed) { Changed?.Invoke(); RebuildConstantsPage(); }
+    }
+
+    private void AddDroppedSounds(EditorChar ch, string[] files, HeroFx fx)
+    {
+        bool pushed = false;
+        foreach (var f in files.Where(f => f.ToLower().EndsWith(".ogg")))
+        {
+            var res = ch.ImportAudio(f, overwrite: true);
+            if (res.Path == null) continue;
+            if (!pushed) { Project.PushUndo(); pushed = true; }
+            fx.Sounds.Add(res.Path);
+        }
+        if (pushed) { Changed?.Invoke(); RebuildConstantsPage(); }
     }
 
     private void ApplyFxAsset(System.Func<string> get, System.Action<string> set, ImportOutcome res, string where)
