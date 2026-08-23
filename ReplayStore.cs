@@ -9,16 +9,16 @@ using MouseKombat.Sim;
 // to 50 local + 50 LAN + 50 lobby replays, not 50 in total. Separate folders make that a directory
 // listing rather than a filter.
 //
-//   user://replays/local/<timestamp>.mkr
-//   user://replays/lan/...
-//   user://replays/lobby/...
+//   <game root>/replays/local/<timestamp>.mkr      (exported: next to the .exe; dev: user://)
+//   <game root>/replays/lan/...
+//   <game root>/replays/lobby/...
 //
 // Files are named purely from the recording time. Player names are NOT in the filename: they are
 // user-supplied text and would need filesystem escaping for no benefit — everything the list screen
 // shows comes out of the header instead.
 public static class ReplayStore
 {
-    public const string Root = "user://replays";
+    public static string Root => GamePaths.IsExported ? GamePaths.RootPathFor("replays") : "user://replays";
 
     public static readonly string[] Modes = { ReplayData.ModeLocal, ReplayData.ModeLan, ReplayData.ModeLobby };
 

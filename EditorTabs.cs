@@ -1832,14 +1832,20 @@ public sealed partial class EditorTabs : Control
 
     private static string[] _fireballIds;
 
-    // res:// (dev: repo, export: pck) ∪ user:// (export-time shadow imports), sorted.
+    // res:// (dev: repo, export: pck) ∪ portable game root ∪ legacy user://, sorted.
     private static string[] FireballIds()
     {
         if (_fireballIds != null) return _fireballIds;
         var ids = new List<string>();
-        foreach (string scheme in new[] { "res://", "user://" })
+        var sources = new List<string> { "res://FireballTSCN" };
+        if (GamePaths.IsExported)
         {
-            var da = DirAccess.Open(scheme + "FireballTSCN");
+            sources.Insert(0, GamePaths.ExecutableRoot() + "/FireballTSCN");
+            sources.Add("user://FireballTSCN");
+        }
+        foreach (string source in sources)
+        {
+            var da = DirAccess.Open(source);
             if (da == null) continue;
             da.ListDirBegin();
             string f = da.GetNext();

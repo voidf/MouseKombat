@@ -11,11 +11,13 @@ using MouseKombat.Sim;
 //   Heroes/<name>/        one folder per character (char.json + actions/*.json + images/ + audio/)
 //   FireballTSCN/<id>.tscn  shared fireball prefabs (their Hitbox export is the sim's hit rect)
 //   ParticleTSCN/<id>.tscn  shared particle prefabs (FXTimeline references these by path)
+//   SoundFXOGG/<file>.ogg   shared sound effects
 //
-// On startup it scans res:// AND user:// (a user:// folder with the same name wins), loads every
-// hero, compiles its MoveSet, packs all frame images into in-memory atlas pages (no files are
-// written — see the rendercall note in the design docs), and computes the asset hash the title
-// screen shows and the lobby/LAN version gates enforce:
+// Dev (Godot Editor) scans the repo (res://). Exported builds scan the PORTABLE folders next to
+// the .exe first, then the pck's res:// copy, and only then legacy user:// (priority in that
+// order). It loads every hero, compiles its MoveSet, packs all frame images into in-memory atlas
+// pages (no files are written — see the rendercall note in the design docs), and computes the
+// asset hash the title screen shows and the lobby/LAN version gates enforce:
 //
 //   md5 of every content file's (relative path + bytes), files visited in ordinal path order.
 //
@@ -24,13 +26,27 @@ public partial class HeroLibrary : Node
 {
     public static HeroLibrary Instance { get; private set; }
 
-    // In a dev (Godot Editor) run, user:// shadow copies must NOT participate in hashing/loading:
-    // they may be leftovers from an exported build on the same machine, and letting a stale
-    // user:// tree override res:// is exactly the "editor hash and Out hash never agree" trap.
-    // Exported builds scan res:// (the pck) and then user://, with user:// winning.
+    // Dev (Godot Editor): only res:// (the repo) participates, never stale user:// leftovers.
+    // Exported build: portable game-root folders next to the .exe win first, then the pck's
+    // res:// copy fills missing files, and user:// is only a LAST-RESORT legacy fallback. This
+    // makes a copy of Heroes/ FireballTSCN/ ParticleTSCN/ SoundFXOGG/ next to the exe produce
+    // exactly the same hash as the Godot Editor reading the same files from the repo.
     private static bool IsExportedBuild => OS.HasFeature("template");
-    private static IEnumerable<string> ContentSchemes =>
-        IsExportedBuild ? new[] { "res://", "user://" } : new[] { "res://" };
+
+    private static IEnumerable<string> ContentSources(string root)
+    {
+        if (IsExportedBuild)
+        {
+            string portable = GamePaths.ExecutableRoot();
+            if (!string.IsNullOrEmpty(portable)) yield return portable + "/" + root;
+            yield return "res://" + root;               // packaged content (pck)
+            yield return "user://" + root;              // legacy AppData fallback only
+        }
+        else
+        {
+            yield return "res://" + root;
+        }
+    }
 
     public string AssetHash { get; private set; } = "";
     public string AssetHashShort => AssetHash.Length >= 6 ? AssetHash[..6] : AssetHash;
@@ -48,7 +64,7 @@ public partial class HeroLibrary : Node
     {
         public HeroCharDef Def;
         public string Folder;                          // "Hamster"
-        public string RootPath;                        // "res://Heroes/Hamster" or user:// shadow
+        public string RootPath;                        // res://, portable <exe dir>, or legacy user://
         public string ResRootPath;                     // the packaged res:// copy, for per-file fallback
         public MoveSet Compiled;
         public Dictionary<string, HeroActionDef> Actions = new();
@@ -90,9 +106,19 @@ public partial class HeroLibrary : Node
     {
         if (string.IsNullOrEmpty(path)) return null;
         if (_particles.TryGetValue(path, out var cached)) return cached;
-        // res:// first (dev / pck), then a user:// shadow copy (exported editor imports)
-        string res = ResolveResPath(path);
-        var scene = ResourceLoader.Exists(res) ? ResourceLoader.Load<PackedScene>(res) : null;
+
+        PackedScene scene = null;
+        if (IsExportedBuild)
+        {
+            // portable game-root copy first, then the pck, then legacy user://
+            string portable = GamePaths.ExecutableRoot() + "/" + path;
+            if (ResourceLoader.Exists(portable)) scene = ResourceLoader.Load<PackedScene>(portable);
+        }
+        if (scene == null)
+        {
+            string res = ResolveResPath(path);
+            if (ResourceLoader.Exists(res)) scene = ResourceLoader.Load<PackedScene>(res);
+        }
         if (scene == null)
         {
             string userPath = "user://" + path;
@@ -126,15 +152,13 @@ public partial class HeroLibrary : Node
         _fireballs.Clear();
         _particles.Clear();
 
-        // normalized path ("Heroes/x/char.json", scheme stripped) -> real res://|user:// path.
-        // user:// is scanned after res:// so a shadow copy of the same file WINS — an exported
-        // build's editable user:// copy overrides the pck's shipped file. Hashing the
-        // normalized paths is what makes a dev build (res:// only) and an exported build with
-        // byte-identical shadow copies produce the SAME asset hash.
+        // normalized path ("Heroes/x/char.json") -> first source that provides it. Sources are
+        // visited in priority order (portable dir, pck, legacy user://) and later duplicates are
+        // ignored, so Out\Heroes beats both the pck and AppData.
         var files = new Dictionary<string, string>();
-        foreach (string scheme in ContentSchemes)
-            foreach (string root in Roots)
-                CollectDir(scheme + root, files);
+        foreach (string root in Roots)
+            foreach (string source in ContentSources(root))
+                CollectDir(source, root, files);
 
         using var md5 = MD5.Create();
         var hashInput = new MemoryStream();
@@ -167,7 +191,10 @@ public partial class HeroLibrary : Node
         return name.StartsWith('.') || name.EndsWith(".import") || name == "images-manifest.json";
     }
 
-    private static void CollectDir(string dir, Dictionary<string, string> into)
+    // Collect files under `dir` with normalized identities rooted at `prefix` (e.g.
+    // "Heroes/Hamster/char.json"). The first source that provides an identity wins; later
+    // duplicates from lower-priority sources are skipped.
+    private static void CollectDir(string dir, string prefix, Dictionary<string, string> into)
     {
         var da = DirAccess.Open(dir);
         if (da == null) return;
@@ -177,15 +204,9 @@ public partial class HeroLibrary : Node
         {
             if (entry.StartsWith(".")) { entry = da.GetNext(); continue; }
             string full = dir + "/" + entry;
-            if (da.CurrentIsDir())
-                CollectDir(full, into);
-            else
-            {
-                // strip the scheme: "res://Heroes/x" and "user://Heroes/x" share the identity
-                // "Heroes/x", so shadowing replaces instead of adding a second hash entry
-                int schemeEnd = full.IndexOf("://") + 3;
-                into[full[schemeEnd..]] = full;
-            }
+            string virt = prefix + "/" + entry;
+            if (da.CurrentIsDir()) CollectDir(full, virt, into);
+            else if (!into.ContainsKey(virt)) into[virt] = full;
             entry = da.GetNext();
         }
         da.ListDirEnd();
@@ -193,12 +214,12 @@ public partial class HeroLibrary : Node
 
     private void LoadHeroes()
     {
-        // folder name -> best root path (user:// beats res:// in exported builds)
+        // folder name -> best root path (portable dir beats pck beats legacy user://)
         var folders = new Dictionary<string, string>();
         var resFolders = new Dictionary<string, string>();
-        foreach (string scheme in ContentSchemes)
+        foreach (string source in ContentSources("Heroes"))
         {
-            var da = DirAccess.Open(scheme + "Heroes");
+            var da = DirAccess.Open(source);
             if (da == null) continue;
             da.ListDirBegin();
             string entry = da.GetNext();
@@ -206,9 +227,10 @@ public partial class HeroLibrary : Node
             {
                 if (!entry.StartsWith(".") && da.CurrentIsDir())
                 {
-                    string path = scheme + "Heroes/" + entry;
-                    folders[entry] = path;
-                    if (scheme == "res://") resFolders[entry] = path;
+                    string path = source + "/" + entry;
+                    if (!folders.ContainsKey(entry)) folders[entry] = path;
+                    if (source.StartsWith("res://") && !resFolders.ContainsKey(entry))
+                        resFolders[entry] = path;
                 }
                 entry = da.GetNext();
             }
@@ -286,9 +308,9 @@ public partial class HeroLibrary : Node
 
     private void LoadFireballs()
     {
-        foreach (string scheme in ContentSchemes)
+        foreach (string source in ContentSources("FireballTSCN"))
         {
-            var da = DirAccess.Open(scheme + "FireballTSCN");
+            var da = DirAccess.Open(source);
             if (da == null) continue;
             da.ListDirBegin();
             string f = da.GetNext();
@@ -297,8 +319,8 @@ public partial class HeroLibrary : Node
                 if (f.EndsWith(".tscn"))
                 {
                     string id = f[..^5];
-                    string path = scheme + "FireballTSCN/" + f;
-                    if (ResourceLoader.Exists(path))
+                    string path = source + "/" + f;
+                    if (!_fireballs.ContainsKey(id) && ResourceLoader.Exists(path))
                         _fireballs[id] = ResourceLoader.Load<PackedScene>(path);
                 }
                 f = da.GetNext();

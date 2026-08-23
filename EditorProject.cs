@@ -31,18 +31,16 @@ public sealed class EditorProject
 
     // ---------------- loading / saving ----------------
 
-    // Where the editor's WRITES go. In dev that is the repo itself (res:// == the project
-    // folder, writable). In an EXPORTED build res:// is the read-only .pck, so the editor
-    // works on user:// shadow copies instead — the same place HeroLibrary.Scan() lets win
-    // over res:// — which is why saves in the exported build change the asset hash.
+    // Where the editor's WRITES go. In dev that is the repo itself. In an EXPORTED build it is
+    // the folder containing the executable (portable layout, like ai_rl_model): Heroes/,
+    // FireballTSCN/, ParticleTSCN/ and SoundFXOGG/ live next to the .exe, NOT in user://.
     public static bool IsExported => OS.HasFeature("template");
 
-    public static string WritableGameRoot() =>
-        ProjectSettings.GlobalizePath(IsExported ? "user://" : "res://");
+    public static string WritableGameRoot() => GamePaths.WritableRoot();
 
     public static EditorProject LoadDefault()
     {
-        if (IsExported) BootstrapShadowCopies();
+        if (IsExported) BootstrapGameRootContent();
         string root = System.IO.Path.Combine(WritableGameRoot(), "Heroes");
         if (!Directory.Exists(root)) Directory.CreateDirectory(root);
         var p = new EditorProject { HeroesRoot = root };
@@ -55,27 +53,26 @@ public sealed class EditorProject
         return p;
     }
 
-    // First editor run in an exported build: copy the shipped content out of the pck into
-    // user:// so it becomes editable. Later runs only fill MISSING entries — existing user
-    // files are the user's edits and are never overwritten. This also heals a shadow folder
-    // bootstrapped by an older build that lacked newly added assets (e.g. WALK_006.png).
-    private static void BootstrapShadowCopies()
+    // First editor run in an exported build: if the portable game-root folders are missing, fill
+    // them from the pck so the package works standalone. Later runs only fill MISSING entries —
+    // existing files are the user's edits and are never overwritten.
+    private static void BootstrapGameRootContent()
     {
         foreach (string folder in new[] { "Heroes", "FireballTSCN", "ParticleTSCN", "SoundFXOGG" })
         {
-            int copied = SyncResTree("res://" + folder, "user://" + folder);
+            int copied = SyncResTree("res://" + folder, System.IO.Path.Combine(WritableGameRoot(), folder));
             if (copied > 0)
-                GD.Print($"[MKEditor] shadow-copied {copied} missing file(s) into user://{folder}");
+                GD.Print($"[MKEditor] copied {copied} missing packaged file(s) into {folder}/ next to the exe");
         }
     }
 
-    // res:// may live inside a pck, so this copy goes through Godot's file APIs, not System.IO.
-    // Existing user:// files are left untouched (they may be the user's edits).
-    private static int SyncResTree(string from, string to)
+    // Source may live inside a pck (read through Godot's VFS); destination is a real game-root
+    // folder (written through System.IO). Existing files are left untouched.
+    private static int SyncResTree(string from, string toAbs)
     {
         var da = DirAccess.Open(from);
         if (da == null) return 0;
-        DirAccess.MakeDirRecursiveAbsolute(ProjectSettings.GlobalizePath(to));
+        Directory.CreateDirectory(toAbs);
         int copied = 0;
         da.ListDirBegin();
         string entry = da.GetNext();
@@ -84,19 +81,14 @@ public sealed class EditorProject
             if (!entry.StartsWith("."))
             {
                 string src = from + "/" + entry;
-                string dst = to + "/" + entry;
-                if (da.CurrentIsDir()) copied += SyncResTree(src, dst);
-                else if (!Godot.FileAccess.FileExists(dst))
+                string dstAbs = Path.Combine(toAbs, entry);
+                if (da.CurrentIsDir()) copied += SyncResTree(src, dstAbs);
+                else if (!File.Exists(dstAbs))
                 {
                     using var reader = Godot.FileAccess.Open(src, Godot.FileAccess.ModeFlags.Read);
                     if (reader == null) { entry = da.GetNext(); continue; }
-                    var bytes = reader.GetBuffer((int)reader.GetLength());
-                    using var writer = Godot.FileAccess.Open(dst, Godot.FileAccess.ModeFlags.Write);
-                    if (writer != null)
-                    {
-                        writer.StoreBuffer(bytes);
-                        copied++;
-                    }
+                    File.WriteAllBytes(dstAbs, reader.GetBuffer((int)reader.GetLength()));
+                    copied++;
                 }
             }
             entry = da.GetNext();
@@ -126,8 +118,8 @@ public sealed class EditorProject
     }
 
     // A shared asset (particle/fireball tscn) copied into a GAME-ROOT folder (ParticleTSCN/…)
-    // under its original name. In dev the game root is the repo; in an exported build it is
-    // user:// (the shadow copy the runtime prefers). Returns the game-root-relative path.
+    // under its original name. In dev the game root is the repo; in an exported build it is the
+    // folder next to the executable. Returns the game-root-relative path.
     public ImportOutcome ImportSharedAsset(string sourcePath, string folder, bool overwrite = false)
     {
         string dir = System.IO.Path.Combine(WritableGameRoot(), folder);
