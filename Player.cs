@@ -38,6 +38,8 @@ public partial class Player : Node2D
     // when on, walking backward (away from the opponent) plays WALK in reverse; off = always forward.
     [Export] public bool ReverseWalkBackward = false;
     [Export] public string HurtAnimName = "HURT";
+    [Export] public string MidHurtAnimName = "HURT";    // mid hit reaction; HURT until dedicated art exists
+    [Export] public string LowHurtAnimName = "HURT";    // low hit reaction; HURT until dedicated art exists
     [Export] public string DefAnimName = "DEF";              // standing block-hit
     [Export] public string CrouchDefAnimName = "CROUCHDEF";  // crouching block-hit
     [Export] public string JumpAnimName = "JUMP";
@@ -144,6 +146,8 @@ public partial class Player : Node2D
         IdleAnimName = IdleAnimName,
         WalkAnimName = WalkAnimName,
         HurtAnimName = HurtAnimName,
+        MidHurtAnimName = MidHurtAnimName,
+        LowHurtAnimName = LowHurtAnimName,
         DefAnimName = DefAnimName,
         CrouchDefAnimName = CrouchDefAnimName,
         JumpAnimName = JumpAnimName,

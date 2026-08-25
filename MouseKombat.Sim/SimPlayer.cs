@@ -1030,11 +1030,36 @@ public sealed class SimPlayer
             State = PlayerState.Hurt;
             _hurtFrame = 0;
             _hurtStunDuration = move.oH > 0 ? move.oH : _cfg.HurtStunFrames;
-            PlayAnim(_cfg.HurtAnimName, true);
+            PlayAnim(HurtAnimNameFor(move), true);
             if (move.Knockback > 0)
                 _pendingPushX = pushDir * move.Knockback;
         }
         return HitResult.Hit;
+    }
+
+    // Ground hit reaction clip selection:
+    //   1. the attacker's explicit HurtAnimOverride, when the VICTIM actually has that action;
+    //   2. otherwise the victim's default animation for the attack's guard height (上/中/下段).
+    // This deliberately stays out of the juggle/air-reset branches above: launches and air hits
+    // keep their state-specific LAUNCH / AIR_HURT clips.
+    private string HurtAnimNameFor(MoveDef move)
+    {
+        if (move == null) return string.IsNullOrEmpty(_cfg.HurtAnimName) ? "HURT" : _cfg.HurtAnimName;
+
+        if (!string.IsNullOrEmpty(move.HurtAnimOverride))
+        {
+            var victimClip = _moves.ById(move.HurtAnimOverride);
+            if (victimClip != null) return move.HurtAnimOverride;
+        }
+
+        return move.Guard switch
+        {
+            GuardHeight.Mid => string.IsNullOrEmpty(_cfg.MidHurtAnimName)
+                ? _cfg.HurtAnimName : _cfg.MidHurtAnimName,
+            GuardHeight.Low => string.IsNullOrEmpty(_cfg.LowHurtAnimName)
+                ? _cfg.HurtAnimName : _cfg.LowHurtAnimName,
+            _ => string.IsNullOrEmpty(_cfg.HurtAnimName) ? "HURT" : _cfg.HurtAnimName,
+        };
     }
 
     // ================= savestate =================

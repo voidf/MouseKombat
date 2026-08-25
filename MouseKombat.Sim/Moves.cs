@@ -172,6 +172,11 @@ public sealed class MoveDef
     public AttackButton[] ComboButtons = null;
     public bool Unblockable = false; // throws ignore guard
 
+    // Optional victim hit-reaction clip (data-driven heroes): overrides the victim's default
+    // guard-height hurt animation on a successful hit. Empty = use the victim's High/Mid/Low
+    // default chosen from this move's Guard. The name is resolved against the VICTIM's MoveSet.
+    public string HurtAnimOverride = "";
+
     // Non-null => this move is a THROW (grab + hold + release), not a strike. See ThrowSpec.
     public ThrowSpec Throw = null;
 

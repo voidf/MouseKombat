@@ -117,6 +117,10 @@ public sealed class HeroAttack
     public bool AnyKick { get; set; }
     public string Stance { get; set; } = "Stand";
     public bool Unblockable { get; set; }          // throws ignore guard
+    // Optional victim hit-reaction clip: when set, a hit by this move plays THIS action on the
+    // victim instead of the victim's guard-height default. The name must exist on the VICTIM
+    // (any character may be hit, so the editor offers every character's action list).
+    public string HurtAnimOverride { get; set; } = "";
     public List<string> StartupCancelInto { get; set; } = new();   // cancellable while in startup
     public List<string> RecoveryCancelInto { get; set; } = new();  // cancellable while in recovery
     public List<HeroActive> Actives { get; set; } = new();
@@ -194,7 +198,9 @@ public sealed class HeroAnimNames
 {
     public string Idle { get; set; } = "IDLE";
     public string Walk { get; set; } = "WALK";
-    public string Hurt { get; set; } = "HURT";
+    public string Hurt { get; set; } = "HURT";       // upper hit reaction (existing HURT migrated here)
+    public string MidHurt { get; set; } = "HURT";    // mid hit reaction; falls back to HURT until art exists
+    public string LowHurt { get; set; } = "HURT";    // low hit reaction; falls back to HURT until art exists
     public string Def { get; set; } = "DEF";
     public string CrouchDef { get; set; } = "CROUCHDEF";
     public string Jump { get; set; } = "JUMP";
@@ -309,6 +315,7 @@ public static class HeroCompiler
         m.Motion = ParseMotion(atk.Motion);
         m.CommandLabel = atk.CommandLabel;
         m.Unblockable = atk.Unblockable;
+        m.HurtAnimOverride = atk.HurtAnimOverride ?? "";
         m.Damage = 0;   // melee damage lives per active interval; kept 0 on the move itself
 
         // buttons: one entry = command button, two entries = simultaneous press (throw input)
@@ -501,6 +508,8 @@ public static class HeroCompiler
         cfg.IdleAnimName = n.Idle;
         cfg.WalkAnimName = n.Walk;
         cfg.HurtAnimName = n.Hurt;
+        cfg.MidHurtAnimName = n.MidHurt;
+        cfg.LowHurtAnimName = n.LowHurt;
         cfg.DefAnimName = n.Def;
         cfg.CrouchDefAnimName = n.CrouchDef;
         cfg.JumpAnimName = n.Jump;

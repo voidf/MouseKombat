@@ -75,6 +75,8 @@
     "idle": "IDLE",
     "walk": "WALK",
     "hurt": "HURT",
+    "midHurt": "HURT",
+    "lowHurt": "HURT",
     "def": "DEF",
     "crouchDef": "CROUCHDEF",
     "jump": "JUMP",

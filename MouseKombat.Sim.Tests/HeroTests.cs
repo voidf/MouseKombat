@@ -19,6 +19,12 @@ internal static partial class Program
         };
 
         var hero = new HeroCharDef { Name = "Testy", DisplayName = "测试鼠" };
+        hero.AnimNames = new HeroAnimNames
+        {
+            Hurt = "HURT",
+            MidHurt = "HURT_MID",
+            LowHurt = "HURT_LOW",
+        };
 
         var multi = A("MULTI", 16, attack: true);
         multi.Attack.StartupRange = new[] { 0, 2 };
@@ -177,6 +183,65 @@ internal static partial class Program
             Check(same, "hero: JSON round-trip preserves the action table");
             Check(back.Actions.First(a => a.Name == "THROWV").Throw.HurtTimeline.Count == 2,
                 "hero: JSON round-trip preserves multi-hit throw ticks");
+        }
+
+        // ---- victim hurt anim: guard-height defaults (上/中/下段) + HurtAnimOverride ----
+        {
+            var hurtHero = BuildTestHero();
+            hurtHero.Actions.Add(new HeroActionDef
+            {
+                Name = "OVRHIT",
+                Frames = Enumerable.Range(0, 4).Select(_ => new HeroFrame()).ToList(),
+                IsAttack = true,
+                Attack = new HeroAttack
+                {
+                    Guard = "High",
+                    HurtAnimOverride = "LAUNCH",
+                    Actives = new List<HeroActive>
+                    {
+                        new() { ActiveRange = new[] { 1, 2 }, Damage = 100,
+                                Hitboxes = new List<HeroBox> { new(85, -100, 25, 20) } },
+                    },
+                },
+            });
+
+            var compiled = HeroCompiler.Compile(hurtHero);
+            Check(compiled.ById("OVRHIT").HurtAnimOverride == "LAUNCH",
+                "hero: compile keeps the victim hurt-animation override");
+
+            static string LastHurtAnim(GameSim sim)
+            {
+                for (int i = sim.P2.AnimEvents.Count - 1; i >= 0; i--)
+                    if (sim.P2.AnimEvents[i].Kind == AnimKind.PlayRestart)
+                        return sim.P2.AnimEvents[i].Name;
+                return "";
+            }
+
+            var high = MakeHeroSim(hurtHero);
+            high.P2.ApplyDamage(new MoveDef { Guard = GuardHeight.High, Damage = 10 }, 1, 10);
+            Check(LastHurtAnim(high) == "HURT", $"hero: high hit plays the upper hurt anim ({LastHurtAnim(high)})");
+
+            var mid = MakeHeroSim(hurtHero);
+            mid.P2.ApplyDamage(new MoveDef { Guard = GuardHeight.Mid, Damage = 10 }, 1, 10);
+            Check(LastHurtAnim(mid) == "HURT_MID", $"hero: mid hit plays the mid hurt anim ({LastHurtAnim(mid)})");
+
+            var low = MakeHeroSim(hurtHero);
+            low.P2.ApplyDamage(new MoveDef { Guard = GuardHeight.Low, Damage = 10 }, 1, 10);
+            Check(LastHurtAnim(low) == "HURT_LOW", $"hero: low hit plays the low hurt anim ({LastHurtAnim(low)})");
+
+            var over = MakeHeroSim(hurtHero);
+            over.P2.ApplyDamage(compiled.ById("OVRHIT"), 1, 10);
+            Check(LastHurtAnim(over) == "LAUNCH", $"hero: HurtAnimOverride wins over the default ({LastHurtAnim(over)})");
+
+            var missing = MakeHeroSim(hurtHero);
+            missing.P2.ApplyDamage(new MoveDef
+            {
+                Guard = GuardHeight.High,
+                HurtAnimOverride = "NO_SUCH_ACTION",
+                Damage = 10,
+            }, 1, 10);
+            Check(LastHurtAnim(missing) == "HURT",
+                $"hero: an override the victim lacks falls back to the guard-height default ({LastHurtAnim(missing)})");
         }
 
         // ---- compiler: phase ranges land where they were authored ----

@@ -53,7 +53,9 @@ public sealed class PlayerConfig
     // animation clip names the sim references when emitting AnimCommands
     public string IdleAnimName = "IDLE";
     public string WalkAnimName = "WALK";
-    public string HurtAnimName = "HURT";
+    public string HurtAnimName = "HURT";          // upper hit reaction (existing HURT migrated here)
+    public string MidHurtAnimName = "HURT";       // mid hit reaction; HURT until dedicated art exists
+    public string LowHurtAnimName = "HURT";       // low hit reaction; HURT until dedicated art exists
     public string DefAnimName = "DEF";
     public string CrouchDefAnimName = "CROUCHDEF";
     public string JumpAnimName = "JUMP";

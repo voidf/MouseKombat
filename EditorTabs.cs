@@ -457,17 +457,25 @@ public sealed partial class EditorTabs : Control
         Project.PushUndo();
         string old = a.Name;
         a.Name = t;
-        // keep references pointing at the new name (whiff/throw targets, cancels)
+        // keep references pointing at the new name (whiff/throw targets, cancels, victim anims)
         foreach (var other in ch.Def.Actions)
         {
-            if (other.Attack == null) continue;
-            foreach (var act in other.Attack.Actives)
+            if (other.Attack != null)
             {
-                if (act.WhiffAction == old) act.WhiffAction = t;
-                if (act.ThrowAction == old) act.ThrowAction = t;
+                foreach (var act in other.Attack.Actives)
+                {
+                    if (act.WhiffAction == old) act.WhiffAction = t;
+                    if (act.ThrowAction == old) act.ThrowAction = t;
+                }
+                if (other.Attack.HurtAnimOverride == old) other.Attack.HurtAnimOverride = t;
+                other.Attack.StartupCancelInto = RenameIn(other.Attack.StartupCancelInto, old, t);
+                other.Attack.RecoveryCancelInto = RenameIn(other.Attack.RecoveryCancelInto, old, t);
             }
-            other.Attack.StartupCancelInto = RenameIn(other.Attack.StartupCancelInto, old, t);
-            other.Attack.RecoveryCancelInto = RenameIn(other.Attack.RecoveryCancelInto, old, t);
+            if (other.Throw?.VictimBind != null)
+            {
+                foreach (var k in other.Throw.VictimBind)
+                    if (k.VictimAnim == old) k.VictimAnim = t;
+            }
         }
         if (Project.SelectedAction == old) Project.SelectedAction = t;
         StructureChanged?.Invoke();
@@ -849,6 +857,9 @@ public sealed partial class EditorTabs : Control
             "抬手阶段无敌：不会被打击和投技命中"));
         _constPage.AddChild(Check("Unblockable", a.Unblockable, v => { MarkEditing(); a.Unblockable = v; Changed?.Invoke(); },
             "防御不能：该招绕过防御直接命中（投技类判定）"));
+        _constPage.AddChild(ActionPickerRow("HurtAnimOverride", a.HurtAnimOverride ?? "",
+            v => { MarkEditing(); a.HurtAnimOverride = v; Changed?.Invoke(); },
+            "命中后受害者播放的动作名（任意角色的动作）。留空 = 按本招 Guard 高度播放受害者默认的上/中/下段受击动画。"));
 
         var motionRow = new HBoxContainer
         {
@@ -1230,8 +1241,9 @@ public sealed partial class EditorTabs : Control
             body.AddChild(FloatRow("BindPos.Y", k.BindPos?.Y ?? 0,
                 v => { MarkEditing(); k.BindPos = new HeroVec(k.BindPos?.X ?? 0, v); Changed?.Invoke(); },
                 "受害者锚点相对投技方锚点的 Y 偏移（上为负）"));
-            body.AddChild(TextRow("VictimAnim", k.VictimAnim ?? "", s2 => { MarkEditing(); k.VictimAnim = s2; Changed?.Invoke(); },
-                "受害者在绑定期间播放的动作名（对方角色的动作）"));
+            body.AddChild(ActionPickerRow("VictimAnim", k.VictimAnim ?? "",
+                s2 => { MarkEditing(); k.VictimAnim = s2; Changed?.Invoke(); },
+                "受害者在绑定期间播放的动作名（按下下拉时扫描所有角色的动作，支持搜索过滤）"));
             body.AddChild(Check("IsResetVictimAnim", k.IsResetVictimAnim,
                 v => { MarkEditing(); k.IsResetVictimAnim = v; Changed?.Invoke(); },
                 "勾选：即使下一绑定帧动画名相同也从首帧重播；否则同名动画继续播放"));
@@ -1765,6 +1777,136 @@ public sealed partial class EditorTabs : Control
             Changed?.Invoke();
         };
         row.AddChild(dd);
+        return row;
+    }
+
+    // Searchable dropdown over EVERY character's action list. The list is scanned lazily each
+    // time the button is pressed (so newly added/renamed actions always appear), and the search
+    // field filters case-insensitively: an entry stays visible when the query is a substring of
+    // the displayed "角色 / 动作" text. VictimAnim and HurtAnimOverride share this control.
+    private Control ActionPickerRow(string label, string current, System.Action<string> set,
+        string tip = null, bool allowEmpty = true)
+    {
+        var row = new HBoxContainer { TooltipText = tip };
+        row.AddChild(new Label { Text = label + " ", SizeFlagsHorizontal = SizeFlags.ShrinkBegin });
+
+        static string DisplayAction(string v) => string.IsNullOrEmpty(v) ? "（无） ▾" : v + " ▾";
+
+        var button = new Button
+        {
+            Text = DisplayAction(current),
+            CustomMinimumSize = new Vector2(200, 30),
+            ClipText = true,
+        };
+
+        var popup = new PopupPanel { MinSize = new Vector2I(400, 340) };
+        var box = new VBoxContainer
+        {
+            AnchorRight = 1f,
+            AnchorBottom = 1f,
+            SizeFlagsHorizontal = SizeFlags.ExpandFill,
+            SizeFlagsVertical = SizeFlags.ExpandFill,
+        };
+        var search = new LineEdit
+        {
+            PlaceholderText = "搜索动作（不区分大小写，匹配子串）…",
+            ClearButtonEnabled = true,
+            CustomMinimumSize = new Vector2(0, 32),
+        };
+        var scroll = new ScrollContainer
+        {
+            SizeFlagsHorizontal = SizeFlags.ExpandFill,
+            SizeFlagsVertical = SizeFlags.ExpandFill,
+            CustomMinimumSize = new Vector2(360, 260),
+            HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled,
+        };
+        var list = new VBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
+        scroll.AddChild(list);
+        box.AddChild(search);
+        box.AddChild(scroll);
+        popup.AddChild(box);
+        row.AddChild(button);
+        row.AddChild(popup);
+
+        void Select(string name)
+        {
+            current = name;
+            set(name);
+            button.Text = DisplayAction(name);
+            popup.Hide();
+        }
+
+        void RebuildList()
+        {
+            ClearChildren(list);
+            string q = search.Text.Trim();
+
+            if (allowEmpty && q.Length == 0)
+            {
+                var none = new Button
+                {
+                    Text = "（无）",
+                    SizeFlagsHorizontal = SizeFlags.ExpandFill,
+                    CustomMinimumSize = new Vector2(0, 30),
+                };
+                none.Pressed += () => Select("");
+                list.AddChild(none);
+            }
+
+            // scanned on open, but rebuilding here costs nothing and keeps entries correct even
+            // while the popup stays open across edits
+            var entries = new List<(string Folder, string Name, string Text)>();
+            var seen = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
+            foreach (var ch in Project.Chars.OrderBy(c => c.Folder, System.StringComparer.OrdinalIgnoreCase))
+            {
+                foreach (var a in ch.Def.Actions.OrderBy(a => a.Name, System.StringComparer.OrdinalIgnoreCase))
+                {
+                    string text = $"{ch.Folder} / {a.Name}";
+                    if (seen.Add(text)) entries.Add((ch.Folder, a.Name, text));
+                }
+            }
+
+            // keep a stale value selectable so it can be inspected/re-chosen
+            if (!string.IsNullOrEmpty(current) && !entries.Any(e => e.Name == current))
+            {
+                string text = $"{current}（当前值）";
+                entries.Insert(0, ("", current, text));
+            }
+
+            foreach (var e in entries)
+            {
+                if (q.Length > 0
+                    && e.Text.IndexOf(q, System.StringComparison.OrdinalIgnoreCase) < 0)
+                    continue;
+                string name = e.Name;
+                var item = new Button
+                {
+                    Text = e.Text,
+                    SizeFlagsHorizontal = SizeFlags.ExpandFill,
+                    CustomMinimumSize = new Vector2(0, 30),
+                    Alignment = HorizontalAlignment.Left,
+                };
+                item.Pressed += () => Select(name);
+                list.AddChild(item);
+            }
+        }
+
+        void OpenPopup()
+        {
+            search.Text = "";
+            RebuildList();
+            PositionPopup(popup, button, button.GlobalPosition + new Vector2(0, button.Size.Y));
+            popup.Popup();
+            search.GrabFocus();
+        }
+
+        button.Pressed += () =>
+        {
+            if (popup.Visible) popup.Hide();
+            else OpenPopup();
+        };
+        search.TextChanged += _ => RebuildList();
+        popup.PopupHide += () => button.Text = DisplayAction(current);
         return row;
     }
 
