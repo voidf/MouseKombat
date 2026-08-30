@@ -111,10 +111,86 @@ ESC 退出房间后回到选房界面; 建房后 ESC 保持大厅连接; 主持�
 The one `Bye` that does close a connection is the server shutting down.
 
 A member leaving mid-match keeps its slot reserved **only while it holds a fighting seat**: the
-opponent is still simulating against that seat, so the seat stays claimed, the player stays in the
-snapshot as `Connected=false`, and the kick happens at match end (§ Ending, same as LAN). A
+opponent is still simulating against that seat, so the seat stays claimed, the player stays in
+the snapshot as `Connected=false`, and the kick happens at match end (§ Ending, same as LAN). A
 **seatless watcher** changes nothing about the match, so it is removed outright and its human slot is
-free at once — reserving it left rooms advertising `2/4 人` that refused every joiner with 房间已满.
+free at once (`RoomState.HoldsSeat` / `room.py holds_seat` decide which is which).
+
+## Accounts and matchmaking
+
+The lobby server persists player accounts in ONE SQLite file (`players`: `playerid`
+AUTOINCREMENT from 1, `name` UNIQUE, `score`, `created_at`; WAL mode — `server/player_store.py`).
+The Hello **name is the login**: the first sight of a name registers the account with the
+configured initial score (1000); every later login loads `playerid` + `score` by name. The name
+stays display text for everything else; the account row is the identity that is scored and
+顶号'd by. Room-local `playerId` values are unaffected — they remain per-room membership ids.
+
+### Login and 顶号 (kick-out)
+
+Login happens as part of Hello, before any browse op:
+
+1. The server looks the name up (creating the row on first sight) and checks its ONLINE table
+   (`playerid -> connection`).
+2. **Not online** → the connection is bound to the account and answered `LoginOk{playerid,
+   score}`; the browse phase opens on it.
+3. **Online elsewhere** → the connection parks in a kick-wait phase and receives
+   `KickConfirm{name, score}`. The client shows the 「继续登录将顶号」popup.
+   * Confirm → `KickLogin{name}`: the server tears the OLD session down **completely first** —
+     out of the matchmaking pool, out of its room (and if it held a fighting seat in a RUNNING
+     match, that seat counts as a SURRENDER: the match ends with the opponent as the winner and
+     the Elo settles immediately) — then sends the old connection `Kicked{reason}` and closes it,
+     re-reads the (possibly just-settled) score, binds the account to the NEW connection, and
+     answers `LoginOk`. The full teardown-before-bind ordering is the race-condition rule: the
+     new session must never see a half-dead old one. Confirming kicks whoever CURRENTLY holds
+     the account, so a race between two confirmers is resolved last-writer-wins.
+   * Cancel (or a plain disconnect) leaves the account with the other session; the kick-wait
+     connection is reaped on the short idle timeout.
+4. A client that sends browse ops while in the kick-wait phase gets a non-fatal `Rejected`
+   (请先完成登录) — an old build's parked `LobbyList` must not kill the connection.
+
+The kicked client surfaces `Kicked` as its ordinary `Disconnected` flow, so every screen already
+reacts the way it does to any drop — only the reason text names the takeover. Going offline (any
+connection loss) removes the account from the online table and the matchmaking pool.
+
+### Matchmaking pool
+
+A logged-in connection in the browse phase may `MatchmakeJoin` (the quick-match button) and
+`MatchmakeCancel`. The server keeps the pool in memory and runs a heartbeat (config
+`tick_interval_seconds`): each waiting player's acceptable score gap starts at `bucket_base`
+(100) and widens by `bucket_growth_per_second` (15) per second waited, capped at `bucket_max`
+(400). A pair forms only when the gap fits BOTH windows, and among candidates the closest gap
+wins — 等待越久，接受分差越宽. Two players with different asset hashes are never paired (they
+would desync; the same gate a room join enforces).
+
+A matched pair gets a fresh HIDDEN room (2 humans, no password, not searchable): the first
+queuer is the host player, both seats are claimed and each character is picked at random from
+the configured pool. Both receive the standard `Welcome` + `RoomState`, and with
+`auto_start` (default) the server immediately runs the normal match start — the clients ride the
+usual `StartMatch` into the fight with no room screen in between. On the CLIENT this means
+`StartMatch` can arrive while the lobby menu is still the current scene (its `MatchStarting`
+event has no subscriber), so the autoload buffers it (`NetSession.PendingMatchStart`) and the
+seat screen drains the buffer in `_Ready` — the same hand-off `PendingCatchUp` already does for
+mid-match joins.
+
+Joining or creating a room by hand removes the player from the pool.
+
+### Scores
+
+Every lobby match that ends between TWO HUMAN seats is settled with zero-sum Elo (config
+`k_factor` 32, floor 0): the winner gains what the loser loses, deltas are pinned to at least
+±1, and a loser at the floor simply stops paying (a little inflation is accepted). The settle
+runs server-side at match end — including the forced surrender of a 顶号'd fighter — writes
+through to SQLite, and the new scores ride the post-match `RoomState` broadcast (`PlayerInfo`
+fields `[5] accountId`, `[6] score`, appended, LAN snapshots leave them 0). A match with an AI
+seat teaches the ladder nothing and changes no score.
+
+### Ping
+
+The server heartbeats every connection (`Ping{seq}` / `Pong{seq}`, one ping in flight, answered
+inside `LobbyRoomClient`), measures the smoothed RTT from each echo, and pushes `PingStats{self,
+opponent}` to every member holding a fighting seat once per heartbeat. The match HUD shows
+`名字 · 分数 · ping` above each HP bar from the room snapshot + these stats; an AI opponent
+shows no ping, and a spectator sees `--` (stats only go to seated members).
 
 ## Relay (lobby only)
 
@@ -200,6 +276,16 @@ must therefore agree on field ORDER. Rules:
 | 24 | `HostSendTo` | host player → lobby | forward a frame (type + raw msgpack body) to one room member — the catch-up stream |
 | 25 | `MatchStart` | host player → lobby | request a match start with the stage geometry |
 | 26 | `LobbyPlayerJoined` | lobby → host player | a player just joined (mid-match catch-up hook) |
+| 27 | `LoginOk` | lobby → client | the account is bound (fresh or after a confirmed 顶号): `playerid` + `score` (§ Accounts and matchmaking) |
+| 28 | `KickConfirm` | lobby → client | the account is online elsewhere; the client shows the 顶号 popup |
+| 29 | `KickLogin` | client → lobby | popup confirmed: kick the other session, bind this connection |
+| 30 | `Kicked` | lobby → old client | the account was taken over; the server closes the connection right after |
+| 31 | `MatchmakeJoin` | client → lobby | enter the matchmaking pool (browse phase only) |
+| 32 | `MatchmakeCancel` | client → lobby | leave the pool |
+| 33 | `MatchmakeStatus` | lobby → client | pool membership: searching / not (the button toggles on this) |
+| 34 | `Ping` | lobby → client | heartbeat; the server measures RTT from the matching Pong |
+| 35 | `Pong` | client → lobby | echo of `Ping` (answered inside `LobbyRoomClient`) |
+| 36 | `PingStats` | lobby → client | measured `(self, opponent)` RTT in ms, pushed to seated members for the match HUD |
 
 Per-frame match input is **not** in this table: it goes over UDP inside the rollback library's own
 framing and is opaque to everything here (see `MouseKombat.Net/RollbackMatch.cs`). The one thing this

@@ -1,0 +1,17 @@
+{
+  "db_path": "lobby.db",
+  "matchmaking": {
+    "initial_score": 1000,
+    "k_factor": 32,
+    "score_floor": 0,
+    "bucket_base": 100,
+    "bucket_growth_per_second": 15,
+    "bucket_max": 400,
+    "tick_interval_seconds": 1.0,
+    "auto_start": true,
+    "auto_characters": [0, 1, 2]
+  },
+  "ping": {
+    "interval_seconds": 2.0
+  }
+}

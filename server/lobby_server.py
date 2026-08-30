@@ -9,6 +9,17 @@ half (RoomState lives in room.py) plus the lobby-only extras:
   4-digit password, searchable flag), join by 6-digit room id + password, hard cap 4 humans;
 * version check at connect (Hello) against the configured game version — a mismatch is refused
   before anything else;
+* account login (SQLite, one file — see player_store.py): the Hello name IS the account. A name
+  seen for the first time is registered; a name already ONLINE on another connection starts the
+  顶号 (kick-out) handshake — KickConfirm -> client confirms with KickLogin -> the old connection
+  is torn down (out of the matchmaking pool, out of its room, a mid-match seat counts as a
+  surrender) and only then is the account rebound to the new connection;
+* matchmaking pool (matchmaking.py): MatchmakeJoin puts a logged-in browser into the pool; a
+  heartbeat pairs players by dynamic score buckets, creates a 2-human room with both seats
+  auto-claimed and auto-picked characters, and (config) auto-starts the match — the clients get
+  the standard Welcome/StartMatch flow with no room screen in between;
+* per-connection ping: the server heartbeats Ping and measures RTT from each Pong, then reports
+  (self, opponent) RTTs to seated members (PingStats) for the in-match HUD;
 * the match UDP relay: fighters wrap every rollback datagram in
       u32 roomId (LE) + u8 srcSlot + u8 dstSlot + opaque payload
   and the server forwards the payload to the dstSlot holder's match endpoint;
@@ -16,12 +27,15 @@ half (RoomState lives in room.py) plus the lobby-only extras:
   player, HostSendTo carries the host player's catch-up frames to a chosen member, and
   LobbyPlayerJoined tells the host player when someone joins so it can serve a catch-up.
 
-Everything is in-memory (spec: no persistence), single-threaded asyncio. 2C2G comfortably
-handles the target of under 100 concurrent players.
+Room state is in-memory (spec: no persistence THERE); only player accounts persist, in one SQLite
+file (WAL mode). Single-threaded asyncio. 2C2G comfortably handles the target of under 100
+concurrent players.
 
 Run:  python lobby_server.py [--host H] [--port P] [--udp-port P] [--game-version V]
+                            [--config PATH] [--db PATH]
 Config can also come from env: MK_HOST / MK_PORT / MK_UDP_PORT / MK_GAME_VERSION /
-MK_PROTOCOL / MK_IDLE_TIMEOUT / MK_MAX_ROOMS.
+MK_PROTOCOL / MK_IDLE_TIMEOUT / MK_MAX_ROOMS. Matchmaking / db / ping settings come from
+config.json (next to this file by default; --config overrides).
 """
 
 from __future__ import annotations
@@ -29,23 +43,28 @@ from __future__ import annotations
 import argparse
 import asyncio
 import itertools
+import json
 import logging
 import os
 import random
 import signal
+import sqlite3
 import sys
 import time
 
 from protocol import (
     MAX_FRAME_BYTES, MSG_ADD_AI, MSG_BYE, MSG_CHAR_PICK, MSG_HELLO, MSG_HOST_SEND_TO,
-    MSG_LOBBY_CREATE, MSG_LOBBY_JOIN, MSG_LOBBY_LIST, MSG_LOBBY_PLAYER_JOINED,
-    MSG_LOBBY_ROOMS, MSG_MATCH_ENDED, MSG_MATCH_INPUT_REPORT, MSG_MATCH_RESULT,
-    MSG_MATCH_START, MSG_REJECTED, MSG_REMOVE_AI, MSG_ROOM_STATE, MSG_SEAT_CLAIM,
-    MSG_SEAT_RELEASE, MSG_START_MATCH, MSG_WELCOME, PAGE_SIZE, PROTOCOL,
-    ROOM_MEMBER_TYPES, HOST_SEND_TO_ALLOWED_TYPES, ProtocolError, FrameReader,
-    decode_body, encode_frame, is_valid_password, is_valid_room_id, normalize_ip,
-    sanitize_name,
+    MSG_KICK_CONFIRM, MSG_KICK_LOGIN, MSG_KICKED, MSG_LOGIN_OK, MSG_LOBBY_CREATE,
+    MSG_LOBBY_JOIN, MSG_LOBBY_LIST, MSG_LOBBY_PLAYER_JOINED, MSG_LOBBY_ROOMS,
+    MSG_MATCH_ENDED, MSG_MATCH_INPUT_REPORT, MSG_MATCH_RESULT, MSG_MATCH_START,
+    MSG_MATCHMAKE_CANCEL, MSG_MATCHMAKE_JOIN, MSG_MATCHMAKE_STATUS, MSG_PING, MSG_PING_STATS,
+    MSG_PONG, MSG_REJECTED, MSG_REMOVE_AI, MSG_ROOM_STATE, MSG_SEAT_CLAIM, MSG_SEAT_RELEASE,
+    MSG_START_MATCH, MSG_WELCOME, PAGE_SIZE, PROTOCOL, ROOM_MEMBER_TYPES,
+    HOST_SEND_TO_ALLOWED_TYPES, ProtocolError, FrameReader, decode_body, encode_frame,
+    is_valid_password, is_valid_room_id, normalize_ip, sanitize_name,
 )
+from player_store import Account, PlayerStore
+from matchmaking import Matchmaker, elo_update
 from room import RoomState, SEAT_COUNT
 
 log = logging.getLogger("lobby")
@@ -57,15 +76,57 @@ log = logging.getLogger("lobby")
 # mid-match remap would kill the rest of the match. See _handle_udp_inner.
 ENDPOINT_REPIN_AFTER = 2.0
 
+# Defaults for config.json (the shipped config.json mirrors these). The file overrides these,
+# --config points at a different file; anything missing in the file falls back to the values here.
+DEFAULT_CONFIG = {
+    "db_path": "lobby.db",
+    "matchmaking": {
+        "initial_score": 1000,          # the score a fresh account is registered with
+        "k_factor": 32,                 # standard Elo K
+        "score_floor": 0,               # a loser never goes below this
+        "bucket_base": 100,             # acceptable score gap on the first second of waiting
+        "bucket_growth_per_second": 15, # the gap widens by this much per second waited
+        "bucket_max": 400,              # ... and never wider than this
+        "tick_interval_seconds": 1.0,   # matchmaking heartbeat
+        "auto_start": True,             # a matchmade room starts the match by itself
+        "auto_characters": [0, 1, 2],   # random per-seat pick pool for the auto-claimed seats
+    },
+    "ping": {
+        "interval_seconds": 2.0,        # server heartbeat; RTT is measured from each Pong
+    },
+}
+
+
+def load_config(path: str | None) -> dict:
+    """config.json merged over DEFAULT_CONFIG (shallow per section, so a partial section keeps the
+    remaining defaults). A missing file is fine — the defaults are the config."""
+    cfg = json.loads(json.dumps(DEFAULT_CONFIG))   # deep-enough copy of the defaults
+    if path and os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            for key, value in data.items():
+                if isinstance(value, dict) and isinstance(cfg.get(key), dict):
+                    cfg[key].update(value)
+                else:
+                    cfg[key] = value
+        except (OSError, ValueError) as e:
+            raise SystemExit(f"config {path} is unreadable: {e}")
+    return cfg
+
 
 # --------------------------------------------------------------------------- models
 
 class Member:
-    """One TCP connection. In lobby phase it is a browser; after create/join it is a room member."""
+    """One TCP connection. In lobby phase it is a browser (or a queued matchmaker); after
+    create/join it is a room member. From Hello on it is also bound to an ACCOUNT (playerid +
+    score from SQLite), which is the player's identity for scoring and 顶号."""
 
     __slots__ = ("player_id", "name", "is_host", "reader", "writer", "tcp_ip",
                  "announced_udp_port", "udp_endpoint", "udp_last_rx", "phase", "last_activity",
-                 "room", "asset_hash")
+                 "room", "asset_hash",
+                 "account_id", "account_score", "kick_pending",
+                 "ping_seq", "ping_sent_at", "ping_rtt")
 
     def __init__(self, writer):
         self.player_id = 0
@@ -80,10 +141,18 @@ class Member:
         self.announced_udp_port = 0
         self.udp_endpoint = None
         self.udp_last_rx = 0.0      # monotonic time of the last datagram accepted from udp_endpoint
-        self.phase = "hello"        # "hello" -> "op" -> "room" -> "closed"
+        self.phase = "hello"        # "hello" -> ("op" | "kick_wait") -> "room" -> "closed"
         self.last_activity = time.monotonic()
         self.room = None
         self.asset_hash = ""        # Heroes/ content hash from Hello; gates room entry
+        # ---- account (persistent identity; 0 = not bound yet) ----
+        self.account_id = 0
+        self.account_score = 0
+        self.kick_pending = None    # Account awaiting the 顶号 confirm (phase "kick_wait")
+        # ---- ping (server-measured RTT, seconds; None until the first Pong) ----
+        self.ping_seq = 0
+        self.ping_sent_at = None
+        self.ping_rtt = None
 
     def touch(self):
         self.last_activity = time.monotonic()
@@ -119,7 +188,9 @@ _next_seq = itertools.count().__next__
 
 class LobbyServer:
     def __init__(self, host: str, port: int, udp_port: int, game_version: str,
-                 protocol: int = PROTOCOL, idle_timeout: float = 300.0, max_rooms: int = 500):
+                 protocol: int = PROTOCOL, idle_timeout: float = 300.0, max_rooms: int = 500,
+                 config_path: str | None = None, db_path: str | None = None,
+                 config_overrides: dict | None = None):
         self.host = host
         self.port = port
         self.udp_port = udp_port
@@ -133,6 +204,32 @@ class LobbyServer:
         self._udp_rebinding = False
         self._tcp_server = None
 
+        # ---- account persistence + online table + matchmaking ----
+        self.cfg = load_config(config_path)
+        if config_overrides:
+            for key, value in config_overrides.items():
+                if isinstance(value, dict) and isinstance(self.cfg.get(key), dict):
+                    self.cfg[key].update(value)
+                else:
+                    self.cfg[key] = value
+        self.mm_cfg = self.cfg["matchmaking"]
+        self.ping_cfg = self.cfg["ping"]
+        db = db_path or self.cfg["db_path"]
+        if not os.path.isabs(db):
+            # A relative db path means "next to the config file", so the server's data stays
+            # where the operator put the config regardless of the working directory.
+            base = os.path.dirname(os.path.abspath(config_path)) if config_path else \
+                os.path.dirname(os.path.abspath(__file__))
+            db = os.path.join(base, db)
+        self.db_path = db
+        self.players = PlayerStore(db, self.mm_cfg["initial_score"])
+        self.online = {}            # account playerid -> Member (the session that owns it)
+        self._matchmaker = Matchmaker(self.mm_cfg["bucket_base"],
+                                      self.mm_cfg["bucket_growth_per_second"],
+                                      self.mm_cfg["bucket_max"])
+        self._mm_task = None
+        self._ping_task = None
+
     # ---- lifecycle ----
 
     async def start(self):
@@ -145,17 +242,33 @@ class LobbyServer:
             lambda: _UdpProtocol(self._handle_udp, self._udp_died), local_addr=(self.host, self.udp_port))
         self._udp_transport = transport
         self.udp_port = transport.get_extra_info("sockname")[1]
-        asyncio.get_running_loop().create_task(self._reaper_loop())
-        log.info("lobby up: tcp %s:%d udp %s:%d protocol %d game version %r",
+        loop = asyncio.get_running_loop()
+        loop.create_task(self._reaper_loop())
+        self._mm_task = loop.create_task(self._matchmaker_loop())
+        self._ping_task = loop.create_task(self._ping_loop())
+        log.info("lobby up: tcp %s:%d udp %s:%d protocol %d game version %r db %s",
                  self.host, self.port, self.host, self.udp_port, self.protocol,
-                 self.game_version or "(unset — every Hello refused)")
+                 self.game_version or "(unset — every Hello refused)", self.db_path)
 
     async def shutdown(self):
         for room in list(self.rooms.values()):
             self._destroy_room(room, "服务器已关闭", close=True)
+        # Close every remaining connection BEFORE wait_closed: on Python 3.13+ wait_closed()
+        # also waits for every client handler, and a stray browser (a crash mid-request, a test
+        # that leaked a client) would otherwise hold the shutdown hostage forever.
+        for m in list(self.conns):
+            m.phase = "closed"
+            self._close_member(m)
         if self._tcp_server is not None:
             self._tcp_server.close()
-            await self._tcp_server.wait_closed()
+            try:
+                await asyncio.wait_for(self._tcp_server.wait_closed(), timeout=2.0)
+            except asyncio.TimeoutError:
+                pass
+        for task in (self._mm_task, self._ping_task):
+            if task is not None:
+                task.cancel()
+        self.players.close()
 
     # ---- TCP ----
 
@@ -195,6 +308,20 @@ class LobbyServer:
             else:
                 self._reject(m, "未完成握手")
             return
+        if msg_type == MSG_PONG:
+            # The client auto-pongs from every phase past the handshake; the RTT it produces feeds
+            # the match HUD, and the periodic reply also keeps an idle browser off the reaper.
+            self._on_pong(m, decode_body(body))
+            return
+        if m.phase == "kick_wait":
+            # Mid-顶号: the account is confirmed online elsewhere. Only the confirm proceeds;
+            # browse ops aimed at this connection (a stale client's parked LobbyList) are refused
+            # without closing, exactly like any other lobby-phase validation failure.
+            if msg_type == MSG_KICK_LOGIN:
+                self._on_kick_login(m, decode_body(body))
+            else:
+                self._refuse(m, "请先完成登录")
+            return
         if m.phase == "op":
             if msg_type == MSG_LOBBY_LIST:
                 self._on_list(m, decode_body(body))
@@ -202,6 +329,10 @@ class LobbyServer:
                 self._on_create(m, decode_body(body))
             elif msg_type == MSG_LOBBY_JOIN:
                 self._on_join(m, decode_body(body))
+            elif msg_type == MSG_MATCHMAKE_JOIN:
+                self._on_matchmake_join(m)
+            elif msg_type == MSG_MATCHMAKE_CANCEL:
+                self._on_matchmake_cancel(m)
             else:
                 self._reject(m, "未加入房间")
             return
@@ -228,8 +359,212 @@ class LobbyServer:
         port = body[4] if isinstance(body[4], int) else 0
         m.announced_udp_port = port if 0 < port <= 65535 else 0
         m.asset_hash = body[5] if len(body) > 5 and isinstance(body[5], str) else ""
+        self._login(m, m.name)
+
+    # ---- account login + 顶号 (kick-out) ----
+    #
+    # The Hello NAME is the login. The account row (playerid, score) is created on first sight;
+    # the ONLINE check is what may route the connection through the kick-out handshake instead of
+    # straight into the browse phase:
+    #
+    #   login ok                        -> phase "op", LoginOk{playerid, score}
+    #   account online elsewhere        -> phase "kick_wait", KickConfirm{name, score}
+    #                                        client confirms with KickLogin:
+    #                                          1. the OLD connection is torn down COMPLETELY —
+    #                                             out of the matchmaking pool, out of its room (a
+    #                                             mid-match seat counts as a surrender, scored),
+    #                                             Kicked{reason} sent, socket closed, online
+    #                                             entry removed — all before step 2 touches
+    #                                             anything;
+    #                                          2. the account rebinds to the NEW connection and
+    #                                             it receives LoginOk (with the score AS SETTLED,
+    #                                             in case the surrender just moved it).
+
+    def _login(self, m: Member, name: str):
+        try:
+            account = self.players.find_or_create(name)
+        except sqlite3.Error as e:
+            log.error("db error on login %r: %s", name, e)
+            self._reject(m, "服务器账号数据不可用")
+            return
+        online = self.online.get(account.player_id)
+        if online is not None and online is not m and not online.writer.is_closing():
+            m.kick_pending = account
+            m.phase = "kick_wait"
+            self._send_raw(m, encode_frame(MSG_KICK_CONFIRM, [account.name, account.score]))
+            log.info("login %r: account #%d is online elsewhere — awaiting 顶号 confirm",
+                     name, account.player_id)
+            return
+        self._bind_account(m, account)
+
+    def _bind_account(self, m: Member, account: Account):
+        """The connection becomes the account's ONE online session and enters the browse phase."""
+        m.account_id = account.player_id
+        m.account_score = account.score
+        m.kick_pending = None
+        self.online[account.player_id] = m
         m.phase = "op"
-        log.info("connected %s as %r (match udp %d)", m.tcp_ip, m.name, m.announced_udp_port)
+        self._send_raw(m, encode_frame(MSG_LOGIN_OK, [m.account_id, m.account_score]))
+        log.info("login %r as account #%d (score %d, match udp %d)",
+                 m.name, m.account_id, m.account_score, m.announced_udp_port)
+
+    def _on_kick_login(self, m: Member, body):
+        if m.phase != "kick_wait" or m.kick_pending is None:
+            self._refuse(m, "没有待确认的登录")
+            return
+        account = m.kick_pending
+        m.kick_pending = None
+        old = self.online.get(account.player_id)
+        if old is not None and old is not m:
+            # Tear the old session down FIRST (spec: the old connection must be fully destroyed
+            # before the new one binds the session). A chain of confirmations kicks whoever
+            # CURRENTLY holds the account — the winner of a race between two confirmers.
+            self._kick_session(old, "您的账号在其他设备上登录，本机连接已被断开")
+        # Re-read: the surrender above may have just settled the account's score.
+        account = self.players.find_or_create(account.name)
+        self._bind_account(m, account)
+
+    def _kick_session(self, old: Member, reason: str):
+        """Force one online session offline because its ACCOUNT was taken over.
+
+        Order matters and is the whole point: matchmaking queue, then room membership, then the
+        online table — every in-memory handle cleared synchronously — and only then the Kicked
+        frame and the physical close. By the time this returns, nothing references `old` except
+        its own dying socket."""
+        self._matchmaker.remove(old)
+        if old.phase == "room" and old.room is not None:
+            room = old.room
+            state = room.state
+            if state.match_running and state.holds_seat(old.player_id):
+                # In a match: count it as a surrender for the kicked player NOW (spec) — the
+                # opponent gets the win, the Elo settles, and nobody sims against a ghost seat.
+                seat = 0 if state.seat(0).occupant_player_id == old.player_id else 1
+                self._end_match(room, 1 - seat)
+            self._leave_room(old, "账号在其他设备上登录")
+        if self.online.get(old.account_id) is old:
+            self.online.pop(old.account_id, None)
+        old.account_id = 0
+        old.kick_pending = None
+        self._send_raw(old, encode_frame(MSG_KICKED, [reason]))
+        # phase "closed" makes the socket's own _on_conn_lost a no-op: the room and the online
+        # table were already handled here, and _leave_room must not run twice.
+        old.phase = "closed"
+        self._close_member(old)
+        log.info("kicked session of %r (%s)", old.name, reason)
+
+    # ---- matchmaking pool ----
+
+    def _on_matchmake_join(self, m: Member):
+        if m.account_id == 0:
+            self._refuse(m, "请先完成登录")
+            return
+        if self._matchmaker.contains(m.account_id):
+            return
+        self._matchmaker.add(m, m.account_id, m.account_score, m.asset_hash)
+        self._send_raw(m, encode_frame(MSG_MATCHMAKE_STATUS, [True, 0]))
+        log.info("matchmaking: %r (score %d) joined the pool (%d waiting)",
+                 m.name, m.account_score, len(self._matchmaker))
+
+    def _on_matchmake_cancel(self, m: Member):
+        if self._matchmaker.remove(m):
+            self._send_raw(m, encode_frame(MSG_MATCHMAKE_STATUS, [False, 0]))
+            log.info("matchmaking: %r left the pool", m.name)
+
+    async def _matchmaker_loop(self):
+        interval = max(0.05, float(self.mm_cfg["tick_interval_seconds"]))
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                self._matchmake_tick()
+            except Exception as e:  # noqa: BLE001 — a pool error must not kill the heartbeat
+                log.error("matchmaker tick failed: %s", e)
+
+    def _matchmake_tick(self):
+        for a, b in self._matchmaker.update_and_match():
+            if a.member.phase != "op" or b.member.phase != "op":
+                # Stale pair (a connection died between the queue scan and this tick): the
+                # conn-lost cleanup removes dead entries, so just wait for the next tick.
+                continue
+            if not self._create_matchmade_room(a, b):
+                self._matchmaker.readd(a)
+                self._matchmaker.readd(b)
+
+    def _create_matchmade_room(self, a, b) -> bool:
+        """Both queue entries become the two fighters of a fresh, hidden, 2-human room: seats
+        claimed, characters auto-picked, standard Welcome/RoomState, and (config) the match
+        auto-starts — the clients ride the normal StartMatch flow straight into the fight."""
+        if len(self.rooms) >= self.max_rooms:
+            log.warning("matchmaking: room table full, pair left queued")
+            return False
+        ma, mb = a.member, b.member
+        id_int = self._fresh_room_id()
+        room = Room(id_int, 2, "", False)
+        room.asset_hash = ma.asset_hash
+        pa = room.state.add_player(ma.name, is_host=True)
+        pb = room.state.add_player(mb.name, is_host=False)
+        if pa is None or pb is None:
+            return False
+        room.members[pa.player_id] = ma
+        room.members[pb.player_id] = mb
+        for member, player in ((ma, pa), (mb, pb)):
+            member.player_id = player.player_id
+            member.is_host = player.is_host
+            member.phase = "room"
+            member.room = room
+        room.state.claim_seat(pa.player_id, 0)
+        room.state.claim_seat(pb.player_id, 1)
+        pool = self.mm_cfg["auto_characters"] or [0]
+        room.state.pick_character(pa.player_id, random.choice(pool))
+        room.state.pick_character(pb.player_id, random.choice(pool))
+        self.rooms[id_int] = room
+        self._send_welcome(ma, pa.player_id, True)
+        self._send_welcome(mb, pb.player_id, False)
+        self._broadcast_room(room)
+        log.info("matchmaking: %r vs %r -> room %s (auto)", ma.name, mb.name, room.state.room_id)
+        if self.mm_cfg["auto_start"]:
+            self._start_match(room, ma, None)
+        return True
+
+    # ---- ping ----
+
+    def _on_pong(self, m: Member, body):
+        seq = body[0] if isinstance(body, list) and body and isinstance(body[0], int) else None
+        if seq is None or m.ping_sent_at is None or seq != m.ping_seq:
+            return   # a stale echo of a ping we already gave up matching
+        sample = max(0.0, time.monotonic() - m.ping_sent_at)
+        m.ping_sent_at = None
+        # Exponential smoothing: one lost or bursty cycle must not swing the HUD.
+        m.ping_rtt = sample if m.ping_rtt is None else (0.7 * m.ping_rtt + 0.3 * sample)
+
+    def _send_ping_stats(self, m: Member):
+        """(self, opponent) RTT for a member holding a fighting seat — what the match HUD shows."""
+        if m.phase != "room" or m.room is None:
+            return
+        state = m.room.state
+        seat = 0 if state.seat(0).occupant_player_id == m.player_id else \
+            1 if state.seat(1).occupant_player_id == m.player_id else -1
+        if seat < 0:
+            return
+        self_rtt = int(m.ping_rtt * 1000) if m.ping_rtt is not None else 0
+        opp_rtt = 0
+        other = state.seat(1 - seat)
+        if not other.is_ai:
+            om = m.room.members.get(other.occupant_player_id)
+            if om is not None and om.ping_rtt is not None:
+                opp_rtt = int(om.ping_rtt * 1000)
+        self._send_raw(m, encode_frame(MSG_PING_STATS, [self_rtt, opp_rtt]))
+
+    async def _ping_loop(self):
+        interval = max(0.05, float(self.ping_cfg["interval_seconds"]))
+        while True:
+            await asyncio.sleep(interval)
+            for m in list(self.conns):
+                if m.phase not in ("op", "room", "kick_wait"):
+                    continue
+                m.ping_seq += 1
+                m.ping_sent_at = time.monotonic()
+                self._send_raw(m, encode_frame(MSG_PING, [m.ping_seq]))
+                self._send_ping_stats(m)
 
     def _on_list(self, m: Member, body):
         page = body[0] if isinstance(body, list) and body and isinstance(body[0], int) else 0
@@ -266,6 +601,8 @@ class LobbyServer:
         if len(self.rooms) >= self.max_rooms:
             self._refuse(m, "服务器房间已满")
             return
+        # Joining a room by hand ends the wait in the pool — one player cannot be both.
+        self._matchmaker.remove(m)
         id_int = self._fresh_room_id()
         room = Room(id_int, max_players, password, searchable)
         room.asset_hash = m.asset_hash
@@ -306,6 +643,8 @@ class LobbyServer:
             m.phase = "closed"
             self._close_member(m)
             return
+        # Joining a room by hand ends the wait in the pool — one player cannot be both.
+        self._matchmaker.remove(m)
         player = room.state.add_player(m.name, is_host=False)
         if player is None:
             self._refuse(m, "房间已满")
@@ -385,6 +724,13 @@ class LobbyServer:
             self._leave_room(m, reason or "玩家离开了房间")
 
     def _on_match_start(self, room: Room, m: Member, body):
+        self._start_match(room, m, body if isinstance(body, list) else None)
+
+    def _start_match(self, room: Room, requester: Member, geo):
+        """`geo` is the host player's stage geometry from MatchStart, or None for the matchmaking
+        auto-start: the fighters read stage bounds from their OWN scene (the wire geometry exists
+        for spectate catch-ups, which take it from the fighters' reports), so the defaults are as
+        good an answer as any for a match nobody dials in by hand."""
         state = room.state
         # Both fighting seats must be reachable over UDP, or starting is pointless (mirrors
         # MatchPlan.PreviewPlan refusing with the real reason).
@@ -393,16 +739,16 @@ class LobbyServer:
             if s.occupant_player_id != 0:
                 holder = room.members.get(s.occupant_player_id)
                 if holder is None or holder.announced_udp_port <= 0:
-                    self._send_raw(m, encode_frame(
+                    self._send_raw(requester, encode_frame(
                         MSG_REJECTED, ["另一位玩家没有上报对局端口，无法开始", self.protocol,
                                        self.game_version, "", ""]))
                     return
         if not state.begin_match():
             return   # both seats not ready; silent like the LAN host
         self._forget_match_endpoints(room)
-        geo = body if isinstance(body, list) and len(body) >= 7 else [40.0, 760.0, 800.0,
-                                                                      120.0, 560.0, 650.0, 560.0]
-        start = [state.snapshot(),
+        geo = geo if geo is not None and len(geo) >= 7 else [40.0, 760.0, 800.0,
+                                                             120.0, 560.0, 650.0, 560.0]
+        start = [self._room_snapshot(room),
                  float(geo[0]), float(geo[1]), float(geo[2]),
                  float(geo[3]), float(geo[4]), float(geo[5]), float(geo[6]),
                  "", "",                      # Seat0/1Endpoints: never used (server is the hub)
@@ -414,7 +760,9 @@ class LobbyServer:
 
     def _end_match(self, room: Room, winner_seat: int):
         state = room.state
-        dropped = state.end_match()
+        seats = [state.seat(0), state.seat(1)]   # captured BEFORE end_match clears them: the
+        dropped = state.end_match()              # Elo settle needs to know who fought
+        self._settle_scores(room, seats, winner_seat)
         self._forget_match_endpoints(room)
         for pid in dropped:
             self._kick(room, pid, "本局结束，已断线")
@@ -422,6 +770,35 @@ class LobbyServer:
         self._broadcast_room(room)
         log.info("room %s match ended (winner seat %d, kicked %r)",
                  state.room_id, winner_seat, dropped)
+
+    def _settle_scores(self, room: Room, seats, winner_seat: int):
+        """Elo settle for a match that just ended between TWO HUMAN fighters. A match with an AI
+        seat teaches the ladder nothing, so it does not touch the scores. Zero-sum except at the
+        score floor; the DB is written before the in-memory copies move, so a failed write can
+        never leave the two views disagreeing."""
+        if winner_seat not in (0, 1):
+            return
+        win_seat, lose_seat = seats[winner_seat], seats[1 - winner_seat]
+        if win_seat.is_ai or lose_seat.is_ai:
+            return
+        wm = room.members.get(win_seat.occupant_player_id)
+        lm = room.members.get(lose_seat.occupant_player_id)
+        if wm is None or lm is None or wm.account_id == 0 or lm.account_id == 0:
+            return
+        if wm.account_id == lm.account_id:
+            return
+        new_w, new_l = elo_update(wm.account_score, lm.account_score,
+                                  self.mm_cfg["k_factor"], self.mm_cfg["score_floor"])
+        try:
+            self.players.update_score(wm.account_id, new_w)
+            self.players.update_score(lm.account_id, new_l)
+        except sqlite3.Error as e:
+            log.error("db error on score settle (room %s): %s", room.state.room_id, e)
+            return
+        w_old, l_old = wm.account_score, lm.account_score
+        wm.account_score, lm.account_score = new_w, new_l
+        log.info("score settle (room %s): %r %d -> %d, %r %d -> %d",
+                 room.state.room_id, wm.name, w_old, new_w, lm.name, l_old, new_l)
 
     def _forget_match_endpoints(self, room: Room):
         """Match endpoints are learned PER MATCH, never once per connection.
@@ -446,10 +823,26 @@ class LobbyServer:
             self._broadcast_room(room)
 
     def _send_welcome(self, m: Member, player_id: int, is_host: bool):
-        self._send_raw(m, encode_frame(MSG_WELCOME, [player_id, is_host, m.room.state.snapshot()]))
+        self._send_raw(m, encode_frame(MSG_WELCOME, [player_id, is_host, self._room_snapshot(m.room)]))
+
+    def _room_snapshot(self, room: Room):
+        """The authoritative snapshot, with each HUMAN player's persistent identity (account
+        playerid + score) appended to its PlayerInfo — the score is what the match HUD shows and
+        the playerid is the stable key future business logic will index by. Append-only fields:
+        a client that does not know them ignores the tail (PROTOCOL.md § Bodies)."""
+        snap = room.state.snapshot()
+        for p in snap[0]:
+            member = room.members.get(p[0]) if isinstance(p[0], int) else None
+            if member is not None and member.account_id:
+                p.append(member.account_id)
+                p.append(member.account_score)
+            else:
+                p.append(0)
+                p.append(0)
+        return snap
 
     def _broadcast_room(self, room: Room):
-        self._broadcast(room, MSG_ROOM_STATE, room.state.snapshot())
+        self._broadcast(room, MSG_ROOM_STATE, self._room_snapshot(room))
 
     def _broadcast(self, room: Room, msg_type: int, body):
         frame = encode_frame(msg_type, body)
@@ -529,13 +922,21 @@ class LobbyServer:
 
     def _on_conn_lost(self, m: Member):
         """EOF, protocol error or explicit close. A room member is removed (or the room is
-        destroyed, for the host player); a lobby-phase browser is just dropped."""
+        destroyed, for the host player); a lobby-phase browser is just dropped. Either way the
+        ACCOUNT goes offline with the connection — it stops waiting in the matchmaking pool and
+        frees the online slot, so the next login with this name meets no 顶号 wall."""
         if m.phase == "room":
             # The reason is what the OTHER members are shown for a host player, so name the event
             # from their side: their own connection is fine, the host's is not.
             self._leave_room(m, "主持玩家已断开连接" if m.is_host else "连接断开")
         elif m.phase == "op":
             log.info("lobby browser %s disconnected", m.tcp_ip)
+        self._matchmaker.remove(m)
+        if m.account_id and self.online.get(m.account_id) is m:
+            self.online.pop(m.account_id, None)
+            log.info("account #%d (%r) is offline", m.account_id, m.name)
+        m.account_id = 0
+        m.kick_pending = None
         m.phase = "closed"
 
     def _reject(self, m: Member, reason: str):
@@ -619,9 +1020,12 @@ class LobbyServer:
                 # A connection that never finished the handshake is dead weight and goes on the
                 # configured timeout. A BROWSER (past Hello, in no room) is a player looking at the
                 # room list, so it gets a much longer grace — dropping an AFK player after five
-                # minutes of reading the list would read as "the lobby disconnected me".
-                limit = self.idle_timeout if m.phase == "hello" else self.idle_timeout * 4
-                if m.phase in ("hello", "op") and now - m.last_activity > limit:
+                # minutes of reading the list would read as "the lobby disconnected me". A
+                # KICK_WAIT connection is the 顶号 popup waiting for a human: same short grace as a
+                # handshake, since the account is still held by the OTHER (live) session and this
+                # half-open state must not outlive the popup indefinitely.
+                limit = self.idle_timeout if m.phase in ("hello", "kick_wait") else self.idle_timeout * 4
+                if m.phase in ("hello", "kick_wait", "op") and now - m.last_activity > limit:
                     log.info("idle lobby connection %s timed out (phase %s)", m.tcp_ip, m.phase)
                     m.phase = "closed"
                     self._close_member(m)
@@ -746,6 +1150,10 @@ def _parse_args(argv):
     p.add_argument("--idle-timeout", type=float,
                    default=float(os.environ.get("MK_IDLE_TIMEOUT", "300")))
     p.add_argument("--max-rooms", type=int, default=int(os.environ.get("MK_MAX_ROOMS", "500")))
+    p.add_argument("--config", default=None,
+                   help="path to config.json (default: config.json next to this file)")
+    p.add_argument("--db", default=None,
+                   help="path to the SQLite account file (overrides config db_path)")
     args = p.parse_args(argv)
     if args.udp_port == 0:
         args.udp_port = args.port
@@ -756,8 +1164,13 @@ def main(argv=None):
     args = _parse_args(argv)
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
+    config_path = args.config
+    if config_path is None:
+        default_cfg = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+        config_path = default_cfg if os.path.exists(default_cfg) else None
     srv = LobbyServer(args.host, args.port, args.udp_port, args.game_version,
-                      args.protocol, args.idle_timeout, args.max_rooms)
+                      args.protocol, args.idle_timeout, args.max_rooms,
+                      config_path=config_path, db_path=args.db)
 
     async def run():
         await srv.start()

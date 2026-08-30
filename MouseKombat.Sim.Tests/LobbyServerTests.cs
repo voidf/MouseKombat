@@ -111,9 +111,20 @@ internal static partial class Program
             return;
         }
         int port = PickPortPair();
+        // A per-run temp dir: the account DB must not leak between runs (scores would break the
+        // "fresh account starts at 1000" assertions), and the matchmaking heartbeat runs fast so
+        // the pairing scenarios do not crawl.
+        string tmpDir = Path.Combine(Path.GetTempPath(), "mk_lobby_test_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        string cfgPath = Path.Combine(tmpDir, "config.json");
+        string dbPath = Path.Combine(tmpDir, "accounts.db");
+        File.WriteAllText(cfgPath,
+            "{\"matchmaking\":{\"tick_interval_seconds\":0.2,\"auto_start\":true,\"auto_characters\":[0,1,2]},"
+            + "\"ping\":{\"interval_seconds\":0.2}}");
         var psi = new ProcessStartInfo(python,
             $"\"{serverPy}\" --host 127.0.0.1 --port {port} --udp-port {port} "
-            + $"--game-version {Ver} --protocol {NetVersion.Protocol}")
+            + $"--game-version {Ver} --protocol {NetVersion.Protocol} "
+            + $"--config \"{cfgPath}\" --db \"{dbPath}\"")
         {
             WorkingDirectory = Path.GetDirectoryName(serverPy),
             RedirectStandardOutput = true,
@@ -171,6 +182,8 @@ internal static partial class Program
             LobbyAiVsHumanRelayTest(port, Ver);
             LobbyRematchRelayTest(port, Ver);
             LobbyWatcherSlotTest(port, Ver);
+            RunAccountScenarios(port, Ver);
+            LobbyAccountClientTest(port, Ver);
         }
         catch (Exception e)
         {
@@ -950,6 +963,180 @@ internal static partial class Program
             "lobby: the member keeps its connection and browses again after the room died");
         Check(Array.TrueForAll(afterBye.As<LobbyRooms>().Entries, e => e.RoomId != roomId),
             "lobby: the destroyed room is gone from the list");
+    }
+
+    // ---- accounts (登录/顶号), quick match (快速匹配) and Elo settle, on the raw wire ----
+    private static void RunAccountScenarios(int port, string ver)
+    {
+        Hello Handshake(LobbyProbe p, string name) =>
+            new Hello { Protocol = NetVersion.Protocol, GameVersion = ver, Name = name, MatchUdpPort = p.MatchUdpPort };
+
+        // login: a fresh name is registered with the initial score
+        ulong accId;
+        using (var a = new LobbyProbe("积分甲"))
+        {
+            a.Connect("127.0.0.1", port);
+            a.Send(MsgType.Hello, Handshake(a, "积分甲"));
+            var ok = a.Wait<LoginOk>(MsgType.LoginOk);
+            Check(ok.Body != null, "account: a fresh name is answered with LoginOk");
+            Check(ok.As<LoginOk>().PlayerAccountId > 0,
+                $"account: playerid is a positive integer ({ok.As<LoginOk>().PlayerAccountId})");
+            Check(ok.As<LoginOk>().Score == 1000,
+                $"account: a fresh account starts at 1000 ({ok.As<LoginOk>().Score})");
+            accId = ok.As<LoginOk>().PlayerAccountId;
+
+            // duplicate login: the 顶号 handshake
+            using (var b = new LobbyProbe("积分甲"))
+            {
+                b.Connect("127.0.0.1", port);
+                b.Send(MsgType.Hello, Handshake(b, "积分甲"));
+                var kc = b.Wait<KickConfirm>(MsgType.KickConfirm);
+                Check(kc.Body != null && kc.As<KickConfirm>().Name == "积分甲",
+                    "account: a same-name login gets KickConfirm");
+                Check(kc.Body != null && kc.As<KickConfirm>().Score == 1000,
+                    "account: KickConfirm carries the score for the popup");
+                b.Send(MsgType.KickLogin, new KickLogin { Name = "积分甲" });
+                var ok2 = b.Wait<LoginOk>(MsgType.LoginOk);
+                Check(ok2.Body != null && ok2.As<LoginOk>().PlayerAccountId == accId,
+                    "account: the confirm binds the SAME account");
+                var kick = a.Wait<Kicked>(MsgType.Kicked);
+                Check(kick.Body != null && kick.As<Kicked>().Reason.Contains("其他设备"),
+                    "account: the old session is told why before the close");
+                int spin = 0;
+                while (!a.Dead && spin++ < 2000) { a.Poll(); Thread.Sleep(1); }
+                Check(a.Dead, "account: the old connection is closed right after Kicked");
+            }
+        }
+
+        // quick match: two queued players pair into an auto room, the match auto-starts, Elo settles
+        using (var p1 = new LobbyProbe("积分乙"))
+        using (var p2 = new LobbyProbe("积分丙"))
+        {
+            p1.Connect("127.0.0.1", port);
+            p1.Send(MsgType.Hello, Handshake(p1, "积分乙"));
+            p2.Connect("127.0.0.1", port);
+            p2.Send(MsgType.Hello, Handshake(p2, "积分丙"));
+            p1.Send(MsgType.MatchmakeJoin, new MatchmakeJoin { Name = "积分乙" });
+            var st = p1.Wait<MatchmakeStatus>(MsgType.MatchmakeStatus);
+            Check(st.Body != null && st.As<MatchmakeStatus>().Searching,
+                "mm: joining the pool answers status searching=true");
+            p2.Send(MsgType.MatchmakeJoin, new MatchmakeJoin { Name = "积分丙" });
+            var w1 = p1.Wait<Welcome>(MsgType.Welcome, ww => ww.Room != null, 8000);
+            var w2 = p2.Wait<Welcome>(MsgType.Welcome, ww => ww.Room != null, 8000);
+            Check(w1.Body != null && w2.Body != null, "mm: two queued players pair into a room");
+            Check(w1.Body != null && w2.Body != null
+                  && w1.As<Welcome>().Room.RoomId == w2.As<Welcome>().Room.RoomId,
+                "mm: both land in the SAME room");
+            Check(w1.Body != null && w1.As<Welcome>().IsHost, "mm: the first queuer is the host player");
+            Check(w1.Body != null && Array.TrueForAll(w1.As<Welcome>().Room.Players,
+                    pp => pp.AccountId > 0 && pp.Score == 1000),
+                "mm: snapshot players carry accountid + score");
+            Check(p1.Wait<StartMatch>(MsgType.StartMatch, ss => ss.Room != null, 8000).Body != null,
+                "mm: the match auto-starts (no room screen round-trip)");
+            Check(p1.Wait<PingStats>(MsgType.PingStats, null, 4000).Body != null,
+                "ping: a seated fighter receives RTT stats");
+            p1.Send(MsgType.MatchResult, new MatchResult { WinnerSeat = 0 });
+            Check(p1.Wait<MatchEnded>(MsgType.MatchEnded, null, 4000).Body != null,
+                "mm: MatchEnded follows the result");
+            var rs = p1.Wait<RoomSnapshot>(MsgType.RoomState, f => !f.MatchRunning
+                && Array.Exists(f.Players, pp => pp.Name == "积分乙" && pp.Score == 1016), 4000);
+            Check(rs.Body != null, "mm: Elo settled 1016/984 for equal scores");
+            Check(rs.Body != null && Array.Exists(rs.As<RoomSnapshot>().Players,
+                    pp => pp.Name == "积分丙" && pp.Score == 984),
+                "mm: the loser's score moved to 984");
+        }
+        // persistence: the settled score survives a reconnect
+        using (var a2 = new LobbyProbe("积分乙"))
+        {
+            a2.Connect("127.0.0.1", port);
+            a2.Send(MsgType.Hello, Handshake(a2, "积分乙"));
+            Check(a2.Wait<LoginOk>(MsgType.LoginOk, l => l.Score == 1016, 4000).Body != null,
+                "persist: the settled score survives a reconnect");
+        }
+
+        // 顶号 while IN GAME: the kicked fighter surrenders, the opponent is awarded the match
+        using (var e = new LobbyProbe("积分丁"))
+        using (var g = new LobbyProbe("积分戊"))
+        {
+            e.Connect("127.0.0.1", port);
+            e.Send(MsgType.Hello, Handshake(e, "积分丁"));
+            e.Send(MsgType.LobbyCreate, new LobbyCreate { MaxPlayers = 2, Password = "", Searchable = true });
+            var we = e.Wait<Welcome>(MsgType.Welcome, ww => ww.IsHost);
+            Check(we.Body != null, "surrender: room ready");
+            string roomId = we.As<Welcome>().Room.RoomId;
+            g.Connect("127.0.0.1", port);
+            g.Send(MsgType.Hello, Handshake(g, "积分戊"));
+            g.Send(MsgType.LobbyJoin, new LobbyJoin { RoomId = roomId, Password = "" });
+            Check(g.Wait<Welcome>(MsgType.Welcome).Body != null, "surrender: the opponent joined");
+            e.Send(MsgType.SeatClaim, new SeatClaim { Seat = 0 });
+            g.Send(MsgType.SeatClaim, new SeatClaim { Seat = 1 });
+            e.Send(MsgType.CharPick, new CharPick { Character = 0 });
+            g.Send(MsgType.CharPick, new CharPick { Character = 1 });
+            Check(g.Wait<RoomSnapshot>(MsgType.RoomState, f => f.MatchRunning == false
+                    && f.Seats[0].Ready && f.Seats[1].Ready, 4000).Body != null,
+                "surrender: both seats ready");
+            e.Send(MsgType.MatchStart, new MatchStart());
+            Check(g.Wait<StartMatch>(MsgType.StartMatch, null, 4000).Body != null,
+                "surrender: the match is running");
+            using (var h = new LobbyProbe("积分丁"))
+            {
+                h.Connect("127.0.0.1", port);
+                h.Send(MsgType.Hello, Handshake(h, "积分丁"));
+                Check(h.Wait<KickConfirm>(MsgType.KickConfirm, null, 4000).Body != null,
+                    "surrender: the popup appears for the in-game account");
+                h.Send(MsgType.KickLogin, new KickLogin { Name = "积分丁" });
+                Check(h.Wait<LoginOk>(MsgType.LoginOk, null, 4000).Body != null,
+                    "surrender: the new session is bound");
+            }
+            Check(e.Wait<Kicked>(MsgType.Kicked, null, 4000).Body != null,
+                "surrender: the old session is told");
+            var meG = g.Wait<MatchEnded>(MsgType.MatchEnded, null, 4000);
+            Check(meG.Body != null && meG.As<MatchEnded>().WinnerSeat == 1,
+                "surrender: the opponent is awarded the match (winner seat 1)");
+            Check(g.Wait<RoomSnapshot>(MsgType.RoomState, f => !f.MatchRunning
+                    && Array.Exists(f.Players, pp => pp.Name == "积分戊" && pp.Score == 1016)
+                    && Array.Exists(f.Players, pp => pp.Name == "积分丁" && pp.Score == 984),
+                4000).Body != null,
+                "surrender: the Elo settled against the kicked player");
+            int spin = 0;
+            while (!e.Dead && spin++ < 2000) { e.Poll(); Thread.Sleep(1); }
+            Check(e.Dead, "surrender: the kicked connection is closed");
+        }
+    }
+
+    // The REAL client class through the same wire: the login events, the 顶号 popup event, the
+    // auto-pong (which is what makes the HUD's PingStats arrive at all) and the pool join.
+    private static void LobbyAccountClientTest(int port, string ver)
+    {
+        using var a = new LobbyRoomClient { MatchUdpPort = 46020 };
+        a.Connect("127.0.0.1", port, "客户端甲", ver);
+        Check(LobbyWait(a, LobbyRoomClient.EventKind.LoginOk),
+            "client: LoginOk is surfaced as an event");
+
+        using var b = new LobbyRoomClient { MatchUdpPort = 46021 };
+        b.Connect("127.0.0.1", port, "客户端甲", ver);
+        Check(LobbyWait(b, LobbyRoomClient.EventKind.KickConfirm),
+            "client: KickConfirm is surfaced as an event");
+        b.ConfirmKick();
+        Check(LobbyWait(b, LobbyRoomClient.EventKind.LoginOk),
+            "client: ConfirmKick completes the login");
+        Check(LobbyWait(a, LobbyRoomClient.EventKind.Disconnected),
+            "client: the kicked client reports Disconnected (with the takeover reason)");
+
+        b.MatchmakeJoin();
+        Check(LobbyWait(b, LobbyRoomClient.EventKind.MatchmakeStatus,
+                  f => f.As<MatchmakeStatus>().Searching),
+            "client: MatchmakeJoin flips the status to searching");
+        using var c = new LobbyRoomClient { MatchUdpPort = 46022 };
+        c.Connect("127.0.0.1", port, "客户端乙", ver);
+        Check(LobbyWait(c, LobbyRoomClient.EventKind.LoginOk),
+            "client: the second account logs in");
+        c.MatchmakeJoin();
+        Check(LobbyWait(b, LobbyRoomClient.EventKind.Connected, null, 8000)
+              && LobbyWait(c, LobbyRoomClient.EventKind.Connected, null, 8000),
+            "client: matchmaking lands both clients in an auto room");
+        Check(LobbyWait(b, LobbyRoomClient.EventKind.PingStats, null, 5000),
+            "client: auto-pong produces PingStats for the match HUD");
     }
 
     private static string FindPython()

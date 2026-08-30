@@ -24,12 +24,14 @@ glow_enabled = true
 glow_intensity = 1.13
 glow_blend_mode = 0
 
-[node name="Node2D" type="Node2D" unique_id=929041593 node_paths=PackedStringArray("P1Slot", "P2Slot", "hp1Fill", "hp2Fill", "WinAnim", "WinTextLine1", "WinTextLine2", "Bgm", "SfxHit", "SfxGuard")]
+[node name="Node2D" type="Node2D" unique_id=929041593 node_paths=PackedStringArray("P1Slot", "P2Slot", "hp1Fill", "hp2Fill", "P1HudInfo", "P2HudInfo", "WinAnim", "WinTextLine1", "WinTextLine2", "Bgm", "SfxHit", "SfxGuard")]
 script = ExtResource("gm_script")
 P1Slot = NodePath("P1Slot")
 P2Slot = NodePath("P2Slot")
 hp1Fill = NodePath("HUD/P1Bar/Fill")
 hp2Fill = NodePath("HUD/P2Bar/Fill")
+P1HudInfo = NodePath("HUD/P1Info")
+P2HudInfo = NodePath("HUD/P2Info")
 WinAnim = NodePath("WinFx/WinAnim")
 WinTextLine1 = NodePath("WinTextFx/WinTextLine1")
 WinTextLine2 = NodePath("WinTextFx/WinTextLine2")
@@ -114,6 +116,23 @@ layout_mode = 0
 offset_right = 260.0
 offset_bottom = 24.0
 color = Color(0.95, 0.25, 0.25, 1)
+
+[node name="P1Info" type="Label" parent="HUD" unique_id=2069848013]
+offset_left = 20.0
+offset_top = 0.0
+offset_right = 300.0
+offset_bottom = 18.0
+theme_override_font_sizes/font_size = 13
+text = " "
+
+[node name="P2Info" type="Label" parent="HUD" unique_id=2069848014]
+offset_left = 480.0
+offset_top = 0.0
+offset_right = 780.0
+offset_bottom = 18.0
+theme_override_font_sizes/font_size = 13
+horizontal_alignment = 2
+text = " "
 
 [node name="P2Bar" type="Control" parent="HUD" unique_id=658719578]
 layout_mode = 3

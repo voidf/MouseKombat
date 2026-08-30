@@ -2,7 +2,7 @@
 
 [ext_resource type="Script" uid="uid://7hk4qmuwvoos" path="res://LobbyMenuScreen.cs" id="1_lobby"]
 
-[node name="LobbyMenu" type="Control" unique_id=84609158 node_paths=PackedStringArray("NameField", "HostField", "PortField", "ConnectButton", "StatusLabel", "Browser", "RoomList", "PageLabel", "PrevPageButton", "NextPageButton", "RefreshButton", "CreateButton", "JoinIdButton")]
+[node name="LobbyMenu" type="Control" unique_id=84609158 node_paths=PackedStringArray("NameField", "HostField", "PortField", "ConnectButton", "StatusLabel", "Browser", "RoomList", "PageLabel", "PrevPageButton", "NextPageButton", "RefreshButton", "CreateButton", "JoinIdButton", "MatchmakeButton")]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -23,6 +23,7 @@ NextPageButton = NodePath("Browser/Paging/NextPage")
 RefreshButton = NodePath("Browser/Actions/Refresh")
 CreateButton = NodePath("Browser/Actions/Create")
 JoinIdButton = NodePath("Browser/Actions/JoinId")
+MatchmakeButton = NodePath("Browser/Actions/Matchmake")
 
 [node name="BG" type="ColorRect" parent="." unique_id=288962580]
 layout_mode = 1
@@ -206,20 +207,26 @@ grow_horizontal = 2
 theme_override_constants/separation = 16
 alignment = 1
 
+[node name="Matchmake" type="Button" parent="Browser/Actions" unique_id=298297232]
+custom_minimum_size = Vector2(105, 44)
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "快速匹配"
+
 [node name="Refresh" type="Button" parent="Browser/Actions" unique_id=399909101]
-custom_minimum_size = Vector2(140, 44)
+custom_minimum_size = Vector2(105, 44)
 layout_mode = 2
 theme_override_font_sizes/font_size = 18
 text = "刷新列表"
 
 [node name="Create" type="Button" parent="Browser/Actions" unique_id=1151505866]
-custom_minimum_size = Vector2(140, 44)
+custom_minimum_size = Vector2(105, 44)
 layout_mode = 2
 theme_override_font_sizes/font_size = 18
 text = "创建房间"
 
 [node name="JoinId" type="Button" parent="Browser/Actions" unique_id=298297231]
-custom_minimum_size = Vector2(180, 44)
+custom_minimum_size = Vector2(140, 44)
 layout_mode = 2
 theme_override_font_sizes/font_size = 18
 text = "按房间号加入"
@@ -487,10 +494,57 @@ custom_minimum_size = Vector2(105, 44)
 layout_mode = 2
 text = "取消"
 
+[node name="KickPanel" type="Panel" parent="Popups" unique_id=298297240]
+visible = false
+layout_mode = 0
+offset_left = 240.0
+offset_top = 130.0
+offset_right = 560.0
+offset_bottom = 360.0
+
+[node name="Title" type="Label" parent="Popups/KickPanel" unique_id=298297241]
+layout_mode = 0
+offset_left = 20.0
+offset_top = 16.0
+offset_right = 300.0
+offset_bottom = 48.0
+theme_override_font_sizes/font_size = 18
+text = "账号冲突"
+
+[node name="Body" type="Label" parent="Popups/KickPanel" unique_id=298297242]
+layout_mode = 0
+offset_left = 20.0
+offset_top = 56.0
+offset_right = 300.0
+offset_bottom = 178.0
+theme_override_font_sizes/font_size = 14
+text = "该账号已在其他设备登录。"
+autowrap_mode = 2
+
+[node name="Buttons" type="HBoxContainer" parent="Popups/KickPanel" unique_id=298297243]
+layout_mode = 0
+offset_left = 70.0
+offset_top = 188.0
+offset_right = 300.0
+offset_bottom = 232.0
+theme_override_constants/separation = 12
+alignment = 2
+
+[node name="KickBtn" type="Button" parent="Popups/KickPanel/Buttons" unique_id=298297244]
+custom_minimum_size = Vector2(115, 44)
+layout_mode = 2
+text = "确认顶号"
+
+[node name="CancelBtn" type="Button" parent="Popups/KickPanel/Buttons" unique_id=298297245]
+custom_minimum_size = Vector2(85, 44)
+layout_mode = 2
+text = "取消"
+
 [connection signal="pressed" from="Form/ConnectButton" to="." method="OnConnectPressed"]
 [connection signal="pressed" from="Browser/Paging/PrevPage" to="." method="OnPrevPagePressed"]
 [connection signal="pressed" from="Browser/Paging/NextPage" to="." method="OnNextPagePressed"]
 [connection signal="pressed" from="Browser/Actions/Refresh" to="." method="OnRefreshPressed"]
 [connection signal="pressed" from="Browser/Actions/Create" to="." method="OnCreatePressed"]
 [connection signal="pressed" from="Browser/Actions/JoinId" to="." method="OnJoinIdPressed"]
+[connection signal="pressed" from="Browser/Actions/Matchmake" to="." method="OnMatchmakePressed"]
 [connection signal="pressed" from="Back" to="." method="OnBackPressed"]

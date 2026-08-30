@@ -58,6 +58,20 @@ MSG_HOST_SEND_TO = 24
 MSG_MATCH_START = 25
 MSG_LOBBY_PLAYER_JOINED = 26
 
+# account / matchmaking (27..). Login happens at Hello: the server binds the name to a persistent
+# SQLite account (playerid + score) and either answers LoginOk or — when the SAME account is already
+# online on another connection — KickConfirm, which starts the 顶号 (kick-out) handshake.
+MSG_LOGIN_OK = 27         # lobby -> client: [playerid, score]
+MSG_KICK_CONFIRM = 28     # lobby -> client: [name, score] — the account is online elsewhere
+MSG_KICK_LOGIN = 29       # client -> lobby: [name] — confirm 顶号: kick the old session, bind me
+MSG_KICKED = 30           # lobby -> OLD client: [reason] — account taken over; the server closes next
+MSG_MATCHMAKE_JOIN = 31   # client -> lobby: [name] — enter the matchmaking pool
+MSG_MATCHMAKE_CANCEL = 32 # client -> lobby: [name] — leave the pool
+MSG_MATCHMAKE_STATUS = 33 # lobby -> client: [searching, waited_seconds]
+MSG_PING = 34             # lobby -> client: [seq] heartbeat; the server measures RTT from the Pong
+MSG_PONG = 35             # client -> lobby: [seq] echo
+MSG_PING_STATS = 36       # lobby -> client: [self_rtt_ms, opponent_rtt_ms] for the match HUD
+
 # Types a member may send in room phase. Anything else is ignored, exactly like the C# host
 # ignores unknown client types (a stale or hostile peer must not crash the room).
 ROOM_MEMBER_TYPES = frozenset({

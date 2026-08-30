@@ -108,6 +108,19 @@ public partial class NetSeatScreen : Control
         BuildDropPopup();
         BuildPadBusyPopup();
 
+        // A 顶号 kick of an IN-MATCH player lands on this screen with the connection already
+        // gone: the server sends MatchEnded and Kicked in one burst, MatchEnded starts the scene
+        // change here (whose leaving-guard swallows the Disconnected event in GameManager), and
+        // the burst finishes before this screen exists. The recorded reason is the only way the
+        // player learns why — say it, and land the popup on the lobby menu like any other drop.
+        if (Net != null && !Net.Active && Net.Mode == ReplayData.ModeLobby
+            && Net.LastDisconnectReason != null)
+        {
+            string why = Net.LastDisconnectReason;
+            Net.ClearLastDisconnectReason();
+            ShowDrop("连接断开", why, LobbyMenuScenePath);
+        }
+
         if (Net != null)
         {
             Net.RoomChanged += Render;
@@ -122,6 +135,16 @@ public partial class NetSeatScreen : Control
         // exactly for that window; drain it now that this screen exists.
         if (Net != null && Net.PendingCatchUp != null)
             OnCatchUpReceived(Net.PendingCatchUp);
+        // A QUICK-MATCH room is the StartMatch twin of that window: the server auto-starts the
+        // matchmade room right after Welcome, so the MatchStarting event fired while the lobby
+        // menu was still on stage. Consume the buffered setup now — this machine goes straight
+        // into the fight instead of sitting on the seat screen.
+        if (Net != null && Net.PendingMatchStart != null)
+        {
+            var setup = Net.PendingMatchStart;
+            Net.ClearPendingMatchStart();
+            OnMatchStarting(setup);
+        }
         Render();
     }
 
@@ -462,6 +485,9 @@ public partial class NetSeatScreen : Control
     // (MatchPlan), so this only has to either enter the match scene or say why it is staying put.
     private void OnMatchStarting(StartMatch setup)
     {
+        // Consumed through either entry point (the event while this screen is live, or the
+        // _Ready drain for a quick match): the buffer must not re-fire for the NEXT screen.
+        Net?.ClearPendingMatchStart();
         var net = Net;
         var plan = net?.Plan;
         if (plan == null) { _matchNote = "对局已开始，但本机未取得对局分配"; Render(); return; }

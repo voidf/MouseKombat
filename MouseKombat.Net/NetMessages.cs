@@ -44,6 +44,24 @@ public enum MsgType : byte
                       // member of the room — carries the catch-up stream (see § Mid-match spectating)
     MatchStart = 25,  // host player -> lobby: request a match start with the stage geometry
     LobbyPlayerJoined = 26,// lobby -> host player: a player just joined (mid-match catch-up hook)
+
+    // Account login + matchmaking (账号与匹配). Login happens AT Hello: the Hello name is the
+    // account, the server binds a persistent (playerid, score) row from its SQLite file, and the
+    // one of LoginOk / KickConfirm decides whether this connection enters the browse phase or the
+    // 顶号 (kick-out) handshake. Append-only like everything else; a peer that does not know
+    // these types ignores them.
+    LoginOk = 27,        // lobby -> client: the account is bound (fresh or after a kick);
+                         // carries playerid + score
+    KickConfirm = 28,    // lobby -> client: the account is ONLINE ELSEWHERE — show the popup
+    KickLogin = 29,      // client -> lobby: popup confirmed; kick the other session, bind me
+    Kicked = 30,         // lobby -> OLD client: your account was taken over; the server closes
+                         // the connection right after (client-side it surfaces as Disconnected)
+    MatchmakeJoin = 31,  // client -> lobby: enter the matchmaking pool (browse phase only)
+    MatchmakeCancel = 32,// client -> lobby: leave the pool
+    MatchmakeStatus = 33,// lobby -> client: searching or not (the button toggles on this)
+    Ping = 34,           // lobby -> client: heartbeat; the server measures RTT from each Pong
+    Pong = 35,           // client -> lobby: echo (answered inside LobbyRoomClient, no screens)
+    PingStats = 36,      // lobby -> client: measured (self, opponent) RTTs for the match HUD
 }
 
 public static class NetVersion
@@ -107,6 +125,11 @@ public sealed class PlayerInfo
     [Key(2)] public bool IsHost { get; set; }
     [Key(3)] public int Seat { get; set; } = -1;   // -1 = spectator
     [Key(4)] public bool Connected { get; set; } = true;
+    // Append-only account fields (lobby only): the persistent identity behind this room member.
+    // 0 = not carried (LAN host builds snapshots locally; an AI seat has no account). Field ORDER
+    // follows the server's snapshot append: identity first, then the score derived from it.
+    [Key(5)] public ulong AccountId { get; set; }
+    [Key(6)] public int Score { get; set; }
 }
 
 [MessagePackObject]
@@ -363,4 +386,89 @@ public sealed class MatchStart
 public sealed class LobbyPlayerJoined
 {
     [Key(0)] public int PlayerId { get; set; }
+}
+
+// ---- account login + matchmaking (账号与匹配). See PROTOCOL.md § Accounts and matchmaking. ----
+
+// The account is bound to this connection and the browse phase is open. Sent after Hello (fresh
+// login) or after a confirmed 顶号 — in which case Score is the value AS SETTLED, since the kicked
+// session may have just surrendered a match.
+[MessagePackObject]
+public sealed class LoginOk
+{
+    [Key(0)] public ulong PlayerAccountId { get; set; }   // the players.playerid row (from 1)
+    [Key(1)] public int Score { get; set; }
+}
+
+// The account is online on ANOTHER connection. The client shows the 顶号 popup; confirming sends
+// KickLogin, cancelling just drops this connection (the account stays with the other session).
+[MessagePackObject]
+public sealed class KickConfirm
+{
+    [Key(0)] public string Name { get; set; } = "";   // the account's display name
+    [Key(1)] public int Score { get; set; }           // its current score, for the popup text
+}
+
+// The 顶号 confirm. The server tears the old session down COMPLETELY first (out of the matchmaking
+// pool, out of its room — a mid-match seat counts as a scored surrender) and only then binds this
+// connection; that ordering is the spec's race-condition rule.
+[MessagePackObject]
+public sealed class KickLogin
+{
+    [Key(0)] public string Name { get; set; } = "";
+}
+
+// The OLD client's notification, sent right before the server closes its connection. The client
+// surfaces it through the existing Disconnected flow, so every screen already reacts the same way
+// it would to any other drop — only the text names the takeover.
+[MessagePackObject]
+public sealed class Kicked
+{
+    [Key(0)] public string Reason { get; set; } = "";
+}
+
+// Enter / leave the matchmaking pool. Both echo the sender's name for symmetric logging; the
+// server derives everything else from the connection's account.
+[MessagePackObject]
+public sealed class MatchmakeJoin
+{
+    [Key(0)] public string Name { get; set; } = "";
+}
+
+[MessagePackObject]
+public sealed class MatchmakeCancel
+{
+    [Key(0)] public string Name { get; set; } = "";
+}
+
+// Pool state for the button: searching=true after a join, false after a cancel (or a removal the
+// server made itself, e.g. the player joined a room by hand).
+[MessagePackObject]
+public sealed class MatchmakeStatus
+{
+    [Key(0)] public bool Searching { get; set; }
+    [Key(1)] public int WaitedSeconds { get; set; }
+}
+
+// Server heartbeat. The server measures the RTT from the matching Pong; one ping in flight per
+// connection, so Seq pairs the echo with its measurement.
+[MessagePackObject]
+public sealed class Ping
+{
+    [Key(0)] public int Seq { get; set; }
+}
+
+[MessagePackObject]
+public sealed class Pong
+{
+    [Key(0)] public int Seq { get; set; }
+}
+
+// Measured RTTs for the match HUD: this machine's, and the other fighting seat's (0 = an AI seat,
+// or nothing measured yet). Pushed once per heartbeat to every member holding a fighting seat.
+[MessagePackObject]
+public sealed class PingStats
+{
+    [Key(0)] public int SelfRttMs { get; set; }
+    [Key(1)] public int OpponentRttMs { get; set; }
 }

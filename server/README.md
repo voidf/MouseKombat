@@ -8,6 +8,9 @@ server/
   lobby_server.py   # 服务器本体（asyncio，TCP 房间信道 + UDP 对局转发）
   room.py           # 房间状态机（RoomState.cs 的 Python 移植，纯逻辑）
   protocol.py       # 帧格式 / msgpack / 消息号 / 名字净化
+  player_store.py   # 玩家账号表（SQLite 单文件，WAL；name/playerid/score）
+  matchmaking.py    # 匹配池（梯级分差）+ Elo 结算（纯逻辑）
+  config.json       # 匹配 / 数据库 / ping 配置（可 --config 换文件）
   smoke_test.py     # headless 端到端自测（无需 .NET）
   requirements.txt
   README.md
@@ -34,6 +37,39 @@ server/
 | `MK_PROTOCOL` | `2` | 线协议版本（与 `NetVersion.Protocol` 一致，一般不要动） |
 | `MK_IDLE_TIMEOUT` | `300` | 未进房间的浏览器连接空闲超时（秒） |
 | `MK_MAX_ROOMS` | `500` | 服务器同时在开房间上限 |
+| `--config PATH` | 同目录 `config.json` | 匹配 / 数据库 / ping 配置文件（见下） |
+| `--db PATH` | config 的 `db_path` | SQLite 账号文件路径（相对路径按 config 所在目录解析） |
+
+## 账号、匹配与 ping（config.json）
+
+```jsonc
+{
+  "db_path": "lobby.db",              // SQLite 账号文件（相对 config.json 所在目录）
+  "matchmaking": {
+    "initial_score": 1000,            // 新账号注册分
+    "k_factor": 32,                   // Elo K 值
+    "score_floor": 0,                 // 败者保底分
+    "bucket_base": 100,               // 刚进池时可接受的分差
+    "bucket_growth_per_second": 15,   // 每多等 1 秒放宽多少分差
+    "bucket_max": 400,                // 分差上限
+    "tick_interval_seconds": 1.0,     // 匹配心跳
+    "auto_start": true,               // 匹配成房后自动开赛
+    "auto_characters": [0, 1, 2]      // 自动选角的随机池（0仓鼠 1袋鼠 2松鼠）
+  },
+  "ping": { "interval_seconds": 2.0 } // 服务器心跳 ping 间隔（RTT 由此测得）
+}
+```
+
+行为要点（细节见 PROTOCOL.md § Accounts and matchmaking）：
+
+- **登录即账号**：Hello 里的名字就是账号名，首次出现自动注册（playerid 自增、初始分
+  `initial_score`）。数据落在单个 SQLite 文件（WAL 模式），重启不丢。
+- **顶号**：同账号第二个客户端登录时收到 `KickConfirm`，客户端弹「继续将顶号」确认框；
+  确认后服务器先把旧连接**彻底清理**（移出匹配池、移出房间——正在对局则判负并结算 Elo），
+  再把账号绑给新连接。被顶的客户端收到 `Kicked` 后断开。
+- **Elo 结算**：任意两个真人座位打完一局（含被顶号判负）即结算，零和（触底除外），立即写库。
+- **ping**：服务器对每条连接周期性 `Ping`/`Pong` 测 RTT，并给持座成员推送
+  `(自己, 对手)` 两组数值（`PingStats`），对局 HUD 据此实时显示。
 
 ## 本机运行（Windows / 开发机）
 
@@ -116,7 +152,9 @@ sudo systemctl start mousekombat-lobby
 
 ### 资源与规模
 
-- 状态全在进程内存，无落盘、无数据库；重启即清空所有房间（预期行为）。
+- 房间/匹配状态全在进程内存；重启即清空所有房间（预期行为）。
+- **玩家账号落盘**：单个 SQLite 文件（WAL），重启不丢；备份 = 备份该文件
+  （连同 `-wal`/`-shm`，或先 `sqlite3 lobby.db "PRAGMA wal_checkpoint;"`）。
 - 2C2G 对「百人以下同时在开」完全富余：每个房间最多 4 名人类，100 人 ≈ 25 个房间。
 - 带宽：单场对局 60Hz rollback 包约为几十 KB/s，25 场同时开远低于 100M。
 - 并发连接上限未硬编码；`MK_MAX_ROOMS` 是房间数上限，必要时再调。

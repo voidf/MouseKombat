@@ -11,18 +11,22 @@ isolation and is the thing to run on the server machine after a deploy.
 from __future__ import annotations
 
 import asyncio
+import os
 import socket
 import sys
+import tempfile
 
 from protocol import (
-    MSG_ADD_AI, MSG_BYE, MSG_CHAR_PICK, MSG_HELLO, MSG_HOST_SEND_TO, MSG_LOBBY_CREATE,
-    MSG_LOBBY_JOIN, MSG_LOBBY_LIST, MSG_LOBBY_PLAYER_JOINED, MSG_LOBBY_ROOMS,
-    MSG_MATCH_ENDED, MSG_MATCH_INPUT_REPORT, MSG_MATCH_INPUTS, MSG_MATCH_RESULT,
-    MSG_MATCH_START, MSG_REJECTED, MSG_REMOVE_AI, MSG_ROOM_STATE, MSG_SEAT_CLAIM,
-    MSG_SEAT_RELEASE, MSG_START_MATCH, MSG_WELCOME, PROTOCOL, FrameReader, decode_body,
-    encode_frame,
+    MSG_ADD_AI, MSG_BYE, MSG_CHAR_PICK, MSG_HELLO, MSG_HOST_SEND_TO, MSG_KICK_CONFIRM,
+    MSG_KICK_LOGIN, MSG_KICKED, MSG_LOGIN_OK, MSG_LOBBY_CREATE, MSG_LOBBY_JOIN, MSG_LOBBY_LIST,
+    MSG_LOBBY_PLAYER_JOINED, MSG_LOBBY_ROOMS, MSG_MATCH_ENDED, MSG_MATCH_INPUT_REPORT,
+    MSG_MATCH_INPUTS, MSG_MATCH_RESULT, MSG_MATCH_START, MSG_MATCHMAKE_JOIN,
+    MSG_MATCHMAKE_STATUS, MSG_PING_STATS, MSG_PONG, MSG_REJECTED, MSG_REMOVE_AI, MSG_ROOM_STATE,
+    MSG_SEAT_CLAIM, MSG_SEAT_RELEASE, MSG_START_MATCH, MSG_WELCOME, PROTOCOL, FrameReader,
+    decode_body, encode_frame,
 )
 from lobby_server import ENDPOINT_REPIN_AFTER, LobbyServer
+from matchmaking import elo_update
 
 GAME_VERSION = "0.0.7"
 _fail = 0
@@ -142,11 +146,20 @@ class FakeClient:
 
 
 async def main():
-    srv = LobbyServer("127.0.0.1", 0, 0, GAME_VERSION, idle_timeout=300, max_rooms=500)
+    # The DB lands in a per-run temp dir: accounts persist WITHIN a run (that is what the
+    # persistence scenario proves) but never leak between runs or into the repo.
+    tmp = tempfile.mkdtemp(prefix="mk_lobby_smoke_")
+    srv = LobbyServer("127.0.0.1", 0, 0, GAME_VERSION, idle_timeout=300, max_rooms=500,
+                      db_path=os.path.join(tmp, "smoke_accounts.db"),
+                      config_overrides={
+                          "matchmaking": {"tick_interval_seconds": 0.2},
+                          "ping": {"interval_seconds": 0.2},
+                      })
     await srv.start()
     host, tcp_port, udp_port = "127.0.0.1", srv.port, srv.udp_port
     try:
         await run_scenarios(host, tcp_port, udp_port)
+        await run_account_scenarios(host, tcp_port)
     finally:
         await srv.shutdown()
 
@@ -181,9 +194,11 @@ async def run_scenarios(host, port, udp_port):
     check(w[2][3] == 4, "create: snapshot carries maxPlayers=4")
 
     # ---- invalid create params ----
-    for body, expect in (([9, "", True], "2到4"), ([4, "12", True], "密码"),
-                         ([4, "12345", True], "密码"), (["4", "", True], "2到4")):
-        c = FakeClient(host, port, "乱建")
+    # Unique name per attempt: with accounts, a name that reconnects before the server noticed
+    # the previous EOF would meet the 顶号 popup instead of the create form.
+    for i, (body, expect) in enumerate((([9, "", True], "2到4"), ([4, "12", True], "密码"),
+                                        ([4, "12345", True], "密码"), (["4", "", True], "2到4"))):
+        c = FakeClient(host, port, f"乱建{i}", udp_port=40090 + i)
         await c.connect()
         await c.hello()
         await c.send(MSG_LOBBY_CREATE, body)
@@ -686,6 +701,183 @@ async def udp_remapped_relay_ok(host, udp_port, room_id, port_a, port_b,
     finally:
         for t in transports:
             t.close()
+
+
+async def run_account_scenarios(host, port):
+    # ---- login: a fresh name is registered with the configured initial score ----
+    a = FakeClient(host, port, "积分甲", udp_port=40100)
+    await a.connect()
+    await a.hello()
+    f = await a.recv_until(MSG_LOGIN_OK)
+    check(f is not None, "login: a fresh name gets LoginOk")
+    check(isinstance(f[1][0], int) and f[1][0] > 0, f"login: playerid is a positive int ({f[1][0]})")
+    check(f[1][1] == 1000, f"login: a fresh account starts at 1000 ({f[1][1]})")
+    acc_a = f[1][0]
+
+    # ---- duplicate login: the 顶号 popup path ----
+    b = FakeClient(host, port, "积分甲", udp_port=40101)
+    await b.connect()
+    await b.hello()
+    f = await b.recv_until(MSG_KICK_CONFIRM)
+    check(f is not None and f[1][0] == "积分甲" and f[1][1] == 1000,
+          "kick: a same-name login gets KickConfirm{name, score}")
+    # A browse op aimed at a kick-wait connection is refused without closing (the stale parked
+    # LobbyList an old client sends right after Hello).
+    await b.send(MSG_LOBBY_LIST, [0])
+    f = await b.recv_until(MSG_REJECTED)
+    check(f is not None and "登录" in f[1][0], "kick: browse ops are refused until the login completes")
+    # Confirm -> the old session is told, closed, and the SAME account binds to the new one.
+    await b.send(MSG_KICK_LOGIN, ["积分甲"])
+    f = await b.recv_until(MSG_LOGIN_OK)
+    check(f is not None and f[1][0] == acc_a, "kick: the confirm binds the SAME account id")
+    f = await a.recv_until(MSG_KICKED)
+    check(f is not None and "其他设备" in f[1][0], "kick: the old session is told why")
+    closed = False
+    try:
+        f = await a.recv(timeout=2.0)
+        closed = f is None   # no frame left — just the EOF
+    except ConnectionError:
+        closed = True
+    check(closed, "kick: the old connection is closed right after Kicked")
+
+    # A third login sees the popup too; closing WITHOUT confirming leaves the account with b.
+    c = FakeClient(host, port, "积分甲", udp_port=40102)
+    await c.connect()
+    await c.hello()
+    check(await c.recv_until(MSG_KICK_CONFIRM) is not None, "kick: a third login also sees the popup")
+    c.close()
+    await asyncio.sleep(0.1)   # let the server process the abandoned popup's EOF
+
+    # ---- matchmaking: two queued players pair into an auto room, the match auto-starts ----
+    d = FakeClient(host, port, "积分乙", udp_port=40103)
+    await d.connect()
+    await d.hello()
+    check(await d.recv_until(MSG_LOGIN_OK) is not None, "login: second account ready")
+    await b.send(MSG_MATCHMAKE_JOIN, ["积分甲"])
+    f = await b.recv_until(MSG_MATCHMAKE_STATUS)
+    check(f is not None and f[1][0] is True, "mm: joining the pool answers status searching=true")
+    await d.send(MSG_MATCHMAKE_JOIN, ["积分乙"])
+    w_b = await b.recv_until(MSG_WELCOME, timeout=5.0)
+    w_d = await d.recv_until(MSG_WELCOME, timeout=5.0)
+    check(w_b is not None and w_d is not None, "mm: two queued players pair into a room")
+    check(w_b[1][2][2] == w_d[1][2][2], "mm: both land in the SAME room")
+    check(w_b[1][1] is True and w_d[1][1] is False, "mm: the first queuer is the host player")
+    snap = w_b[1][2]
+    check(snap[1][0][0] != 0 and snap[1][1][0] != 0, "mm: both seats are auto-claimed")
+    check(snap[1][0][1] >= 0 and snap[1][1][1] >= 0, "mm: characters are auto-picked")
+    check(all(len(p) == 7 and p[5] > 0 for p in snap[0]),
+          "mm: snapshot players carry accountid + score (append-only fields)")
+    sm = await b.recv_until(MSG_START_MATCH, timeout=5.0)
+    check(sm is not None, "mm: the match auto-starts (no room screen round-trip)")
+    # The server heartbeat reaches a seated fighter with (self, opponent) RTTs for the HUD.
+    ps = await b.recv_until(MSG_PING_STATS, timeout=3.0)
+    check(ps is not None and ps[1][0] >= 0 and ps[1][1] >= 0,
+          f"ping: a seated fighter receives RTT stats ({ps[1] if ps else None})")
+    await b.send(MSG_PONG, [99999])   # a stale echo must be ignored without breaking anything
+
+    # ---- Elo settle: b (seat 0) wins, both scores move, the DB keeps them ----
+    await b.send(MSG_MATCH_RESULT, [0])
+    me = await b.recv_until(MSG_MATCH_ENDED)
+    check(me is not None, "mm: MatchEnded follows the result")
+    rs = await b.recv_until(MSG_ROOM_STATE, timeout=2.0)
+    entries = {p[1]: p for p in rs[1][0]} if rs is not None else {}
+    got_a = entries.get("积分甲", [0] * 7)[6]
+    got_b = entries.get("积分乙", [0] * 7)[6]
+    check(got_a == 1016 and got_b == 984,
+          f"mm: Elo settled 1016/984 for equal scores (got {got_a}/{got_b})")
+    b.close()
+    await asyncio.sleep(0.1)
+    b2 = FakeClient(host, port, "积分甲", udp_port=40104)
+    await b2.connect()
+    await b2.hello()
+    f = await b2.recv_until(MSG_LOGIN_OK)
+    check(f is not None and f[1][1] == 1016, "persist: the settled score survives a reconnect")
+
+    # ---- 顶号 while IN GAME: the kicked fighter surrenders, the opponent wins, scores settle ----
+    e = FakeClient(host, port, "积分丙", udp_port=40105)
+    await e.connect()
+    await e.hello()
+    await e.recv_until(MSG_LOGIN_OK)
+    w_e = await e.create(2)
+    g = FakeClient(host, port, "积分丁", udp_port=40106)
+    await g.connect()
+    await g.hello()
+    w_g = await g.join(w_e[2][2])   # create() returns [player_id, is_host, snapshot]; [2][2] = room id
+    check(w_e is not None and w_g is not None, "surrender: room ready")
+    await e.claim(0)
+    await g.claim(1)
+    await e.pick(0)
+    await g.pick(1)
+    await g.wait_room_state(lambda s: s[4] is False and s[1][0][2] >= 0 and s[1][1][2] >= 0)
+    await e.send(MSG_MATCH_START, [40.0, 760.0, 800.0, 120.0, 560.0, 650.0, 560.0])
+    check(await g.recv_until(MSG_START_MATCH) is not None, "surrender: the match is running")
+    # h logs in as 积分丙 and confirms the 顶号
+    h = FakeClient(host, port, "积分丙", udp_port=40107)
+    await h.connect()
+    await h.hello()
+    check(await h.recv_until(MSG_KICK_CONFIRM) is not None, "surrender: the popup appears")
+    await h.send(MSG_KICK_LOGIN, ["积分丙"])
+    check(await h.recv_until(MSG_LOGIN_OK) is not None, "surrender: the new session is bound")
+    check(await e.recv_until(MSG_KICKED) is not None, "surrender: the old session is told")
+    me_g = await g.recv_until(MSG_MATCH_ENDED, timeout=3.0)
+    check(me_g is not None and me_g[1][0] == 1,
+          f"surrender: the opponent is awarded the match (winner seat {me_g[1][0] if me_g else '?'})")
+    closed = False
+    try:
+        closed = await e.recv(timeout=2.0) is None
+    except ConnectionError:
+        closed = True
+    check(closed, "surrender: the kicked connection is closed")
+    e.close()
+    h.close()          # h holds the account; it must go offline before the reconnect below
+    await asyncio.sleep(0.1)
+    e2 = FakeClient(host, port, "积分丙", udp_port=40108)
+    await e2.connect()
+    await e2.hello()
+    f = await e2.recv_until(MSG_LOGIN_OK)
+    score = f[1][1] if f is not None else None
+    check(f is not None and score == 984,
+          f"surrender: the kicked player lost Elo (score {score})")
+    e2.close()
+    await asyncio.sleep(0.1)
+    h2 = FakeClient(host, port, "积分丙", udp_port=40109)
+    await h2.connect()
+    await h2.hello()
+    f = await h2.recv_until(MSG_LOGIN_OK)
+    score = f[1][1] if f is not None else None
+    check(f is not None and score == 984, "surrender: the account keeps its settled score")
+
+    # ---- 顶号 while IN QUEUE: the pool entry goes with the kicked session ----
+    x = FakeClient(host, port, "积分戊", udp_port=40110)
+    await x.connect()
+    await x.hello()
+    await x.recv_until(MSG_LOGIN_OK)
+    await x.send(MSG_MATCHMAKE_JOIN, ["积分戊"])
+    check(await x.recv_until(MSG_MATCHMAKE_STATUS) is not None, "queue-kick: x is queued")
+    y = FakeClient(host, port, "积分戊", udp_port=40111)
+    await y.connect()
+    await y.hello()
+    check(await y.recv_until(MSG_KICK_CONFIRM) is not None, "queue-kick: the popup appears")
+    await y.send(MSG_KICK_LOGIN, ["积分戊"])
+    check(await y.recv_until(MSG_LOGIN_OK) is not None, "queue-kick: the new session binds")
+    check(await x.recv_until(MSG_KICKED) is not None, "queue-kick: the queued session is told")
+    # If x's ghost stayed in the pool, z would pair with it on the very next tick (gap 0).
+    z = FakeClient(host, port, "积分己", udp_port=40112)
+    await z.connect()
+    await z.hello()
+    await z.recv_until(MSG_LOGIN_OK)
+    await z.send(MSG_MATCHMAKE_JOIN, ["积分己"])
+    f = await z.recv_until(MSG_WELCOME, timeout=2.5)
+    check(f is None, "queue-kick: no ghost pairing — the kicked entry left the pool")
+
+    # ---- Elo math (unit-level) ----
+    check(elo_update(1000, 1000) == (1016, 984), "elo: equal scores -> +16/-16 at K=32")
+    check(elo_update(1300, 1000) == (1305, 995), "elo: the favourite gains little, loses little")
+    check(elo_update(900, 1100) == (924, 1076), "elo: the underdog's upset pays well")
+    check(elo_update(1000, 1) == (1001, 0), "elo: the loser never drops below the floor, the winner still gains 1")
+
+    for cl in (b2, d, g, h, x, y, z):
+        cl.close()
 
 
 if __name__ == "__main__":

@@ -35,6 +35,11 @@ public sealed class LobbyRoomClient : IDisposable
         // alive and back in the browse phase. Distinct from Disconnected on purpose: the screens
         // return to the room browser instead of the main menu, and nothing has to reconnect.
         RoomClosed,
+        // ---- account / matchmaking (see PROTOCOL.md § Accounts and matchmaking) ----
+        LoginOk,           // the account is bound (fresh, or after a confirmed 顶号) — browse opens
+        KickConfirm,       // the account is online elsewhere: show the 顶号 popup
+        MatchmakeStatus,   // pool membership changed (button toggles on this)
+        PingStats,         // (self, opponent) RTT sample for the match HUD
     }
 
     public readonly struct ClientEvent
@@ -73,6 +78,11 @@ public sealed class LobbyRoomClient : IDisposable
     public int PlayerId { get; private set; }
     public bool IsHostPlayer { get; private set; }
     public RoomSnapshot Room { get; private set; }
+    // The persistent account this connection is logged in as (0 = not yet, e.g. still awaiting a
+    // 顶号 confirm). The room-local PlayerId above is per-room; THIS is the identity the server
+    // scores and 顶号s by.
+    public ulong AccountPlayerId { get; private set; }
+    public int AccountScore { get; private set; }
     public bool IsConnected => _stage is Stage.Lobby or Stage.Room;
     public bool IsInRoom => _stage == Stage.Room;
     public bool IsBusy => _stage is Stage.Resolving or Stage.Connecting or Stage.Handshaking;
@@ -98,6 +108,8 @@ public sealed class LobbyRoomClient : IDisposable
         _assetHash = assetHash ?? "";
         LastError = null;
         _pendingOp = null;
+        AccountPlayerId = 0;
+        AccountScore = 0;
         _stage = Stage.Resolving;
         Emit(EventKind.Connecting, $"正在解析 {host}");
         try { _dns = Dns.GetHostAddressesAsync(host); }
@@ -264,6 +276,38 @@ public sealed class LobbyRoomClient : IDisposable
                 case MsgType.LobbyPlayerJoined:
                     Emit(EventKind.LobbyPlayerJoined, null, frame);
                     break;
+                case MsgType.LoginOk:
+                {
+                    var m = frame.As<LoginOk>();
+                    AccountPlayerId = m.PlayerAccountId;
+                    AccountScore = m.Score;
+                    Emit(EventKind.LoginOk, null, frame);
+                    break;
+                }
+                case MsgType.KickConfirm:
+                    Emit(EventKind.KickConfirm, null, frame);
+                    break;
+                case MsgType.MatchmakeStatus:
+                    Emit(EventKind.MatchmakeStatus, null, frame);
+                    break;
+                case MsgType.Ping:
+                    // Answered here, not by a screen: the RTT is server-side bookkeeping and no
+                    // UI decision depends on the echo. A stale seq is ignored server-side.
+                    Send(MsgType.Pong, new Pong { Seq = frame.As<Ping>().Seq });
+                    break;
+                case MsgType.PingStats:
+                    Emit(EventKind.PingStats, null, frame);
+                    break;
+                case MsgType.Kicked:
+                {
+                    // The account was taken over (顶号): the server closes right after this frame.
+                    // Surfaced as the ordinary Disconnected so every screen reacts the way it
+                    // already does to a drop — only the reason text names the takeover.
+                    LastError = frame.As<Kicked>().Reason;
+                    Emit(EventKind.Disconnected, LastError);
+                    Shutdown();
+                    return;
+                }
                 case MsgType.RoomState:
                     Room = frame.As<RoomSnapshot>();
                     // The frame rides along so a consumer can predicate on the snapshot instead of
@@ -315,6 +359,13 @@ public sealed class LobbyRoomClient : IDisposable
         Send(MsgType.LobbyCreate, new LobbyCreate { MaxPlayers = maxPlayers, Password = password ?? "", Searchable = searchable, AssetHash = _assetHash });
     public void JoinRoom(string roomId, string password) =>
         Send(MsgType.LobbyJoin, new LobbyJoin { RoomId = roomId ?? "", Password = password ?? "" });
+
+    // ---- account / matchmaking ----
+    // 顶号 confirm: the server kicks whatever session currently holds our account, then binds us
+    // and answers LoginOk (the kick-wait phase accepts nothing else).
+    public void ConfirmKick() => Send(MsgType.KickLogin, new KickLogin { Name = _name });
+    public void MatchmakeJoin() => Send(MsgType.MatchmakeJoin, new MatchmakeJoin { Name = _name });
+    public void MatchmakeCancel() => Send(MsgType.MatchmakeCancel, new MatchmakeCancel { Name = _name });
 
     // ---- room phase (same requests a LAN client makes; the server is the authority) ----
     public void ClaimSeat(int seat) => Send(MsgType.SeatClaim, new SeatClaim { Seat = seat });

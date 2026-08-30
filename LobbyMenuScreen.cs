@@ -30,6 +30,7 @@ public partial class LobbyMenuScreen : Control
     [Export] public Button RefreshButton;
     [Export] public Button CreateButton;
     [Export] public Button JoinIdButton;
+    [Export] public Button MatchmakeButton;       // 快速匹配 / 取消匹配 toggle
 
     public const int DefaultPort = 4954;
     public const string DefaultHost = "4kr.top";
@@ -60,6 +61,14 @@ public partial class LobbyMenuScreen : Control
     private LineEdit _joinIdField;
     private LineEdit _joinPwField;
     private Button _joinConfirm;
+    private Panel _kickPanel;           // 顶号 confirm popup (account online elsewhere)
+    private Label _kickText;
+    private Button _kickConfirmBtn;
+
+    // Quick-match state. The wait clock is client-side (the status message only confirms the
+    // server accepted us); a MatchmakeStatus(searching=false) or a scene change ends the wait.
+    private bool _matchmaking;
+    private double _matchmakingFor;
 
     private NetSession Net => NetSession.Instance;
 
@@ -108,6 +117,9 @@ public partial class LobbyMenuScreen : Control
             Net.LobbyRejected += OnLobbyRejected;
             Net.LobbyRoomsReceived += OnLobbyRooms;
             Net.RoomChanged += OnRoomChanged;
+            Net.LobbyLoginOk += OnLoginOk;
+            Net.LobbyKickConfirm += OnKickConfirmNeeded;
+            Net.MatchmakeStatusReceived += OnMatchmakeStatus;
         }
     }
 
@@ -119,6 +131,16 @@ public partial class LobbyMenuScreen : Control
         net.LobbyRejected -= OnLobbyRejected;
         net.LobbyRoomsReceived -= OnLobbyRooms;
         net.RoomChanged -= OnRoomChanged;
+        net.LobbyLoginOk -= OnLoginOk;
+        net.LobbyKickConfirm -= OnKickConfirmNeeded;
+        net.MatchmakeStatusReceived -= OnMatchmakeStatus;
+    }
+
+    public override void _Process(double delta)
+    {
+        if (!_matchmaking) return;
+        _matchmakingFor += delta;
+        SetStatus($"正在匹配对手…（已等待 {_matchmakingFor:0} 秒，按原来的分数越等越宽）");
     }
 
     private static string DefaultPlayerName()
@@ -198,10 +220,33 @@ public partial class LobbyMenuScreen : Control
         // spare the player the retyping.
         AppSettings.Instance?.RememberLobbyForm(NameField?.Text ?? "", host, port);
         net.ConnectLobby(host, port, NameField.Text);
-        // The FIRST page rides along on the connect: LobbyRoomClient parks the op until the socket
-        // exists and flushes it right after the Hello, so the browser panel opens the moment the
-        // server answers.
+        // NO list request here: the server first binds the NAME to an account at Hello (fresh
+        // login -> LoginOk; already online -> the 顶号 popup), and the first page goes out from
+        // OnLoginOk. A list sent before the login would only come back as 请先完成登录.
+    }
+
+    // Login completed (fresh, or a confirmed 顶号): open the browser exactly like the old
+    // connect-then-list flow did.
+    private void OnLoginOk()
+    {
+        var net = Net;
+        if (net == null) return;
+        SetBusy(false);
+        ClosePopup();
+        SetStatus($"已登录 {net.PlayerName}（积分 {net.AccountScore}）");
         net.RequestLobbyList(0);
+    }
+
+    // The account is online elsewhere: the 顶号 popup. Confirming re-logs-in over the old
+    // session (the server kicks it — out of the matchmaking pool, out of any match, with the
+    // match counted as a surrender); cancelling drops THIS connection and keeps the other one.
+    private void OnKickConfirmNeeded(KickConfirm k)
+    {
+        if (_kickText != null)
+            _kickText.Text = $"账号「{k.Name}」（积分 {k.Score}）已在其他设备登录。\n"
+                             + "继续登录将断开那边的连接并接管账号（顶号）。\n确定要继续吗？";
+        OpenPopup(_kickPanel, _kickConfirmBtn, _kickConfirmBtn);
+        SetStatus("该账号已在其他设备登录", true);
     }
 
     // The browse connection is established asynchronously (DNS + TCP); the FIRST list page is
@@ -308,8 +353,43 @@ public partial class LobbyMenuScreen : Control
     private void OnDisconnected(string reason)
     {
         SetBusy(false);
+        SetMatchmaking(false);
         ShowBrowser(false);
         SetStatus(string.IsNullOrEmpty(reason) ? "与大厅的连接已断开。" : reason, true);
+    }
+
+    // ---- quick match ----
+
+    public void OnMatchmakePressed()
+    {
+        if (_matchmaking)
+        {
+            Net?.RequestMatchmakeCancel();
+            SetMatchmaking(false);
+            SetStatus("已取消匹配。");
+            return;
+        }
+        _matchmaking = true;
+        _matchmakingFor = 0;
+        if (MatchmakeButton != null) MatchmakeButton.Text = "取消匹配";
+        Net?.RequestMatchmakeJoin();
+        SetStatus("正在匹配对手…");
+    }
+
+    // The server confirms the join (searching=true) and would tell us if it pulled us out itself
+    // (e.g. we joined a room by hand while queued). A matched pair needs no status: the players
+    // are handed a room via Welcome, which changes the scene like any other join.
+    private void OnMatchmakeStatus(MatchmakeStatus status)
+    {
+        if (status.Searching || !_matchmaking) return;
+        SetMatchmaking(false);
+        SetStatus("匹配已结束。");
+    }
+
+    private void SetMatchmaking(bool on)
+    {
+        _matchmaking = on;
+        if (MatchmakeButton != null) MatchmakeButton.Text = on ? "取消匹配" : "快速匹配";
     }
 
     // ---- popups ----
@@ -331,6 +411,9 @@ public partial class LobbyMenuScreen : Control
         _joinIdField = GetNodeOrNull<LineEdit>("Popups/JoinIdPanel/IdRow/Field");
         _joinPwField = GetNodeOrNull<LineEdit>("Popups/JoinIdPanel/PwRow/Field");
         _joinConfirm = GetNodeOrNull<Button>("Popups/JoinIdPanel/Buttons/JoinBtn");
+        _kickPanel = GetNodeOrNull<Panel>("Popups/KickPanel");
+        _kickText = GetNodeOrNull<Label>("Popups/KickPanel/Body");
+        _kickConfirmBtn = GetNodeOrNull<Button>("Popups/KickPanel/Buttons/KickBtn");
 
         var cancel = GetNodeOrNull<Button>("Popups/PasswordPanel/Buttons/CancelBtn");
         if (cancel != null) cancel.Pressed += () => ClosePopup();
@@ -338,6 +421,24 @@ public partial class LobbyMenuScreen : Control
         if (cancel != null) cancel.Pressed += () => ClosePopup();
         cancel = GetNodeOrNull<Button>("Popups/JoinIdPanel/Buttons/CancelBtn");
         if (cancel != null) cancel.Pressed += () => ClosePopup();
+        // 顶号 popup: confirm -> re-login over the old session; cancel -> drop THIS connection
+        // (the account stays with the other device, the player stays on the connect form).
+        if (_kickConfirmBtn != null) _kickConfirmBtn.Pressed += () =>
+        {
+            ClosePopup();
+            SetBusy(true);
+            SetStatus("正在顶号登录…");
+            Net?.ConfirmKickAndLogin();
+        };
+        cancel = GetNodeOrNull<Button>("Popups/KickPanel/Buttons/CancelBtn");
+        if (cancel != null) cancel.Pressed += () =>
+        {
+            ClosePopup();
+            Net?.Leave(null);
+            ShowBrowser(false);
+            SetBusy(false);
+            SetStatus("已取消登录。");
+        };
 
         if (_pwConfirm != null) _pwConfirm.Pressed += () =>
         {
@@ -412,6 +513,7 @@ public partial class LobbyMenuScreen : Control
         _pwPanel.Visible = false;
         _createPanel.Visible = false;
         _joinPanel.Visible = false;
+        if (_kickPanel != null) _kickPanel.Visible = false;
         _menuPad.DefaultFocus = RefreshButton;
         return true;
     }

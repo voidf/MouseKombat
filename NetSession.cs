@@ -68,6 +68,38 @@ public partial class NetSession : Node
     // Never raised for a real drop — that is Disconnected.
     public event Action<string> LobbyRoomClosed;
 
+    // ---- account / matchmaking (PROTOCOL.md § Accounts and matchmaking) ----
+    // LoginOk: the account is bound (fresh login, or a confirmed 顶号) — the lobby menu opens the
+    // browser on this. KickConfirm carries the online-elsewhere notice the login popup shows.
+    // MatchmakeStatus flips the quick-match button between 匹配中 and idle.
+    public event Action LobbyLoginOk;
+    public event Action<KickConfirm> LobbyKickConfirm;
+    public event Action<MatchmakeStatus> MatchmakeStatusReceived;
+
+    // The persistent account this lobby connection is logged in as (0 = not logged in yet).
+    public ulong AccountPlayerId { get; private set; }
+    public int AccountScore { get; private set; }
+
+    // Last measured RTTs from the server's heartbeat (PingStats). The match HUD reads these every
+    // frame; 0 = nothing measured yet (the HUD shows "--").
+    public int SelfPingMs { get; private set; }
+    public int OpponentPingMs { get; private set; }
+
+    // A QUICK-MATCH arrival buffers its StartMatch here. The server auto-starts the matchmade
+    // room the moment both players are seated, so StartMatch lands while the LOBBY MENU is still
+    // the current scene — its MatchStarting event would fire with no subscriber and be lost, the
+    // exact window PendingCatchUp already covers for mid-match joins. The seat screen drains the
+    // buffer in _Ready; cleared on match end / room close / disconnect / leaving.
+    public StartMatch PendingMatchStart { get; private set; }
+    public void ClearPendingMatchStart() => PendingMatchStart = null;
+
+    // Why the last connection died, or null. The one consumer is the seat screen's _Ready guard:
+    // a 顶号 kick of an in-match player sends MatchEnded and Kicked in ONE burst — MatchEnded
+    // starts the scene change (whose leaving-guard swallows the Disconnected event), and without
+    // this record the kicked player would land on a dead seat screen with no explanation.
+    public string LastDisconnectReason { get; private set; }
+    public void ClearLastDisconnectReason() => LastDisconnectReason = null;
+
     // ---- match channel ----
     //
     // UDP for the rollback session, on the SAME port number as the room's TCP port (PROTOCOL.md
@@ -159,6 +191,7 @@ public partial class NetSession : Node
     public bool StartHosting(string bindAddress, int port, string playerName, string mode)
     {
         Leave(null);
+        LastDisconnectReason = null;
         PlayerName = RoomState.SanitizeName(playerName);
         Mode = mode;
         HostAddress = bindAddress;
@@ -183,6 +216,7 @@ public partial class NetSession : Node
     public void JoinRoom(string host, int port, string playerName, string mode, string password = "")
     {
         Leave(null);
+        LastDisconnectReason = null;
         PlayerName = RoomState.SanitizeName(playerName);
         Mode = mode;
         HostAddress = host;
@@ -210,6 +244,7 @@ public partial class NetSession : Node
     public void ConnectLobby(string host, int port, string playerName)
     {
         Leave(null);
+        LastDisconnectReason = null;
         PlayerName = RoomState.SanitizeName(playerName);
         Mode = ReplayData.ModeLobby;
         HostAddress = host;
@@ -231,6 +266,11 @@ public partial class NetSession : Node
         Lobby?.CreateRoom(maxPlayers, password, searchable);
     public void RequestLobbyJoin(string roomId, string password) =>
         Lobby?.JoinRoom(roomId, password);
+
+    // ---- account / matchmaking requests ----
+    public void ConfirmKickAndLogin() => Lobby?.ConfirmKick();
+    public void RequestMatchmakeJoin() => Lobby?.MatchmakeJoin();
+    public void RequestMatchmakeCancel() => Lobby?.MatchmakeCancel();
 
     // Leave a lobby room but KEEP the lobby connection: the server returns it to the browse phase,
     // so the player lands back in the room browser without reconnecting (spec: ESC 退出房间后回到
@@ -267,6 +307,12 @@ public partial class NetSession : Node
         PendingCatchUp = null;
         PendingStreamInputs.Clear();
         _lockedDevices.Clear();
+        // Account state belongs to the connection; a fresh connect logs in afresh.
+        AccountPlayerId = 0;
+        AccountScore = 0;
+        SelfPingMs = 0;
+        OpponentPingMs = 0;
+        PendingMatchStart = null;
     }
 
     // Drops whatever the CURRENT match set up, keeping the room. Called when a match ends and when
@@ -713,10 +759,14 @@ public partial class NetSession : Node
                     RoomChanged?.Invoke();
                     break;
                 case LobbyRoomClient.EventKind.MatchStarting:
+                    // Buffered BEFORE BeginMatch: a quick-match start arrives while the lobby menu
+                    // is still the current scene, and the seat screen drains this in _Ready.
+                    PendingMatchStart = e.Frame.As<StartMatch>();
                     BeginMatch(e.Frame.As<StartMatch>());
                     break;
                 case LobbyRoomClient.EventKind.MatchEnded:
                     EndMatchLocal();
+                    PendingMatchStart = null;
                     PendingCatchUp = null;
                     PendingStreamInputs.Clear();
                     MatchEnded?.Invoke(e.Frame.As<MatchEnded>());
@@ -743,6 +793,26 @@ public partial class NetSession : Node
                     if (Room != null && Room.MatchRunning)
                         MergeInputReport(0, e.Frame.As<MatchInputReport>());
                     break;
+                case LobbyRoomClient.EventKind.LoginOk:
+                    // The client stores the answer too; re-reading it here keeps this autoload the
+                    // one place screens ask for account state.
+                    AccountPlayerId = Lobby.AccountPlayerId;
+                    AccountScore = Lobby.AccountScore;
+                    LobbyLoginOk?.Invoke();
+                    break;
+                case LobbyRoomClient.EventKind.KickConfirm:
+                    LobbyKickConfirm?.Invoke(e.Frame.As<KickConfirm>());
+                    break;
+                case LobbyRoomClient.EventKind.MatchmakeStatus:
+                    MatchmakeStatusReceived?.Invoke(e.Frame.As<MatchmakeStatus>());
+                    break;
+                case LobbyRoomClient.EventKind.PingStats:
+                {
+                    var s = e.Frame.As<PingStats>();
+                    SelfPingMs = s.SelfRttMs;
+                    OpponentPingMs = s.OpponentRttMs;
+                    break;
+                }
                 case LobbyRoomClient.EventKind.LobbyRooms:
                     LobbyRoomsReceived?.Invoke(e.Frame.As<LobbyRooms>());
                     break;
@@ -757,6 +827,7 @@ public partial class NetSession : Node
                     EndMatchLocal();
                     Room = null;
                     PendingCatchUp = null;
+                    PendingMatchStart = null;
                     PendingStreamInputs.Clear();
                     _lockedDevices.Clear();
                     LobbyRoomClosed?.Invoke(e.Detail ?? "房间已关闭");
@@ -767,6 +838,10 @@ public partial class NetSession : Node
                     Lobby.Dispose();
                     Lobby = null;
                     Room = null;
+                    PendingMatchStart = null;
+                    SelfPingMs = 0;
+                    OpponentPingMs = 0;
+                    LastDisconnectReason = why;
                     Disconnected?.Invoke(why);
                     return;
                 }

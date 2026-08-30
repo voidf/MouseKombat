@@ -27,6 +27,12 @@ public partial class GameManager : Node2D, IMatchPresenter
     [Export] public ColorRect hp2Fill;
     [Export] public float HpBarFullWidth = 260f;
 
+    // The info line ABOVE each HP bar: 名字 · 分数 · ping. Only a LOBBY match has the data —
+    // scores ride the room snapshot (PlayerInfo.Score), pings are the server heartbeat's
+    // PingStats — so LAN and local play keep the plain bars (labels stay hidden).
+    [Export] public Label P1HudInfo;
+    [Export] public Label P2HudInfo;
+
     // ONE victory splash node for both sides. Its SpriteFrames is swapped per match from the
     // WINNING CHARACTER's roster entry, because the splash belongs to the character, not the seat:
     // with two side-specific nodes, a P2 win played the kangaroo splash even when P2 had picked the
@@ -403,6 +409,7 @@ public partial class GameManager : Node2D, IMatchPresenter
     {
         if (_sim == null) return; // SpawnFighters failed; errors already logged in _Ready
 
+        UpdateHudInfo();
         if (_netMatch != null) DrainNetEvents();
 
         if (_phase != Phase.Fighting)
@@ -1067,6 +1074,59 @@ public partial class GameManager : Node2D, IMatchPresenter
             var s = hp2Fill.Size; s.X = w; hp2Fill.Size = s;
             var pos = hp2Fill.Position; pos.X = HpBarFullWidth - w; hp2Fill.Position = pos;
         }
+    }
+
+    // ---- the lobby HUD info line ----
+    // `名字  分数  ping` above each bar, refreshed every frame (the values behind it move at
+    // heartbeat pace; the guard on text churn is not worth it at two labels). A spectator sees
+    // both seats with "--ms": the server only pushes PingStats to machines holding a seat.
+    private void UpdateHudInfo()
+    {
+        var net = NetSession.Instance;
+        bool show = _netMatch != null && _plan != null && net != null && net.IsLobby
+                    && net.Room != null;
+        if (!show)
+        {
+            if (P1HudInfo != null) P1HudInfo.Visible = false;
+            if (P2HudInfo != null) P2HudInfo.Visible = false;
+            return;
+        }
+        int mySeat = _plan.LocalSeat[0] ? 0 : _plan.LocalSeat[1] ? 1 : -1;
+        SetHudInfo(P1HudInfo, net, 0, mySeat);
+        SetHudInfo(P2HudInfo, net, 1, mySeat);
+    }
+
+    private static void SetHudInfo(Label label, NetSession net, int seat, int mySeat)
+    {
+        if (label == null) return;
+        var room = net.Room;
+        var s = seat >= 0 && seat < room.Seats.Length ? room.Seats[seat] : null;
+        if (s == null || !s.Occupied) { label.Visible = false; return; }
+
+        string name;
+        bool hasScore = false, hasPing = false;
+        int score = 0, ping = 0;
+        if (s.IsAi)
+        {
+            name = string.IsNullOrEmpty(s.AiModel) ? "AI" : s.AiModel.GetFile();
+        }
+        else
+        {
+            PlayerInfo p = null;
+            foreach (var cand in room.Players)
+                if (cand.PlayerId == s.OccupantPlayerId) { p = cand; break; }
+            name = p?.Name ?? "?";
+            hasScore = p is { Score: > 0 };
+            score = p?.Score ?? 0;
+            hasPing = true;
+            ping = seat == mySeat ? net.SelfPingMs : net.OpponentPingMs;
+        }
+
+        var text = name;
+        if (hasScore) text += $"  {score}分";
+        if (hasPing) text += ping > 0 ? $"  {ping}ms" : "  --ms";
+        label.Text = text;
+        label.Visible = true;
     }
 
     // winnerIndex: 0 = P1 won, 1 = P2 won (matches StepResult.MatchOverWinner).
