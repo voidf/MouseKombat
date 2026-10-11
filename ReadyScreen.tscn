@@ -76,7 +76,7 @@ offset_top = 444.0
 offset_right = 396.0
 offset_bottom = 476.0
 theme_override_font_sizes/font_size = 16
-text = "按手柄A / 键盘J / 数字键1 占用该机位（~键交给AI）"
+text = "按手柄A / 键盘J / 小键盘1 占用该机位（~键交给AI）"
 horizontal_alignment = 1
 
 [node name="P1CancelHint" type="Label" parent="." unique_id=2114186799]
@@ -128,7 +128,7 @@ offset_top = 444.0
 offset_right = 740.0
 offset_bottom = 476.0
 theme_override_font_sizes/font_size = 16
-text = "按手柄A / 键盘J / 数字键1 占用该机位（~键交给AI）"
+text = "按手柄A / 键盘J / 小键盘1 占用该机位（~键交给AI）"
 horizontal_alignment = 1
 
 [node name="P2CancelHint" type="Label" parent="." unique_id=675369226]

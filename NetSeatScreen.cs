@@ -894,14 +894,19 @@ public partial class NetSeatScreen : Control
         if (net.Room != null && net.Room.MatchRunning)
             return string.IsNullOrEmpty(_matchNote) ? "对局进行中…" : _matchNote;
         int mine = net.LocalSeat();
+        var device = mine >= 0 ? net.LockedDevice(mine) : null;
         var parts = new List<string>();
-        parts.Add(mine >= 0 ? "确认键改角色 · 取消键让位" : "确认键占一个空位");
+        parts.Add(device != null
+            ? $"{device.ConfirmLabel} 改角色 · {device.CancelLabel} 让位"
+            : "按 J / 小键盘1 / 手柄 A 占一个空位");
         if (net.IsHost) parts.Add("~ 键给空位加 AI");
         bool hasAi = net.Room != null && net.Room.Seats.Any(s => s.IsAi);
         if (net.IsHost && hasAi) parts.Add("Backspace 取消 AI");
         parts.Add(net.IsHost ? "Esc 关闭房间" : "Esc 离开房间");
         if (net.IsHost && !net.BothSeatsReady()) parts.Add("两个机位都选好角色后才能开始");
-        return string.Join(" · ", parts);
+        return "键盘机位1：J 确认 / K 取消 · 键盘机位2：小键盘1 确认 / 小键盘2 取消\n"
+            + "手柄：A 确认 / B 取消\n"
+            + string.Join(" · ", parts);
     }
 
     private void SetHint(string text)

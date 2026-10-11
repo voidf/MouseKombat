@@ -29,6 +29,7 @@ public interface IInputSource
     bool ConfirmHeld { get; }
     bool CancelHeld { get; }
 
+    string ConfirmLabel { get; }
     string CancelLabel { get; }        // key shown in the "press X to cancel" hint
 }
 
@@ -36,6 +37,7 @@ public interface IInputSource
 public abstract class InputSourceBase : IInputSource
 {
     public abstract string Id { get; }
+    public abstract string ConfirmLabel { get; }
     public abstract string CancelLabel { get; }
 
     public bool Left { get; private set; }
@@ -88,14 +90,16 @@ public sealed class KeyboardSource : InputSourceBase
     private readonly int[] _btn;          // 6 keycodes, AttackButton order
     private readonly int _confirm, _cancel;
     public override string Id { get; }
+    public override string ConfirmLabel { get; }
     public override string CancelLabel { get; }
 
     private KeyboardSource(string id, int left, int right, int up, int down,
-                           int[] btn, int confirm, int cancel, string cancelLabel)
+                           int[] btn, int confirm, int cancel, string confirmLabel, string cancelLabel)
     {
         Id = id;
         _left = left; _right = right; _up = up; _down = down;
         _btn = btn; _confirm = confirm; _cancel = cancel;
+        ConfirmLabel = confirmLabel;
         CancelLabel = cancelLabel;
     }
 
@@ -104,14 +108,14 @@ public sealed class KeyboardSource : InputSourceBase
         "kbL",
         left: (int)Key.A, right: (int)Key.D, up: (int)Key.W, down: (int)Key.S,
         btn: new[] { (int)Key.U, (int)Key.I, (int)Key.O, (int)Key.J, (int)Key.K, (int)Key.L },
-        confirm: (int)Key.J, cancel: (int)Key.K, cancelLabel: "K");
+        confirm: (int)Key.J, cancel: (int)Key.K, confirmLabel: "J", cancelLabel: "K");
 
     // Right seat: arrows + numpad 1 2 3 / 4 5 6. Lock = numpad 1, cancel = numpad 2.
     public static KeyboardSource RightSeat() => new KeyboardSource(
         "kbR",
         left: (int)Key.Left, right: (int)Key.Right, up: (int)Key.Up, down: (int)Key.Down,
         btn: new[] { (int)Key.Kp4, (int)Key.Kp5, (int)Key.Kp6, (int)Key.Kp1, (int)Key.Kp2, (int)Key.Kp3 },
-        confirm: (int)Key.Kp1, cancel: (int)Key.Kp2, cancelLabel: "小键盘2");
+        confirm: (int)Key.Kp1, cancel: (int)Key.Kp2, confirmLabel: "小键盘1", cancelLabel: "小键盘2");
 
     // Menu-only seat: arrows to navigate, Enter to confirm, backtick to back out. Used to drive an
     // AI seat's panels through the SAME code path a human device uses, so the select screens do not
@@ -120,7 +124,7 @@ public sealed class KeyboardSource : InputSourceBase
         "menu",
         left: (int)Key.Left, right: (int)Key.Right, up: (int)Key.Up, down: (int)Key.Down,
         btn: new[] { 0, 0, 0, 0, 0, 0 },
-        confirm: (int)Key.Enter, cancel: (int)Key.Quoteleft, cancelLabel: "`");
+        confirm: (int)Key.Enter, cancel: (int)Key.Quoteleft, confirmLabel: "回车", cancelLabel: "`");
 
     public override void Poll()
     {
@@ -148,6 +152,7 @@ public sealed class GamepadSource : InputSourceBase
     private const float Dead = 0.5f;
     private readonly int _dev;
     public override string Id { get; }
+    public override string ConfirmLabel => "A";
     public override string CancelLabel => "B";
 
     // The OS device index — the key of the cross-window PadLock mutex.

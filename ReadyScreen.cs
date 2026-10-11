@@ -29,7 +29,7 @@ public partial class ReadyScreen : Control
     [Export] public Label P2CancelHint;
     [Export] public Label StartLabel; // bottom-center start prompt
 
-    [Export] public string PromptText = "按手柄A / 键盘J / 数字键1 占用该机位（~键交给AI）";
+    [Export] public string PromptText = "按手柄A / 键盘J / 小键盘1 占用该机位（~键交给AI）";
     [Export] public string StatusText = "准备中";
     [Export] public string StartText = "按确认键开始游戏";
     [Export] public string StartTextAi = "按空格键开始游戏"; // shown when both slots are AI

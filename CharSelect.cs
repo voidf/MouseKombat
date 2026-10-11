@@ -240,8 +240,8 @@ public partial class CharSelect : Control
     {
         _title.Text = $"P{Seat + 1} 选择角色";
         string dirs = _aiMode ? "方向键" : NavLabel(_nav);
-        string ok = _aiMode ? "回车" : "确认键";
-        string back = _aiMode ? "`" : (_nav?.CancelLabel ?? "取消键");
+        string ok = _nav.ConfirmLabel;
+        string back = _nav.CancelLabel;
         string tail = _aiMode ? "确定后选择 AI 模型" : "双方可以选同一个角色";
         _hint.Text = $"{dirs} 选择 · {ok} 确定 · {back} 或 Esc 返回（放弃该机位）\n{tail}";
     }
