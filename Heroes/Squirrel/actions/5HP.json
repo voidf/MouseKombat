@@ -863,6 +863,7 @@
     "anyKick": false,
     "stance": "Stand",
     "unblockable": false,
+    "hurtAnimOverride": "",
     "startupCancelInto": [],
     "recoveryCancelInto": [
       "5HK"

@@ -670,6 +670,7 @@
     "anyKick": false,
     "stance": "Air",
     "unblockable": false,
+    "hurtAnimOverride": "",
     "startupCancelInto": [],
     "recoveryCancelInto": [],
     "actives": [

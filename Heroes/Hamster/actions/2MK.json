@@ -409,6 +409,7 @@
     "anyKick": false,
     "stance": "Crouch",
     "unblockable": false,
+    "hurtAnimOverride": "",
     "startupCancelInto": [],
     "recoveryCancelInto": [],
     "actives": [

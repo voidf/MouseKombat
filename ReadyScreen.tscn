@@ -1,12 +1,14 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene format=3 uid="uid://c8a0ocae0h2jh"]
 
-[ext_resource type="Script" path="res://ReadyScreen.cs" id="1_rs"]
+[ext_resource type="Script" uid="uid://cek42htd34cxu" path="res://ReadyScreen.cs" id="1_rs"]
 
-[node name="ReadyScreen" type="Control" node_paths=PackedStringArray("P1Portrait", "P2Portrait", "P1Label", "P2Label", "P1Status", "P2Status", "P1Prompt", "P2Prompt", "P1CancelHint", "P2CancelHint", "StartLabel")]
+[node name="ReadyScreen" type="Control" unique_id=975567116 node_paths=PackedStringArray("P1Portrait", "P2Portrait", "P1Label", "P2Label", "P1Status", "P2Status", "P1Prompt", "P2Prompt", "P1CancelHint", "P2CancelHint", "StartLabel")]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
 script = ExtResource("1_rs")
 P1Portrait = NodePath("P1Portrait")
 P2Portrait = NodePath("P2Portrait")
@@ -20,15 +22,14 @@ P1CancelHint = NodePath("P1CancelHint")
 P2CancelHint = NodePath("P2CancelHint")
 StartLabel = NodePath("StartLabel")
 
-[node name="BG" type="ColorRect" parent="."]
+[node name="BG" type="ColorRect" parent="." unique_id=1507866204]
 layout_mode = 0
 offset_right = 800.0
 offset_bottom = 600.0
 color = Color(0.08, 0.09, 0.12, 1)
 
-[node name="Title" type="Label" parent="."]
+[node name="Title" type="Label" parent="." unique_id=1859250715]
 layout_mode = 0
-offset_left = 0.0
 offset_top = 36.0
 offset_right = 800.0
 offset_bottom = 84.0
@@ -37,7 +38,7 @@ text = "选择机位 / READY"
 horizontal_alignment = 1
 vertical_alignment = 1
 
-[node name="P1Label" type="Label" parent="."]
+[node name="P1Label" type="Label" parent="." unique_id=596601048]
 layout_mode = 0
 offset_left = 100.0
 offset_top = 104.0
@@ -47,17 +48,17 @@ theme_override_font_sizes/font_size = 24
 text = "P1"
 horizontal_alignment = 1
 
-[node name="P1Portrait" type="TextureRect" parent="."]
+[node name="P1Portrait" type="TextureRect" parent="." unique_id=520526500]
+modulate = Color(0.45, 0.45, 0.45, 1)
 layout_mode = 0
 offset_left = 100.0
 offset_top = 140.0
 offset_right = 356.0
 offset_bottom = 396.0
-modulate = Color(0.45, 0.45, 0.45, 1)
 expand_mode = 1
 stretch_mode = 5
 
-[node name="P1Status" type="Label" parent="."]
+[node name="P1Status" type="Label" parent="." unique_id=23501239]
 layout_mode = 0
 offset_left = 100.0
 offset_top = 404.0
@@ -68,7 +69,7 @@ theme_override_font_sizes/font_size = 26
 text = "准备中"
 horizontal_alignment = 1
 
-[node name="P1Prompt" type="Label" parent="."]
+[node name="P1Prompt" type="Label" parent="." unique_id=1334443323]
 layout_mode = 0
 offset_left = 60.0
 offset_top = 444.0
@@ -78,7 +79,7 @@ theme_override_font_sizes/font_size = 16
 text = "按手柄A / 键盘J / 数字键1 占用该机位（~键交给AI）"
 horizontal_alignment = 1
 
-[node name="P1CancelHint" type="Label" parent="."]
+[node name="P1CancelHint" type="Label" parent="." unique_id=2114186799]
 layout_mode = 0
 offset_left = 60.0
 offset_top = 444.0
@@ -89,7 +90,7 @@ theme_override_font_sizes/font_size = 16
 text = "按 K 取消准备"
 horizontal_alignment = 1
 
-[node name="P2Label" type="Label" parent="."]
+[node name="P2Label" type="Label" parent="." unique_id=149115526]
 layout_mode = 0
 offset_left = 444.0
 offset_top = 104.0
@@ -99,17 +100,17 @@ theme_override_font_sizes/font_size = 24
 text = "P2"
 horizontal_alignment = 1
 
-[node name="P2Portrait" type="TextureRect" parent="."]
+[node name="P2Portrait" type="TextureRect" parent="." unique_id=1068058438]
+modulate = Color(0.45, 0.45, 0.45, 1)
 layout_mode = 0
 offset_left = 444.0
 offset_top = 140.0
 offset_right = 700.0
 offset_bottom = 396.0
-modulate = Color(0.45, 0.45, 0.45, 1)
 expand_mode = 1
 stretch_mode = 5
 
-[node name="P2Status" type="Label" parent="."]
+[node name="P2Status" type="Label" parent="." unique_id=504158156]
 layout_mode = 0
 offset_left = 444.0
 offset_top = 404.0
@@ -120,7 +121,7 @@ theme_override_font_sizes/font_size = 26
 text = "准备中"
 horizontal_alignment = 1
 
-[node name="P2Prompt" type="Label" parent="."]
+[node name="P2Prompt" type="Label" parent="." unique_id=1268346085]
 layout_mode = 0
 offset_left = 404.0
 offset_top = 444.0
@@ -130,7 +131,7 @@ theme_override_font_sizes/font_size = 16
 text = "按手柄A / 键盘J / 数字键1 占用该机位（~键交给AI）"
 horizontal_alignment = 1
 
-[node name="P2CancelHint" type="Label" parent="."]
+[node name="P2CancelHint" type="Label" parent="." unique_id=675369226]
 layout_mode = 0
 offset_left = 404.0
 offset_top = 444.0
@@ -141,9 +142,8 @@ theme_override_font_sizes/font_size = 16
 text = "按 B 取消准备"
 horizontal_alignment = 1
 
-[node name="StartLabel" type="Label" parent="."]
+[node name="StartLabel" type="Label" parent="." unique_id=1282069466]
 layout_mode = 0
-offset_left = 0.0
 offset_top = 528.0
 offset_right = 800.0
 offset_bottom = 572.0

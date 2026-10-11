@@ -869,6 +869,7 @@
     "anyKick": false,
     "stance": "Stand",
     "unblockable": true,
+    "hurtAnimOverride": "",
     "startupCancelInto": [],
     "recoveryCancelInto": [],
     "actives": [
