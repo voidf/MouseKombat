@@ -55,8 +55,15 @@ public static class Observation
         o[i++] = opp.AttackPhase() / 3f;
         o[i++] = Math.Clamp(self.AtkFrame, 0, 60) / 60f;
         o[i++] = Math.Clamp(opp.AtkFrame, 0, 60) / 60f;
-        o[i++] = (self.CurrentMove?.Damage ?? 0) / 20f;
-        o[i++] = (opp.CurrentMove?.Damage ?? 0) / 20f;
+        // Threat of the move each fighter is performing, as a FRACTION OF A HEALTH BAR.
+        // The divisor used to be the literal 20f, which only made sense for the legacy code tables
+        // (damage in HP: 3..16 -> 0.15..0.80). The Heroes/ tables the game now runs carry damage in
+        // centi-HP AND keep MoveDef.Damage at 0 for melee (it lives per active interval), so the
+        // same feature would read a constant 0 in-game while reading 0.15..0.80 in training — a
+        // train/inference mismatch on 2 of 32 inputs. Normalizing by MaxHp makes the value mean the
+        // same thing in BOTH table kinds (3/100 == 300/10000 == 0.03).
+        o[i++] = Threat(self) ;
+        o[i++] = Threat(opp);
         o[i++] = (self.CurrentMove != null ? (int)self.CurrentMove.Guard : 0) / 2f;
         // i == CoreSize (23) here.
 
@@ -98,5 +105,20 @@ public static class Observation
         o[i++] = self.State == PlayerState.Grabbed ? 1f : 0f;
         o[i++] = opp.State == PlayerState.Grabbed ? 1f : 0f;
         // i == Size (32) here.
+    }
+
+    // Damage of the move `p` is performing, expressed as a fraction of p's own health bar.
+    // Legacy tables put the number on MoveDef.Damage; Heroes/ tables put it on each active
+    // interval, so fall back to the biggest one. 0 while idle.
+    private static float Threat(SimPlayer p)
+    {
+        var m = p.CurrentMove;
+        if (m == null) return 0f;
+        int dmg = m.Damage;
+        if (dmg <= 0 && m.ActiveWindows != null)
+            for (int k = 0; k < m.ActiveWindows.Length; k++)
+                if (m.ActiveWindows[k].Damage > dmg) dmg = m.ActiveWindows[k].Damage;
+        int max = p.MaxHp > 0 ? p.MaxHp : 1;
+        return Math.Clamp(dmg / (float)max, 0f, 1f);
     }
 }

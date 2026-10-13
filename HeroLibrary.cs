@@ -135,7 +135,16 @@ public partial class HeroLibrary : Node
     private SimRect PrefabHitbox(string prefabId)
     {
         var scene = FireballScene(prefabId);
-        if (scene == null) return default;
+        if (scene == null)
+        {
+            // Loud on purpose. Falling back to default(SimRect) is what made a whole mechanic dead
+            // for an unknown length of time: a fireball compiled with a zero-size hit rect spawns,
+            // draws and passes through people, and nothing anywhere says so. If this ever fires
+            // again, the prefab is missing or was looked up before LoadFireballs() ran.
+            GD.PushWarning($"[HeroLibrary] fireball prefab '{prefabId}' not loaded — its hit rect "
+                + "falls back to zero size and the projectile cannot hit anything.");
+            return default;
+        }
         var node = scene.Instantiate<Projectile>();
         var r = node != null ? node.Hitbox : new Rect2();
         node?.Free();
@@ -178,8 +187,14 @@ public partial class HeroLibrary : Node
         }
         AssetHash = System.BitConverter.ToString(md5.ComputeHash(hashInput.ToArray())).Replace("-", "").ToLowerInvariant();
 
-        LoadHeroes();
+        // Fireball prefabs MUST be loaded first: HeroCompiler compiles every character's move table
+        // through PrefabHitbox, which resolves a projectile's hit rect out of FireballTSCN/<id>.tscn.
+        // With the old order the lookup ran against an empty _fireballs, PrefabHitbox returned
+        // default(SimRect), and EVERY fireball in the game compiled with a zero-size hit rect — it
+        // flew, it drew, and it passed straight through people. Invisible because the view spawns
+        // its node from FireballScene() much later, by which time the prefabs were loaded.
         LoadFireballs();
+        LoadHeroes();
         Scanned = true;
         GD.Print($"[HeroLibrary] {_heroes.Count} heroes, {_fireballs.Count} fireball prefabs, "
             + $"asset hash {AssetHashShort}");

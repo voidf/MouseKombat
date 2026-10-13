@@ -31,6 +31,7 @@ def _ensure_runtime():
 _ensure_runtime()
 from MouseKombat.Sim import (  # noqa: E402
     GameSim, PlayerConfig, InputFrame, StateMachineAgent, CharacterId, Observation, HeroDisk,
+    HeroCompiler,
 )
 
 OBS = 32
@@ -38,13 +39,44 @@ NUM_ACT = 10
 
 _HEROES_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Heroes"))
 
+# Reading + compiling a Heroes/<folder> costs ~70 JSON files. Doing that on EVERY episode reset
+# (twice, once per fighter) left the CPU ~20% busy with the sim starved on I/O. The compiled
+# MoveSet is immutable and shared by every fighter of that character in the GAME too
+# (HeroLibrary caches hero.Compiled), so caching it per process is the same deal the game makes.
+_HERO_CACHE = {}
+
+# MK_ZERO_FIREBALL=1 compiles every fireball with a ZERO hit rect, which is what the SHIPPED GAME
+# currently does: FireballTSCN/*.tscn carry stale texture uids, so HeroLibrary fails to load the
+# prefab scenes, FireballScene() returns null and the compiler falls back to default(SimRect).
+# Use it to ask "how does this policy do in the build players actually have today?" — the default
+# (off) trains against fireballs as DESIGNED, which is what the assets say they should be.
+_ZERO_FIREBALL = os.environ.get("MK_ZERO_FIREBALL", "") == "1"
+
 
 def make_config(spec, x, y, facing):
     """CharacterId name ("Hamster") or a data-driven hero via "hero:<Folder>" (Heroes/<Folder>,
     the exact JSON the game's HeroLibrary loads — MKEditor output trains here unchanged)."""
     if spec.startswith("hero:"):
         folder = spec[len("hero:"):]
-        cfg = HeroDisk.BuildPlayerConfig(os.path.join(_HEROES_DIR, folder), float(x), float(y), bool(facing))
+        cached = _HERO_CACHE.get(folder)
+        if cached is None:
+            hero_dir = os.path.join(_HEROES_DIR, folder)
+            defn = HeroDisk.Load(hero_dir)
+            if _ZERO_FIREBALL:
+                from System import Func, String
+                from MouseKombat.Sim import Fix, SimRect
+                q = Fix.FromRaw(0)
+                compiled = HeroCompiler.Compile(
+                    defn, Func[String, SimRect](lambda _p: SimRect(q, q, q, q)))
+            else:
+                compiled = HeroCompiler.Compile(defn, HeroDisk.FireballHitboxResolver(hero_dir))
+            cid = getattr(CharacterId, folder, CharacterId.Hamster)
+            cached = (defn, compiled, cid)
+            _HERO_CACHE[folder] = cached
+        defn, compiled, cid = cached
+        cfg = HeroCompiler.BuildConfig(defn, float(x), float(y), bool(facing))
+        cfg.Character = cid
+        cfg.MoveSetOverride = compiled
         return cfg
     cfg = PlayerConfig()
     cfg.Character = getattr(CharacterId, spec)

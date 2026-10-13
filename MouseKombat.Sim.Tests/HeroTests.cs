@@ -429,8 +429,25 @@ internal static partial class Program
         Check(HeroTableParity(heroesDir, "Squirrel", CharacterId.Hamster), "migration parity: Squirrel (hamster-seeded)");
     }
 
+    // Values the 招式编辑器 deliberately changed in Heroes/ after the migration. The Heroes/ JSON is
+    // the CONTENT SOURCE now (the editor writes it, the game runs it); the legacy C# tables are a
+    // fallback for headless runs with no Heroes/ folder and are deliberately NOT re-synced, because
+    // changing them would change the golden checksum that every stored replay is verified against.
+    // So a divergence on this list is an accepted edit; anything else is still a hard failure —
+    // that is what keeps this test a drift guard instead of a rubber stamp.
+    // Keys are matched as PREFIXES because several messages embed values (e.g. "5HK: total 20 vs 19").
+    private static readonly (string Key, string Reason)[] AcceptedEdits =
+    {
+        ("Hamster/2LP: hitbox",
+         "编辑器把 2LP 判定框抬高前移（仓鼠可以肘击袋鼠）：(20,-60,90,55) -> (49.3,-138.2,78.8,73.9)"),
+    };
+
+    // Folder of the character currently being compared, for the accept-list key above.
+    private static string _parityFolder = "";
+
     private static bool HeroTableParity(string heroesDir, string folder, CharacterId legacyId)
     {
+        _parityFolder = folder;
         string charJson = System.IO.File.ReadAllText(System.IO.Path.Combine(heroesDir, folder, "char.json"));
         var def = HeroJson.Read<HeroCharDef>(charJson);
         def.Actions = new List<HeroActionDef>();
@@ -518,9 +535,22 @@ internal static partial class Program
         return walk;
     }
 
+    // Returns FALSE when the caller should stop (a real, unexpected divergence). Returns TRUE for a
+    // divergence on AcceptedEdits, so the comparison keeps walking and reports every accepted edit
+    // plus the first genuinely unexpected one — instead of stopping at the first accepted one.
     private static bool Fail(string why)
     {
-        Console.WriteLine($"      migration parity: {why}");
+        string key = $"{_parityFolder}/{why}";
+        foreach (var (prefix, reason) in AcceptedEdits)
+        {
+            if (key.StartsWith(prefix, System.StringComparison.Ordinal))
+            {
+                Console.WriteLine($"      migration parity (accepted editor change): {key}");
+                Console.WriteLine($"          {reason}");
+                return true;
+            }
+        }
+        Console.WriteLine($"      migration parity: UNEXPECTED {key}");
         return false;
     }
 

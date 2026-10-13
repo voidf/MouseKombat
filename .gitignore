@@ -20,3 +20,5 @@ rl/checkpoints/
 server/*.db
 server/*.db-wal
 server/*.db-shm
+
+rl/logs/
