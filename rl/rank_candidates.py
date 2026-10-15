@@ -28,6 +28,15 @@ def row(path):
     return dict(path=os.path.basename(path), spec=d.get("spec", "?"), score=score(res), results=res)
 
 
+def _idle(c):
+    """Mean share of actionable frames the policy spent doing literally nothing.
+
+    Used as the tie-break: a policy can win 20-0-0 across the board while standing still 22% of the
+    time, which is the exact behaviour v9 was replaced for."""
+    res = c["results"]
+    return sum(v.get("neutral_pct", 0.0) for v in res.values()) / max(1, len(res))
+
+
 def main():
     cands = [r for r in (row(p) for p in sorted(glob.glob(os.path.join(HERE, "logs", "eval_*.json"))))
              if r]
@@ -53,19 +62,21 @@ def main():
         print("no eval JSONs yet")
         return 1
 
-    cands.sort(key=lambda c: -c["score"])
+    cands.sort(key=lambda c: (-c["score"], _idle(c)))
     opps = [o for o in WEIGHTS if any(o in c["results"] for c in cands)]
-    print(f"{'rank':<5}{'score':>7}  {'checkpoint':<34}{'chars':>6}  " +
+    print(f"{'rank':<5}{'score':>7}{'idle%':>7}  {'checkpoint':<34}{'chars':>6}  " +
           "  ".join(f"{o[:9]:>10}" for o in opps))
     for i, c in enumerate(cands, 1):
         cells = []
         for o in opps:
             r = c["results"].get(o)
             cells.append(f"{r['wins']}-{r['losses']}-{r['draws']}" if r else "-")
-        print(f"{i:<5}{c['score']:>7.3f}  {c['spec'][:34]:<34}{'hero':>6}  " +
+        print(f"{i:<5}{c['score']:>7.3f}{_idle(c):>6.1f}%  {c['spec'][:34]:<34}{'hero':>6}  " +
               "  ".join(f"{x:>10}" for x in cells))
     print("\nscore = 0.5 * (1 + weighted (W-L)/games); weights " +
           ", ".join(f"{k}={v}" for k, v in WEIGHTS.items()))
+    print("同分时按发呆帧占比升序：两个都能 20-0-0 的模型里，发呆 22.6% 的那个明显更被动，"
+          "而『站着不动』正是 v9 当初被骂的问题。")
     best = cands[0]
     print(f"\nBEST: {best['spec']}  score={best['score']:.3f}  (from {best['path']})")
     with open(os.path.join(HERE, "logs", "ranking.json"), "w", encoding="utf-8") as f:

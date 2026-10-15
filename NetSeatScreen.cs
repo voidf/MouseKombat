@@ -445,14 +445,31 @@ public partial class NetSeatScreen : Control
     private void PopulateAi()
     {
         foreach (var c in _aiList.GetChildren()) c.QueueFree();
-        for (int i = 0; i < _aiItems.Count; i++)
+        // Same windowing as ReadyScreen.PopulateMenuList: the panel is a fixed 300x270 box, so a long
+        // model list used to draw straight out of it.
+        int total = _aiItems.Count;
+        int first = total > MenuRows ? Mathf.Clamp(_aiIndex - MenuRows / 2, 0, total - MenuRows) : 0;
+
+        if (first > 0) _aiList.AddChild(HintRow($"▲ 上面还有 {first} 项"));
+        int last = Mathf.Min(total, first + MenuRows);
+        for (int i = first; i < last; i++)
         {
             bool sel = i == _aiIndex;
             var l = new Label { Text = (sel ? "▶ " : "   ") + _aiItems[i].name };
             l.Modulate = sel ? new Color(1f, 0.9f, 0.3f) : new Color(0.8f, 0.8f, 0.8f);
             _aiList.AddChild(l);
         }
+        if (last < total) _aiList.AddChild(HintRow($"▼ 下面还有 {total - last} 项"));
+        _aiList.AddChild(HintRow($"{_aiIndex + 1} / {total}"));
     }
+
+    private const int MenuRows = 6;
+
+    private static Label HintRow(string text) => new Label
+    {
+        Text = text,
+        Modulate = new Color(0.55f, 0.55f, 0.6f),
+    };
 
     private void MoveAi(int d)
     {
@@ -568,6 +585,17 @@ public partial class NetSeatScreen : Control
     }
 
     // Whose name goes over that fighter's head. An AI seat shows the model rather than a player name.
+    // Mirrors GameManager.AgentLabel for the network paths: a spectator's replay must record who was
+    // in each seat too, otherwise games collected from LAN/lobby play cannot be attributed either.
+    private static string SeatAgentLabel(SeatInfo s)
+    {
+        if (s == null) return "";
+        if (!s.IsAi) return ReplayData.AgentHuman;
+        return string.IsNullOrEmpty(s.AiModel)
+            ? ReplayData.AgentStatemachine
+            : ReplayData.AgentAiPrefix + System.IO.Path.GetFileNameWithoutExtension(s.AiModel);
+    }
+
     private static string SeatName(RoomSnapshot room, int seat)
     {
         var s = room.Seats[seat];
@@ -602,6 +630,8 @@ public partial class NetSeatScreen : Control
             P2StartX = cu.P2StartX, P2StartY = cu.P2StartY,
             RoomId = cu.Room.RoomId ?? "",
             Host = $"{Net.HostAddress}:{Net.Port}",
+            P1Agent = SeatAgentLabel(cu.Room.Seats[0]),
+            P2Agent = SeatAgentLabel(cu.Room.Seats[1]),
         };
         d.P1Inputs.AddRange(cu.P1Inputs);
         d.P2Inputs.AddRange(cu.P2Inputs);
@@ -643,6 +673,8 @@ public partial class NetSeatScreen : Control
             P2StartY = net.CatchUpP2StartY,
             RoomId = room.RoomId ?? "",
             Host = $"{net.HostAddress}:{net.Port}",
+            P1Agent = SeatAgentLabel(room.Seats[0]),
+            P2Agent = SeatAgentLabel(room.Seats[1]),
         };
         d.P1Inputs.AddRange(net.CatchUpHistory.P1Inputs);
         d.P2Inputs.AddRange(net.CatchUpHistory.P2Inputs);
@@ -914,3 +946,4 @@ public partial class NetSeatScreen : Control
         if (HintLabel != null) HintLabel.Text = text;
     }
 }
+

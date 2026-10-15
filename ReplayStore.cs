@@ -24,7 +24,16 @@ public static class ReplayStore
 
     // Which file the player screen should open. Static because it survives ChangeSceneToFile, the
     // same mechanism GameSession uses to carry the lobby's choices into the match.
-    public static string PendingPath = "";
+    //
+    // MK_REPLAY seeds it from the environment when nothing has been chosen, which is how the viewer
+    // is exercised headlessly (same spirit as GameManager's MK_AI_P1/MK_AI_P2 hooks):
+    //   Godot --headless --path . res://ReplayPlayer.tscn --quit-after 600
+    // with MK_REPLAY=<absolute .mkr path> proves the scene, the projectile sync and the playback
+    // itself do not crash, which is otherwise only observable by eye.
+    public static string PendingPath =
+        string.IsNullOrEmpty(System.Environment.GetEnvironmentVariable("MK_REPLAY"))
+            ? ""
+            : System.Environment.GetEnvironmentVariable("MK_REPLAY");
 
     public static string ModeLabel(string mode) => mode switch
     {

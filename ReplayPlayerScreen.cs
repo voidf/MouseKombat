@@ -38,6 +38,16 @@ public partial class ReplayPlayerScreen : Control
     private Player _p1, _p2;
     private MenuPad _menuPad;
 
+    // sim projectile id -> view node, reconciled every displayed frame exactly as GameManager does
+    // for a live match. WITHOUT THIS THE REPLAY NEVER SHOWED A FIREBALL AT ALL: this screen renders
+    // the fighters from sim state but had no projectile sync, so a match full of fireballs played
+    // back as if the projectiles did not exist. (Reconciling BY ID rather than from spawn events is
+    // what makes it correct under scrubbing and reverse: a frame simulated repeatedly must not add
+    // the same projectile twice, and seeking backwards must remove ones that are not alive yet.)
+    private readonly System.Collections.Generic.Dictionary<int, Projectile> _projViews = new();
+    private readonly System.Collections.Generic.List<int> _liveIds = new();
+    private readonly System.Collections.Generic.List<int> _toRemove = new();
+
     // ---- precomputed timeline ----
     // The whole replay is simulated once at load, capturing each frame's ANIMATION state for both
     // fighters. Sim states are captured too, by giving ReplaySession a keyframe spacing of 1, so a
@@ -97,9 +107,10 @@ public partial class ReplayPlayerScreen : Control
         {
             string p1 = string.IsNullOrEmpty(data.P1Name) ? "1P" : data.P1Name;
             string p2 = string.IsNullOrEmpty(data.P2Name) ? "2P" : data.P2Name;
+            string a1 = AgentSuffix(data.P1Agent), a2 = AgentSuffix(data.P2Agent);
             TitleLabel.Text = $"{ReplayStore.ModeLabel(data.Mode)} · "
                               + $"{ReplayStore.FormatBattleTime(data.StartedUnixUtc)} · "
-                              + $"{p1} vs {p2}";
+                              + $"{p1}{a1} vs {p2}{a2}";
         }
 
         if (Scrub != null)
@@ -141,8 +152,18 @@ public partial class ReplayPlayerScreen : Control
             _p1.SyncFromSim(); _p2.SyncFromSim();
             _p1.TickAnimation(); _p2.TickAnimation();   // forward-only, exactly as live play would
             _v1[i] = _p1.SaveView(); _v2[i] = _p2.SaveView();
+            int alive = _session.Sim.Projectiles.Count;
+            if (alive > 0) { _framesWithProjectiles++; _peakProjectiles = Mathf.Max(_peakProjectiles, alive); }
         }
+
+        // One line, on purpose: a replay used to play back with NO projectiles at all and nothing
+        // anywhere said so. If this ever reports 0 for a match that had fireballs, the view sync is
+        // broken again — and it is visible without a display, which is what makes it checkable.
+        GD.Print($"[replay] {n} frames precomputed; projectiles in this match: "
+                 + $"peak {_peakProjectiles} alive, {_framesWithProjectiles} frames with one");
     }
+
+    private int _peakProjectiles, _framesWithProjectiles;
 
     private void VerifyAndWarn(ReplayData data)
     {
@@ -220,6 +241,7 @@ public partial class ReplayPlayerScreen : Control
         _p2.SyncFromSim();
         _p1.ApplyAnimation();
         _p2.ApplyAnimation();
+        SyncProjectileViews();
 
         UpdateHpBars();
 
@@ -234,6 +256,77 @@ public partial class ReplayPlayerScreen : Control
             _syncingScrub = false;
         }
     }
+
+    // " (AI: ppo_selfplay_v10)" / " (AI)" / " (状态机)" / "" for a human seat. Recorded agent labels
+    // (see ReplayData.P1Agent) are what let a playback say which model it was.
+    private static string AgentSuffix(string agent)
+    {
+        if (string.IsNullOrEmpty(agent) || agent == ReplayData.AgentHuman) return "";
+        if (agent == ReplayData.AgentStatemachine) return " (状态机)";
+        if (agent.StartsWith(ReplayData.AgentAiPrefix, System.StringComparison.Ordinal))
+            return " (AI: " + agent.Substring(ReplayData.AgentAiPrefix.Length) + ")";
+        return " (" + agent + ")";
+    }
+
+    // ---- projectile views (mirrors GameManager.SyncProjectileViews) ----
+    // Reconcile by id: create a node for any live projectile that lacks one, move the ones that have
+    // one, free the ones whose projectile is gone. Idempotent, so scrubbing and reverse playback are
+    // safe — the same frame may be shown many times and a seek can move the playhead either way.
+    private void SyncProjectileViews()
+    {
+        _liveIds.Clear();
+        var list = _session.Sim.Projectiles;
+        for (int i = 0; i < list.Count; i++)
+        {
+            var pr = list[i];
+            _liveIds.Add(pr.Id);
+            if (!_projViews.TryGetValue(pr.Id, out var node) || !IsInstanceValid(node))
+            {
+                SpawnProjectileView(pr.Id);
+                _projViews.TryGetValue(pr.Id, out node);
+            }
+            if (node != null && IsInstanceValid(node))
+                node.Position = pr.Position.ToGodot();
+        }
+
+        _toRemove.Clear();
+        foreach (var kv in _projViews)
+            if (!_liveIds.Contains(kv.Key)) _toRemove.Add(kv.Key);
+        foreach (int id in _toRemove)
+        {
+            if (_projViews.TryGetValue(id, out var node) && IsInstanceValid(node)) node.QueueFree();
+            _projViews.Remove(id);
+        }
+    }
+
+    private void SpawnProjectileView(int id)
+    {
+        var list = _session.Sim.Projectiles;
+        SimProjectile pr = null;
+        for (int i = 0; i < list.Count; i++)
+            if (list[i].Id == id) { pr = list[i]; break; }
+        if (pr == null) return;
+
+        var owner = pr.OwnerIndex == 0 ? _p1 : _p2;
+        // same resolution order as live play: the data-driven prefab wins, the character scene is the
+        // fallback for a legacy character
+        var scene = HeroLibrary.Instance?.FireballScene(pr.PrefabId) ?? owner.ProjectileScene;
+        if (scene == null) return;   // logic projectile still runs, there is just nothing to draw
+        var node = scene.Instantiate<Projectile>();
+        node.Position = pr.Position.ToGodot();
+        World.AddChild(node);
+        node.Init(pr.Dir);
+        _projViews[id] = node;
+    }
+
+    private void FreeProjectileViews()
+    {
+        foreach (var kv in _projViews)
+            if (IsInstanceValid(kv.Value)) kv.Value.QueueFree();
+        _projViews.Clear();
+    }
+
+    public override void _ExitTree() => FreeProjectileViews();
 
     private void UpdateHpBars()
     {

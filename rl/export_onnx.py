@@ -1,4 +1,4 @@
-"""Export a trained SB3 PPO policy to ONNX for in-game inference (Godot OnnxAgent).
+﻿"""Export a trained SB3 PPO policy to ONNX for in-game inference (Godot OnnxAgent).
 
 Contract (must match OnnxAgent.cs and mk_env.py):
   input  "obs"    : float32 [batch, 32]  = Observation.Get
@@ -32,7 +32,7 @@ class OnnxPolicy(th.nn.Module):
 
 
 def main():
-    ckpt = sys.argv[1] if len(sys.argv) > 1 else "ppo_hamster_v0"
+    ckpt = sys.argv[1] if len(sys.argv) > 1 else "ppo_selfplay_v10"
     out = sys.argv[2] if len(sys.argv) > 2 else ckpt
     model = PPO.load(os.path.join(CKPT_DIR, ckpt), device="cpu")
 
@@ -66,3 +66,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

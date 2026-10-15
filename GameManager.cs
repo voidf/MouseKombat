@@ -272,6 +272,23 @@ public partial class GameManager : Node2D, IMatchPresenter
             P2StartX = P2StartPos.X, P2StartY = P2StartPos.Y,
             RoomId = GameSession.RoomId,
             Host = GameSession.Host,
+            P1Agent = AgentLabel(p1),
+            P2Agent = AgentLabel(p2),
+        };
+    }
+
+    // "human", "statemachine", or "ai:<model name>" — recorded with the replay so a match can be
+    // attributed to the model that played it. Player.Agent is the single source of truth: it is what
+    // FrameFor actually consults, so the label cannot drift from who really drove the seat.
+    private static string AgentLabel(Player p)
+    {
+        if (p == null) return "";
+        return p.Agent switch
+        {
+            OnnxAgent onnx => ReplayData.AgentAiPrefix + onnx.ModelName,
+            StateMachineAgent => ReplayData.AgentStatemachine,
+            null => ReplayData.AgentHuman,
+            _ => p.Agent.GetType().Name,
         };
     }
 

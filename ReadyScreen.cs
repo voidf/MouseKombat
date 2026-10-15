@@ -455,14 +455,39 @@ public partial class ReadyScreen : Control
     private void PopulateMenuList()
     {
         foreach (var c in _menuList.GetChildren()) c.QueueFree();
-        for (int i = 0; i < _menuItems.Count; i++)
+        // WINDOWED LIST. The box is a fixed 300x270 panel and a VBoxContainer happily draws past it,
+        // so once the model folder grew past ~8 files the list ran out of the panel (超框). Rather
+        // than resize the panel (which still breaks at some count) this shows a sliding window that
+        // keeps the selection visible, with the counts spelled out so nothing looks missing.
+        int total = _menuItems.Count;
+        int first = 0;
+        if (total > MenuRows)
+            first = Mathf.Clamp(_menuIndex - MenuRows / 2, 0, total - MenuRows);
+
+        if (first > 0) _menuList.AddChild(HintLabel($"▲ 上面还有 {first} 项"));
+
+        int last = Mathf.Min(total, first + MenuRows);
+        for (int i = first; i < last; i++)
         {
             bool sel = i == _menuIndex;
             var l = new Label { Text = (sel ? "▶ " : "   ") + _menuItems[i].name };
             l.Modulate = sel ? new Color(1f, 0.9f, 0.3f) : new Color(0.8f, 0.8f, 0.8f);
             _menuList.AddChild(l);
         }
+
+        if (last < total) _menuList.AddChild(HintLabel($"▼ 下面还有 {total - last} 项"));
+        _menuList.AddChild(HintLabel($"{_menuIndex + 1} / {total}"));
     }
+
+    // Rows that actually fit inside the panel (196 px of list area at ~24 px a label, minus the two
+    // scroll hints and the counter line).
+    private const int MenuRows = 6;
+
+    private static Label HintLabel(string text) => new Label
+    {
+        Text = text,
+        Modulate = new Color(0.55f, 0.55f, 0.6f),
+    };
 
     private void BuildBackspaceHint()
     {

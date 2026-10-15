@@ -60,6 +60,9 @@ def replay(path):
     a, b = sim.Player(0), sim.Player(1)
     names = [head.get("p1name") or "P1", head.get("p2name") or "P2"]
     who = "nobody (no KO in the recording)" if winner < 0 else f"P{winner + 1} ({names[winner]})"
+    # Who was DRIVING each seat — "human", "statemachine", or "ai:<model>". Written by the game since
+    # the agent-metadata change; older files simply have no such key, hence the "?".
+    agents = [head.get("p1agent") or "?", head.get("p2agent") or "?"]
     # The header carries the checksum of the state the GAME ended on. Matching it proves this
     # reconstruction is the game's simulation and not a lookalike — without it, "no KO" could just
     # mean the setup (chars/stage/starts) was wrong.
@@ -67,7 +70,8 @@ def replay(path):
     mine = format(sim.Checksum(), "08X")
     verified = recorded.upper() == mine.upper()
     print(f"{os.path.basename(path)}  [{len(p1)} frames, {len(p1) / 60:.1f}s, "
-          f"{folders[int(chars[0])]} vs {folders[int(chars[1])]}]")
+          f"{folders[int(chars[0])]} vs {folders[int(chars[1])]}]  "
+          f"P1={agents[0]}  P2={agents[1]}")
     if not verified:
         # Never let an unverified reconstruction be quoted as a result. The game only writes a file
         # on a KO, so "no KO" here means THIS reader's setup differs from the game's, not that the

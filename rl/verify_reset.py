@@ -1,4 +1,4 @@
-"""Reproduce the cross-round freeze and show the per-round reset fixes it.
+﻿"""Reproduce the cross-round freeze and show the per-round reset fixes it.
 
 Mirrors OnnxAgent's edge-detected decode. Runs round 1 (onnx P1 vs idle P2) to a KO, resets the
 sim, then runs round 2 TWO ways: (A) keep the button edge-state from round-1 end (the bug), and
@@ -12,7 +12,7 @@ from mk_env import _ensure_runtime  # sets up pythonnet + loads the sim
 _ensure_runtime()
 from MouseKombat.Sim import GameSim, PlayerConfig, InputFrame, CharacterId, Observation, StateMachineAgent  # noqa: E402
 
-MODEL = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "ai_rl_model", "ppo_hamster_v0.onnx"))
+MODEL = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "ai_rl_model", "ppo_selfplay_v10.onnx"))
 sess = ort.InferenceSession(MODEL)
 iname = sess.get_inputs()[0].name
 
@@ -65,3 +65,4 @@ a_atk, a_dmg = scenario(reset_prev=False)  # bug
 b_atk, b_dmg = scenario(reset_prev=True)   # fix
 print(f"round 2  WITHOUT reset (bug): attacks={a_atk:3d}  dmg_to_opp={a_dmg}")
 print(f"round 2  WITH reset  (fix):  attacks={b_atk:3d}  dmg_to_opp={b_dmg}")
+

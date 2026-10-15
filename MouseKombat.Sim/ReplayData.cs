@@ -49,6 +49,21 @@ public sealed class ReplayData
     public string Host = "";             // LAN games only
     public uint FinalChecksum;           // GameSim.Checksum() after the last recorded frame
 
+    // WHO WAS PLAYING EACH SEAT — "human", "statemachine", or "ai:<model file name>".
+    //
+    // Recorded so a real player's match can be told apart from an AI-vs-AI test afterwards: without
+    // it, a folder of replays says what happened but never who was driving, so feedback collected
+    // from actual play ("this model can't handle X") cannot be attributed to a model. Display-only,
+    // never fed to the sim.
+    //
+    // Added after format 1 shipped. Older readers ignore unknown header keys and older FILES simply
+    // leave these empty, so neither direction needs a format bump (and a bump would have made every
+    // existing replay unreadable, see the FormatVersion check in Decode).
+    public string P1Agent = "", P2Agent = "";
+    public const string AgentHuman = "human";
+    public const string AgentStatemachine = "statemachine";
+    public const string AgentAiPrefix = "ai:";
+
     // Per frame, both players' inputs. Two ushorts = 4 bytes of file per logic frame, so a 60-second
     // round is about 14 KB.
     public readonly List<ushort> P1Inputs = new();
@@ -134,6 +149,8 @@ public sealed class ReplayData
         Put("p2start", $"{F(P2StartX)},{F(P2StartY)}");
         Put("room", RoomId ?? "");
         Put("host", Host ?? "");
+        Put("p1agent", SanitizeName(P1Agent, 48));
+        Put("p2agent", SanitizeName(P2Agent, 48));
         Put("checksum", FinalChecksum.ToString("X8", CultureInfo.InvariantCulture));
         h.Append('\n');   // blank line ends the header
 
@@ -189,6 +206,8 @@ public sealed class ReplayData
                 case "p2char": r.P2Char = (CharacterId)ParseInt(v, 1); break;
                 case "room": r.RoomId = v; break;
                 case "host": r.Host = v; break;
+                case "p1agent": r.P1Agent = v; break;
+                case "p2agent": r.P2Agent = v; break;
                 case "checksum": r.FinalChecksum = ParseHex(v); break;
                 case "stage":
                 {

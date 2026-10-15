@@ -18,10 +18,15 @@ public sealed class OnnxAgent : IAgent, IDisposable
     private readonly bool[] _prevBtn = new bool[6];
     private readonly float[] _obs = new float[Observation.Size];
 
+    // The model's display name (file name without extension). Recorded into every replay this agent
+    // plays in, which is what makes "this game was against ppo_selfplay_v10" answerable later.
+    public string ModelName { get; }
+
     public OnnxAgent(string osModelPath)
     {
         _session = new InferenceSession(osModelPath);
         foreach (var i in _session.InputMetadata) { _inputName = i.Key; break; }
+        ModelName = System.IO.Path.GetFileNameWithoutExtension(osModelPath);
     }
 
     public InputFrame Decide(GameSim sim, int selfIndex)
