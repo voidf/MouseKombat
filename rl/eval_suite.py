@@ -111,10 +111,13 @@ class Scripted:
     def _make(self):
         if self.kind == "spammer":
             return FireballSpammer(self.seed)
-        if self.kind in ("blocker", "jumper"):
-            # the anti-zoning teachers live in train_v10 so workers and evals share one version
-            from train_v10 import BlockAdvanceAgent, JumpInAgent
-            return (BlockAdvanceAgent if self.kind == "blocker" else JumpInAgent)(self.seed)
+        if self.kind in ("blocker", "jumper", "looper", "punisher"):
+            # the anti-zoning and human-playstyle teachers live in train_v10 so workers and evals
+            # share one version of each
+            from train_v10 import (BlockAdvanceAgent, JumpInAgent, KnockdownLooper,
+                                   WhiffPunisher)
+            return {"blocker": BlockAdvanceAgent, "jumper": JumpInAgent,
+                    "looper": KnockdownLooper, "punisher": WhiffPunisher}[self.kind](self.seed)
         return SCRIPTED[self.kind](self.seed)
 
     def reset(self):
@@ -145,7 +148,7 @@ class Policy:
 
 
 def make_ctrl(spec, seed):
-    if spec in SCRIPTED or spec in ("spammer", "blocker", "jumper"):
+    if spec in SCRIPTED or spec in ("spammer", "blocker", "jumper", "looper", "punisher"):
         return Scripted(spec, seed)
     return Policy(spec)
 
@@ -349,3 +352,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

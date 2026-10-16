@@ -45,10 +45,37 @@ STAGES = [
     dict(name="d_half3",   msteps=240, pool_prob=0.70, lr=8e-5, ent=0.010,
          mix="zoner=0.12,spammer=0.08,blocker=0.05,jumper=0.02,rusher=0.06,statemachine=0.04",
          why="longest stage; the zoner+blocker floor keeps fireball defence from decaying"),
+
+    # ---- human-playstyle stages (2026-10-15) ----
+    # The d stages above dialled the zoning share down as they went. These do the OPPOSITE with the
+    # two human-playstyle teachers: they stay at ~45% of the non-pool share in every stage, because
+    # the failure being fixed is that the shipped model was the weakest thing on disk against the
+    # pattern a human actually used (3-3-0 and 82% damage taken from the looper, while every other
+    # candidate went 6-0-0). Each stage is ~60M steps ≈ 2.5 h at the measured 6.7k steps/s.
+    dict(name="h1_human",  msteps=60, pool_prob=0.10, lr=1.5e-4, ent=0.012,
+         mix="looper=0.24,punisher=0.20,zoner=0.12,spammer=0.10,blocker=0.08,jumper=0.04,"
+             "rusher=0.12,statemachine=0.10",
+         why="the knockdown loop and the whiff punisher get 44% of episodes, self-play kept low so "
+              "the new signal is not diluted by snapshots that share the old habit"),
+    dict(name="h2_human",  msteps=60, pool_prob=0.35, lr=1.2e-4, ent=0.011,
+         mix="looper=0.25,punisher=0.20,zoner=0.13,spammer=0.10,blocker=0.06,jumper=0.03,"
+             "rusher=0.13,statemachine=0.10",
+         why="same human-playstyle share, self-play rising now that the habit has been broken"),
+    dict(name="h3_human",  msteps=60, pool_prob=0.55, lr=1e-4, ent=0.010,
+         mix="looper=0.25,punisher=0.20,zoner=0.12,spammer=0.10,blocker=0.05,jumper=0.02,"
+             "rusher=0.13,statemachine=0.13",
+         why="broadest; human-playstyle floor held so the fix cannot decay the way the zoning share "
+              "did in d_half1"),
 ]
-EVAL_OPPONENTS = "statemachine,rusher,blocker,jumper,zoner,spammer"
+EVAL_OPPONENTS = "statemachine,rusher,blocker,jumper,zoner,spammer,looper,punisher"
+# The two human-playstyle teachers carry the heaviest weight on purpose. Every other entry here is a
+# scripted opponent that ADVANCES and pokes; the looper plays the knockdown loop a real player used to
+# beat the last shipped model six knockdowns to zero, and the punisher holds the range that model
+# whiffed from and hits the recovery. Scoring without them is how a policy that went 20-0-0 against
+# every scripted teacher got shipped while being the WEAKEST candidate on disk against a person: it
+# took 82% damage from the looper, worse than any other model in the folder.
 WEIGHTS = {"statemachine": 1.0, "rusher": 1.0, "blocker": 1.5, "jumper": 1.0,
-           "zoner": 2.0, "spammer": 2.0}
+           "zoner": 2.0, "spammer": 2.0, "looper": 3.0, "punisher": 2.5}
 
 
 def log(msg, fh=None):
@@ -75,12 +102,22 @@ def tail(path, n=6):
         return ""
 
 
-def score(res):
-    num = den = 0.0
+def score(res, games=None):
+    """Weighted win rate over the WHOLE opponent list, 0..1 (0.5 = even).
+
+    The denominator is the full weight set, not just the opponents this particular eval happened to
+    cover. Otherwise a candidate measured against only the easy opponents scores 1.000 and outranks
+    one that was actually put through the human-playstyle teachers — which is exactly the mistake
+    that shipped the model the player could beat. Every opponent in WEIGHTS that is missing from
+    `res` simply contributes nothing, which reads as "not demonstrated" rather than "won".
+    """
+    num = 0.0
     for opp, row in res.items():
         w = WEIGHTS.get(opp, 1.0)
         num += w * (row["wins"] - row["losses"])
-        den += w * row["games"]
+    if games is None:
+        games = max((row["games"] for row in res.values()), default=0)
+    den = sum(WEIGHTS.values()) * games
     return 0.5 * (1.0 + (num / den if den else 0.0))   # 0..1, 0.5 = even
 
 

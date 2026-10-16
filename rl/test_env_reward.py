@@ -115,10 +115,18 @@ def whiff_test():
             if prev is not None and not env._move_landed and not env._move_spawns_projectile:
                 whiffs += 1
         prev, prev_atk = cur, af
-    expected = -T.WHIFF_PENALTY * whiffs - T.TIME_PENALTY * frames
+    expected = (-T.WHIFF_PENALTY * whiffs - T.NO_CHANCE_WHIFF_PENALTY * env._no_chance_whiffs
+                - T.TIME_PENALTY * frames)
     check(whiffs >= 10, "the learner whiffed repeatedly (test is meaningful)", f"whiffs={whiffs}")
-    check(abs(total - expected) < 1e-3, "reward == -WHIFF/frame and -TIME_PENALTY/frame",
-          f"got {total:.4f}, expected {expected:.4f}, whiffs={whiffs}")
+    check(abs(total - expected) < 1e-3, "reward == -WHIFF (and -NO_CHANCE_WHIFF) -TIME per frame",
+          f"got {total:.4f}, expected {expected:.4f}, whiffs={whiffs}, "
+          f"no-chance={env._no_chance_whiffs}")
+    # This scenario presses from well outside range against an opponent that never closes, so every
+    # whiff here is a no-chance whiff. If that stops holding, the reach bookkeeping broke — and the
+    # extra penalty exists precisely because the models attacked from outside their own range.
+    check(env._no_chance_whiffs == whiffs,
+          "every whiff here was out of range, so all of them paid the extra penalty",
+          f"{env._no_chance_whiffs}/{whiffs}")
 
 
 def block_test():

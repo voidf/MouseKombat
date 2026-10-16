@@ -142,6 +142,13 @@ public sealed class SimPlayer
     public Fix WalkSpeedPxPerSec => _cfg.WalkSpeedPxPerSec;   // for GameSim.ResolveMovement
     public CharacterId Character => _cfg.Character;           // for observation (asymmetric matchup)
     public Fix CornerPushbackScale => _cfg.CornerPushbackScale;   // for GameSim.ResolveKnockback
+    // Knockdown timeline, exposed for anything that has to TIME an attack against a wakeup: a
+    // scripted opponent doing knockdown pressure needs to know how long the victim stays down and
+    // invincible, and hardcoding 30/24 in the caller would silently mistime it if a character ever
+    // authors different values.
+    public int DownedFrames => _cfg.DownedFrames;
+    public int DownedMinFrames => _cfg.DownedMinFrames;
+    public int WakeupFrames => _cfg.WakeupFrames;
 
     // Diagnostics only (savestate coverage checks, debug overlays). Consecutive juggle hits taken;
     // at MaxJuggleHits further air hits air-reset instead of extending the combo.

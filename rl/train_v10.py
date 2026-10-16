@@ -63,14 +63,40 @@ SCRIPTED = {"statemachine": StateMachineAgent, "zoner": ZonerAgent, "rusher": Ru
 # --- reward constants (fractions of a health bar / of the KO bonus) ---
 TIME_PENALTY = 0.0005
 BLOCK_BONUS = 0.03         # transition into DefenseHit: a blocked hit is a won exchange
-WHIFF_PENALTY = 0.005      # a normal that never connects (fireballs exempt: they connect late)
+# A normal that ran its whole length without touching the opponent.
+#
+# Raised from 0.005 after auditing the player's replays: the shipped model whiffed 89-100% of its
+# attacks, throwing normals from 200-320px at an opponent who was standing still. The old value was
+# far too small to outweigh what whiffing bought against the SCRIPTED teachers, all of which walk
+# into it — so "attack from just outside range" was a winning habit in training and a useless one
+# against a person. NO_CHANCE_WHIFF_PENALTY is charged on top when the move could not have reached
+# the opponent even at the closest point of its active window: that is not a read, it is an input
+# error, and against a passive opponent there is no other feedback that says so.
+WHIFF_PENALTY = 0.02
+NO_CHANCE_WHIFF_PENALTY = 0.05
+# Blocking within this many frames of standing up from a knockdown. The player's knockdown loop
+# (long-startup heavy -> meaty on wakeup) was a free infinite: the model was knocked down six times
+# in a nine-second round and never blocked once. Ordinary blocking is already paid by BLOCK_BONUS;
+# this pays the specific, hard-to-discover case of guarding on wakeup.
+WAKEUP_BLOCK_WINDOW = 30
+WAKEUP_BLOCK_BONUS = 0.06
 # An enemy fireball that dies without touching us. This is the ONLY dense reward the JUMP answer
 # gets — "you ate it" is already priced in, but "you avoided it" otherwise pays nothing at all, and
 # jumping has to be discovered against a 60-frame credit horizon. Anti-farm check: fireballs come
 # every ~38 frames, so turtling in a corner at max range earns 0.005/38 = 0.00013 per frame, which
 # is a quarter of the 0.0005/frame time penalty it would have to pay for standing there.
 FIREBALL_AVOIDED = 0.005
-DEFHIT = 5                 # PlayerState.DefenseHit index
+
+# PlayerState indices, taken from the enum rather than hardcoded: a reorder there would otherwise
+# silently make every teacher below act on the wrong state.
+from MouseKombat.Sim import PlayerState as _PS      # noqa: E402
+DEFHIT = int(_PS.DefenseHit)
+ATK_STATE = int(_PS.Attack)
+HURT = int(_PS.Hurt)
+JUMPI = int(_PS.Jump)
+HURT = int(_PS.Hurt)
+DOWnED = int(_PS.Downed)
+WAKEUP = int(_PS.Wakeup)
 
 _pol_cache = {}
 
@@ -263,6 +289,211 @@ SCRIPTED["blocker"] = BlockAdvanceAgent
 SCRIPTED["jumper"] = JumpInAgent
 
 
+# ---------------------------------------------------------------------------------------------------
+# HUMAN-PLAYSTYLE TEACHERS (2026-10-15)
+#
+# Why these exist: every teacher above ADVANCES and pokes. None of them does what the human who
+# actually plays this game does, and the models paid for it. Auditing nine of his replays showed the
+# shipped model whiffing 89-100% of its attacks, throwing normals from 200-320px at an opponent who
+# was standing still, never once blocking on wakeup (0 for 6 knockdowns) and eating the same
+# long-startup knockdown + wakeup meaty 5/5 times. Against the scripted set it scored a perfect
+# 20-0-0: attacking from just outside range is REWARDED when the opponent walks into it, and nothing
+# in the curriculum ever knocked the model down and then hit it as it stood up.
+#
+# So: one teacher that plays the knockdown loop, one that stands at the range the models whiff from
+# and punishes exactly that mistake.
+# ---------------------------------------------------------------------------------------------------
+
+HK_BIT = 1 << 5          # button order is LP,MP,HP,LK,MK,HK (see ReplayData.Pack / InputFrame)
+
+
+def _move_reach(p):
+    """How far (px, from p's origin) p's CURRENT move's hitbox extends toward its facing side.
+
+    0 when p is not attacking. This is the number that separates "committed and dangerous" from
+    "committed and harmless", and the difference is the whole whiffing pathology: Hamster 5HK has its
+    hitbox at +40 with width 160 (reaches ~200), while the 5LK/5HP the models spam from 200-320px
+    simply cannot arrive.
+    """
+    m = p.CurrentMove
+    if m is None:
+        return 0.0
+    hb = m.Hitbox
+    return abs(hb.Position.X.ToFloat()) + hb.Size.X.ToFloat()
+
+
+def _threatens(op, dist, margin=25.0):
+    """True when op's current move could actually connect at this distance."""
+    if int(op.State) != ATK_STATE:
+        return False
+    # only if it is pointed at us
+    if not getattr(op, "FacingRight", True) and dist < 0:
+        return False
+    return _move_reach(op) + margin >= abs(dist)
+
+
+class KnockdownLooper:
+    """长前摇击倒 → 起身压制 (the pattern from the player's replays), with a SAFE APPROACH.
+
+    Walking in unconditionally makes this a worse RusherAgent: it steps straight into the model's
+    active frames and dies (measured: 6 attempts before being KO'd, model untouched at 8/10 HP). The
+    human it is modelled on did something else — he waited out the model's attacks and walked in
+    while it was committed, which only works because the model's neutral is harmless. So the
+    approach is gated on the opponent NOT being in an attack's startup/active window, and once in
+    range the long-startup knockdown normal goes out, followed by a timed meaty as the victim stands.
+    """
+
+    REACH = 195.0        # 5HK hitbox sits at +40 with width 160, so ~200px from the origin
+    # The spacing the human actually held. Hamster 5HK reaches 200px while the normals the models
+    # spam reach 130 (5LK), 170 (5HP) and 120 (5MK) — so a teacher that stands here can hit them
+    # while they cannot hit it. That is not a trick, it is the direct consequence of them attacking
+    # from outside their own range, and it is exactly what the player exploited for a free round.
+    HOLD_AT = 225.0
+    KD_MOVE = "5HK"
+
+    def __init__(self, seed, kd_move="5HK"):
+        self.seed = seed
+        self.KD_MOVE = kd_move
+        # Per-episode variation. Without it the whole eval is ONE match: the policy is deterministic,
+        # this teacher is deterministic, and the start positions are fixed, so "20 games" is two
+        # distinct matches repeated ten times each (see the README note on jitter). Varying the
+        # spacing and the wakeup timing both makes the training signal less memorisable and makes the
+        # resulting win rate mean something.
+        self._rnd = random.Random(seed)
+        self.HOLD = self.HOLD_AT + self._rnd.uniform(-30.0, 30.0)
+        self.reset()
+
+    def reset(self):
+        self.cd = 0
+        self.wake_wait = -1        # frames still to wait before starting the wakeup meaty
+        self.last_opp_state = None
+        self._jitter = 0           # extra wakeup-timing offset, redrawn per knockdown
+
+    def decide(self, sim, idx):
+        me, op = sim.Player(idx), sim.Player(1 - idx)
+        myx, opx = me.Position.X.ToFloat(), op.Position.X.ToFloat()
+        dist = abs(opx - myx)
+        tl = opx < myx          # walk toward
+        tr = opx > myx
+        st = int(op.State)
+
+        # standing up ourselves: press a direction to wake up fast instead of lying there
+        if int(me.State) in (DOWnED, WAKEUP):
+            return InputFrame(True, False, False, False, 0)
+
+        # --- wakeup pressure: the victim just got up (or is about to) — start the knockdown normal
+        # so its active frames land after the invincibility ends.
+        if self.wake_wait > 0:
+            self.wake_wait -= 1
+            if self.wake_wait == 0:
+                return InputFrame(False, False, False, False, HK_BIT)
+            return InputFrame(tl and dist > self.REACH, tr and dist > self.REACH, False, False, 0)
+        if self.wake_wait == 0:
+            self.wake_wait = -1
+        if st == DOWnED and self.last_opp_state != DOWnED:
+            # wait long enough that the active frames clear the wakeup invincibility
+            self._jitter = self._rnd.randint(-4, 4)
+            self.wake_wait = max(1, op.DownedMinFrames + op.WakeupFrames - 25 - 1 + self._jitter)
+        self.last_opp_state = st
+
+        # --- neutral: hold the spacing where OUR move reaches and THEIR normals do not, press the
+        # knockdown normal from there, and only walk in when they are further away than that.
+        if dist > self.HOLD + 25:
+            if _threatens(op, dist):
+                return InputFrame(False, False, False, False, 0)   # this one can hit: wait it out
+            return InputFrame(tl, tr, False, False, 0)
+        if dist < self.HOLD - 45:
+            return InputFrame(tr, tl, False, False, 0)             # too close: back out to range
+        if self.cd == 0:
+            self.cd = 8
+            return InputFrame(False, False, False, False, HK_BIT)
+        self.cd -= 1
+        return InputFrame(False, False, False, False, 0)
+
+    def _startup(self, sim, idx):
+        try:
+            ms = sim.Player(idx).CurrentMove          # not reliable outside a move; fall back below
+        except Exception:                             # noqa: BLE001
+            ms = None
+        return 25                                     # Hamster 5HK startup, the value that matters here
+
+    def Reset(self):
+        self.reset()
+
+    # The C# teachers expose PascalCase (they implement the sim's IAgent); match them so callers
+    # treat every scripted opponent the same way.
+    Decide = decide
+
+
+class WhiffPunisher:
+    """站在中距离不动, 只惩罚"打空" —— 专治模型在射程外刷招的习惯.
+
+    Holds the 200-320px band the replays showed the models whiffing from, does not approach, and the
+    moment an opponent attack ENDS without having touched it, dashes in and hits the recovery. A
+    model that spams normals at nothing now loses HP for it, which is the pressure the human applied
+    and the scripted teachers never did.
+    """
+
+    HOLD_AT = 265.0       # the middle of the band the whiff data clustered in
+    PUNISH_AT = 175.0     # close enough to connect with a fast normal
+
+    def __init__(self, seed):
+        self.seed = seed
+        # per-episode band variation, same reason as KnockdownLooper
+        self._rnd = random.Random(seed + 977)
+        self.HOLD = self.HOLD_AT + self._rnd.uniform(-35.0, 35.0)
+        self.reset()
+
+    def reset(self):
+        self.was_attacking = False
+        self.punish_for = 0
+        self.cd = 0
+
+    def decide(self, sim, idx):
+        me, op = sim.Player(idx), sim.Player(1 - idx)
+        myx, opx = me.Position.X.ToFloat(), op.Position.X.ToFloat()
+        dist = abs(opx - myx)
+        toward_l, toward_r = opx < myx, opx > myx
+
+        if int(me.State) in (DOWnED, WAKEUP):
+            return InputFrame(True, False, False, False, 0)
+
+        # an opponent attack that ended without touching us is a whiff to punish
+        attacking = int(op.State) == ATK_STATE
+        if self.was_attacking and not attacking and self._took_no_hit(sim, idx, op):
+            self.punish_for = 16
+        self.was_attacking = attacking
+
+        if self.punish_for > 0:
+            self.punish_for -= 1
+            if dist > self.PUNISH_AT:
+                return InputFrame(toward_l, toward_r, False, False, 0)
+            if self.cd == 0:
+                self.cd = 8
+                return InputFrame(False, False, False, False, 1 << 3)   # LK: fastest normal
+            self.cd -= 1
+            return InputFrame(False, False, False, False, 0)
+
+        # otherwise: hold the band, drifting away if they close in
+        if dist < self.HOLD - 40:
+            return InputFrame(toward_r, toward_l, False, False, 0)      # back off
+        if dist > self.HOLD + 40:
+            return InputFrame(toward_l, toward_r, False, False, 0)      # drift in
+        return InputFrame(False, False, False, False, 0)
+
+    def _took_no_hit(self, sim, idx, op):
+        return int(sim.Player(idx).State) not in (DEFHIT, HURT, JUMPI)
+
+    def Reset(self):
+        self.reset()
+
+    Decide = decide
+
+
+SCRIPTED["looper"] = KnockdownLooper
+SCRIPTED["punisher"] = WhiffPunisher
+
+
 class V10Env(gym.Env):
     """Self-play env over the two in-scope characters, on the game's own tables."""
 
@@ -318,6 +549,11 @@ class V10Env(gym.Env):
         self._prev_atk = 0
         self._move_landed = True
         self._move_spawns_projectile = False
+        self._move_closest = 1e9           # closest the opponent came while our move was out
+        self._move_reach = 0.0             # what that move could actually reach
+        self._frames_since_wake = -1       # -1 = down/never; >=0 counts frames since standing up
+        self._whiffs = 0
+        self._no_chance_whiffs = 0
         self._fb_avoided = 0
         return self._obs(self._self), {}
 
@@ -356,6 +592,12 @@ class V10Env(gym.Env):
         st = me.StateIndex
         if st == DEFHIT and self._prev_st != DEFHIT:
             reward += BLOCK_BONUS              # a blocked hit is a won exchange; teaches guarding
+            # ...and much more when it happens right after standing up from a knockdown. The player's
+            # long-startup heavy into a wakeup meaty was a free infinite: the model was knocked down
+            # six times in a nine-second round and never blocked once. Ordinary blocking is paid
+            # above; guarding on wakeup specifically is the case nothing in the curriculum taught.
+            if 0 <= self._frames_since_wake <= WAKEUP_BLOCK_WINDOW:
+                reward += WAKEUP_BLOCK_BONUS
 
         # whiff penalty: a normal that ran its whole length without touching the opponent.
         # Fireball moves are exempt (their damage lands long after the animation is over).
@@ -365,10 +607,39 @@ class V10Env(gym.Env):
         if cur_id is not None and (cur_id != self._prev_move or af < self._prev_atk):
             if self._prev_move is not None and not self._move_landed and not self._move_spawns_projectile:
                 reward -= WHIFF_PENALTY
+                # Was there ever a chance? Compare the closest the opponent came during that move
+                # against what the move can actually reach. Throwing a 130px normal at an opponent
+                # who never entered 200px is not a read that failed, it is an input error — and the
+                # dense "attack from just outside range" habit is what the player's replays showed
+                # (89-100% of everything the shipped model threw). Against a passive opponent nothing
+                # else in the reward says so.
+                if self._move_closest > 0 and self._move_reach > 0 \
+                        and self._move_closest > self._move_reach + 20:
+                    reward -= NO_CHANCE_WHIFF_PENALTY
+                    self._no_chance_whiffs += 1      # instrumentation (test_env_reward.py reads it)
+                self._whiffs += 1
             self._move_landed = False
             self._move_spawns_projectile = bool(cur.SpawnsProjectile)
+            self._move_closest = 1e9
+            self._move_reach = _move_reach(me)
+        else:
+            # track the closest approach while the move is out, and its reach
+            if cur_id is not None:
+                gap = abs(op.Position.X.ToFloat() - me.Position.X.ToFloat())
+                if gap < self._move_closest:
+                    self._move_closest = gap
+                if self._move_reach <= 0:
+                    self._move_reach = _move_reach(me)
         self._prev_move, self._prev_atk = cur_id, af
         self._prev_st = st
+
+        # wakeup clock for the block bonus above
+        if st == DOWnED:
+            self._frames_since_wake = -1        # still down
+        elif self._prev_st == WAKEUP or (self._frames_since_wake == -1 and st not in (DOWnED, WAKEUP)):
+            self._frames_since_wake = 0
+        elif self._frames_since_wake >= 0:
+            self._frames_since_wake += 1
 
         term = trunc = False
         w = res.MatchOverWinner
@@ -487,3 +758,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
