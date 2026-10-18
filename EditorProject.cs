@@ -402,25 +402,18 @@ public sealed class EditorChar
         return info;
     }
 
-    // Import a PNG from OUTSIDE the project (OS drag & drop / file picker) into images/,
-    // keeping the ORIGINAL file name. overwrite=true is the REPLACE flow (same name = the
-    // asset's content is swapped, every layer referencing it sees the new pixels).
-    public ImportOutcome ImportImage(string sourcePath, bool overwrite = false)
+    public ImportOutcome ImportImage(string sourcePath, string actionName)
     {
-        string imgDir = Path.Combine(Dir, "images");
-        string fileName = Sanitize(Path.GetFileNameWithoutExtension(sourcePath)) + ".png";
-        string dest = Path.Combine(imgDir, fileName);
-
-        if (File.Exists(dest) && EditorProject.FilesIdentical(sourcePath, dest))
-            return new ImportOutcome { Result = ImportResult.Ok, Path = "images/" + fileName };
-        if (!overwrite && File.Exists(dest)) return new ImportOutcome { Result = ImportResult.Collision };
-
         try
         {
+            string imgDir = Path.Combine(Dir, "images");
             Directory.CreateDirectory(imgDir);
             File.WriteAllText(Path.Combine(imgDir, ".gdignore"), "");
-            File.Copy(sourcePath, dest, overwrite: true);
-            return new ImportOutcome { Result = ImportResult.Ok, Path = "images/" + fileName };
+            var diskPaths = Directory.EnumerateFileSystemEntries(imgDir).Select(path => "images/" + Path.GetFileName(path));
+            var referencedPaths = Def.Actions.SelectMany(action => action.Frames).SelectMany(frame => frame.Layers).Select(layer => layer.Img);
+            string relative = EditorFrameOperations.NextImagePath(Folder, actionName, diskPaths.Concat(referencedPaths));
+            File.Copy(sourcePath, Path.Combine(Dir, relative), overwrite: false);
+            return new ImportOutcome { Result = ImportResult.Ok, Path = relative };
         }
         catch (System.Exception e)
         {

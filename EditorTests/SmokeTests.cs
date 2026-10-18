@@ -70,22 +70,29 @@ public partial class SmokeTests : Node
             image.Fill(Colors.White);
             image.SavePng(single);
             tabs.DispatchFilesDropped(new[] { single }, canvas.GetGlobalRect().GetCenter());
+            string singleAsset = action.Frames[1].Layers[0].Img;
             Check(action.Frames[1].Layers.Count == 1 && action.Frames[1].Layers[0].Off.Y == -27
                 && action.Frames[1].Hurtboxes[0].Cx == 9 && project.UndoCount == 1,
                 "PNG dropped on empty canvas creates a layer, inherits offset, keeps hurtboxes, one undo");
             var sequence = new[] { "frame10.png", "frame2.png", "frame1.png" }.Select(name => Path.Combine(root, name)).ToArray();
-            foreach (string path in sequence) image.SavePng(path);
+            foreach (string path in sequence)
+            {
+                image.Fill(path.EndsWith("frame1.png") ? Colors.Blue : path.EndsWith("frame2.png") ? Colors.Green : Colors.Red);
+                image.SavePng(path);
+            }
             tabs.DispatchFilesDropped(sequence, canvas.GetGlobalRect().GetCenter());
-            Check(action.Frames.Count == 4 && action.Frames[1].Layers[0].Img.EndsWith("frame1.png")
-                && action.Frames[2].Layers[0].Img.EndsWith("frame2.png") && action.Frames[3].Layers[0].Img.EndsWith("frame10.png")
+            var sequenceAssets = action.Frames.Skip(1).Select(frame => frame.Layers[0].Img).ToArray();
+            Check(action.Frames.Count == 4 && Image.LoadFromFile(Path.Combine(character.Dir, sequenceAssets[0])).GetPixel(0, 0) == Colors.Blue
+                && Image.LoadFromFile(Path.Combine(character.Dir, sequenceAssets[1])).GetPixel(0, 0) == Colors.Green
+                && Image.LoadFromFile(Path.Combine(character.Dir, sequenceAssets[2])).GetPixel(0, 0) == Colors.Red
                 && action.Frames[3].Layers[0].Off.X == 13 && action.Frames[3].Root.X == 7 && project.UndoCount == 2,
                 "sequence drop uses natural order, extends timeline, carries offset, one undo");
             screen._UnhandledKeyInput(KeyPress(Key.Z));
             action = project.Current.Action("IDLE");
-            Check(action.Frames.Count == 2 && action.Frames[1].Layers[0].Img.EndsWith("single.png"), "sequence undo restores full frame count and image");
+            Check(action.Frames.Count == 2 && action.Frames[1].Layers[0].Img == singleAsset, "sequence undo restores full frame count and image");
             screen._UnhandledKeyInput(KeyPress(Key.Y));
             action = project.Current.Action("IDLE");
-            Check(action.Frames.Count == 4 && action.Frames[3].Layers[0].Img.EndsWith("frame10.png"), "sequence redo restores imported frames");
+            Check(action.Frames.Count == 4 && action.Frames[3].Layers[0].Img == sequenceAssets[2], "sequence redo restores imported frames");
 
             project.SelectedFrame = 1;
             tabs.Tabs.CurrentTab = 1;
@@ -103,7 +110,7 @@ public partial class SmokeTests : Node
             action.Frames[0].Hurtboxes[0].Cx = 88;
             project.SelectedFrame = 2;
             tabs.HandleFrameShortcut(KeyPress(Key.V));
-            Check(action.Frames[2].Hurtboxes[0].Cx == 2 && action.Frames[2].Layers[0].Img.EndsWith("frame2.png"), "hurt clipboard is a snapshot independent from animation clipboard");
+            Check(action.Frames[2].Hurtboxes[0].Cx == 2 && action.Frames[2].Layers[0].Img == sequenceAssets[1], "hurt clipboard is a snapshot independent from animation clipboard");
             project.MultiSelect.Clear();
             project.MultiSelect.UnionWith(new[] { 1, 2, 3 });
             int before = project.UndoCount;
@@ -136,6 +143,9 @@ public partial class SmokeTests : Node
             screen._Input(KeyPress(Key.V, true));
             screen._Input(new InputEventKey { Keycode = Key.Right, Pressed = true });
             Check(project.UndoCount == before && project.SelectedFrame == 1, "frame shortcuts do not hijack text-field editing");
+            text.ReleaseFocus();
+            await ImageImportChecks(root, project, tabs, canvas, screen);
+            await TimelineChecks(project, timeline, tabs, screen);
             GD.Print($"ALL {_checks} EDITOR SMOKE CHECKS PASS");
             GetTree().Quit();
         }

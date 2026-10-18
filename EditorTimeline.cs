@@ -13,6 +13,7 @@ public sealed partial class EditorTimeline : Control
     public EditorProject Project;
     public System.Action Changed;                    // selection/frame edits -> repaint the app
     public System.Action PlaybackToggled;
+    public System.Action FramesChanged;
 
     public float CellWidth = 76f;                    // zooms with the wheel
     public const float CellHeight = 84f;
@@ -51,6 +52,11 @@ public sealed partial class EditorTimeline : Control
     private bool _brushActive;
     private int _brushAnchor = -1;
     private bool _middlePanning;
+    private bool _rightPressed;
+    private bool _rightDragged;
+    private int _rightStartCell = -1, _rightInsertion = -1;
+    private Vector2 _rightPosition, _rightStartPosition;
+    private HeroActionDef _rightAction;
 
     private EditorChar Char => Project?.Current;
     private HeroActionDef Action => Char?.Action(Project.SelectedAction);
@@ -59,6 +65,9 @@ public sealed partial class EditorTimeline : Control
     {
         CustomMinimumSize = new Vector2(200, CellHeight + 24f);
         MouseFilter = MouseFilterEnum.Stop;
+        FocusMode = FocusModeEnum.All;
+        ClipContents = true;
+        TooltipText = "左键拖动刷选多帧；右键拖到目标格左半/右半，将选中帧移到其左侧/右侧；同格按下、松开打开菜单。";
     }
 
     private float ContentWidth =>
@@ -66,6 +75,10 @@ public sealed partial class EditorTimeline : Control
 
     public void FrameChangedExternally()
     {
+        CancelRightDrag();
+        int count = Action?.Frames.Count ?? 0;
+        Project.SelectedFrame = Mathf.Clamp(Project.SelectedFrame, 0, Mathf.Max(0, count - 1));
+        Project.MultiSelect.RemoveWhere(index => index < 0 || index >= count);
         EnsureVisible(Project.SelectedFrame);
         QueueRedraw();
     }
@@ -81,6 +94,16 @@ public sealed partial class EditorTimeline : Control
 
     public override void _Process(double delta)
     {
+        if (_rightPressed && _rightDragged && _rightStartCell >= 0)
+        {
+            if (_rightAction != Action) CancelRightDrag();
+            else
+            {
+                if (_rightPosition.X < 24) ScrollCells(-(float)delta * 600);
+                else if (_rightPosition.X > Size.X - 24) ScrollCells((float)delta * 600);
+                UpdateRightDestination(_rightPosition);
+            }
+        }
         // smooth the scroll towards its target (also used by wheel-scrolling)
         if (Mathf.Abs(_scrollTarget - Scroll) > 0.5f)
         {
@@ -165,6 +188,14 @@ public sealed partial class EditorTimeline : Control
         DrawRect(plus, new Color(1, 1, 1, 0.3f), false, 1f);
         DrawString(font, plus.Position + (plus.Size - new Vector2(10, 0)) * 0.5f, "+",
             modulate: new Color(1, 1, 1, 0.8f), fontSize: 26);
+        if (_rightPressed && _rightInsertion >= 0)
+        {
+            float x = _rightInsertion * (CellWidth + CellGap) - Scroll - CellGap * 0.5f;
+            var color = new Color(0.25f, 0.95f, 1f);
+            DrawLine(new Vector2(x, 14), new Vector2(x, CellHeight), color, 3);
+            DrawString(font, new Vector2(Mathf.Clamp(x + 6, 4, Mathf.Max(4, Size.X - 220)), CellHeight + 16),
+                $"移动 {Project.MultiSelect.Count} 帧到此处", modulate: color, fontSize: 14);
+        }
     }
 
     private void DrawRangeStrips(HeroActionDef action, int i, Rect2 cell)
@@ -268,6 +299,7 @@ public sealed partial class EditorTimeline : Control
 
         if (@event is InputEventMouseButton mb && mb.Pressed)
         {
+            if (mb.ButtonIndex == MouseButton.Left || mb.ButtonIndex == MouseButton.Right) GrabFocus();
             if (mb.ButtonIndex == MouseButton.Left)
             {
                 // Range-brush mode (armed from the constants tab) takes the left button over
@@ -311,6 +343,7 @@ public sealed partial class EditorTimeline : Control
             }
             else if (mb.ButtonIndex == MouseButton.Right)
             {
+                PauseForEdit();
                 int idx = CellAt(mb.Position);
                 if (idx >= 0 && !Project.MultiSelect.Contains(idx))
                 {
@@ -318,7 +351,13 @@ public sealed partial class EditorTimeline : Control
                     Project.MultiSelect.Add(idx);
                     SelectFrame(idx);
                 }
-                if (Project.MultiSelect.Count > 0) OpenContextMenu(mb.Position);
+                _rightPressed = true;
+                _rightDragged = false;
+                _rightStartCell = idx;
+                _rightAction = Action;
+                _rightPosition = _rightStartPosition = mb.Position;
+                _rightInsertion = -1;
+                AcceptEvent();
             }
             else if (mb.ButtonIndex == MouseButton.WheelLeft)
             {
@@ -383,10 +422,33 @@ public sealed partial class EditorTimeline : Control
             {
                 _middlePanning = false;
             }
+            else if (mbu.ButtonIndex == MouseButton.Right && _rightPressed)
+            {
+                int start = _rightStartCell;
+                bool sameAction = _rightAction == Action;
+                int target = CellAt(mbu.Position);
+                UpdateRightDestination(mbu.Position);
+                int insertion = _rightInsertion;
+                CancelRightDrag();
+                if (sameAction)
+                {
+                    if (target == start && Project.MultiSelect.Count > 0) OpenContextMenu(mbu.Position, target);
+                    else if (insertion >= 0) MoveSelectedFrames(insertion);
+                }
+                AcceptEvent();
+            }
         }
         else if (@event is InputEventMouseMotion mm)
         {
-            if (_middlePanning)
+            if (_rightPressed)
+            {
+                _rightPosition = mm.Position;
+                if (CellAt(mm.Position) != _rightStartCell && mm.Position.DistanceTo(_rightStartPosition) >= 6)
+                    _rightDragged = true;
+                UpdateRightDestination(mm.Position);
+                AcceptEvent();
+            }
+            else if (_middlePanning)
             {
                 // dragging right pushes the strip right (view moves backwards through time)
                 _scrollTarget = Mathf.Clamp(_scrollTarget - mm.Relative.X, 0,
@@ -450,6 +512,78 @@ public sealed partial class EditorTimeline : Control
     }
 
     // ================= frame operations =================
+
+    private void CancelRightDrag()
+    {
+        _rightPressed = _rightDragged = false;
+        _rightStartCell = _rightInsertion = -1;
+        _rightAction = null;
+        QueueRedraw();
+    }
+
+    public bool CancelFrameDrag()
+    {
+        if (!_rightPressed) return false;
+        CancelRightDrag();
+        return true;
+    }
+
+    private void UpdateRightDestination(Vector2 position)
+    {
+        _rightInsertion = -1;
+        int target = CellAt(position);
+        if (_rightStartCell >= 0 && target >= 0 && target != _rightStartCell && !Project.MultiSelect.Contains(target))
+            _rightInsertion = target + (position.X >= CellRect(target).GetCenter().X ? 1 : 0);
+        else if (_rightStartCell >= 0 && PlusAt(position)) _rightInsertion = Action?.Frames.Count ?? 0;
+        QueueRedraw();
+    }
+
+    private void PauseForEdit()
+    {
+        if (!Playing) return;
+        Playing = false;
+        PlaybackToggled?.Invoke();
+    }
+
+    private void FinishFrameEdit()
+    {
+        _thumbCache.Clear();
+        FrameChangedExternally();
+        FramesChanged?.Invoke();
+        Changed?.Invoke();
+        QueueRedraw();
+    }
+
+    public void InsertFrame(int index)
+    {
+        var action = Action;
+        if (action == null || index < 0 || index > action.Frames.Count) return;
+        PauseForEdit();
+        Project.PushUndo();
+        EditorFrameOperations.InsertBlankFrame(action, index);
+        Project.SelectedFrame = index;
+        Project.MultiSelect.Clear();
+        Project.MultiSelect.Add(index);
+        FinishFrameEdit();
+    }
+
+    public void MoveSelectedFrames(int insertionIndex)
+    {
+        var action = Action;
+        if (action == null || Project.MultiSelect.Count == 0) return;
+        var order = EditorFrameOperations.FrameMoveOrder(action.Frames.Count, Project.MultiSelect, insertionIndex);
+        if (order.SequenceEqual(Enumerable.Range(0, action.Frames.Count))) return;
+        PauseForEdit();
+        Project.PushUndo();
+        var selected = new HashSet<int>(Project.MultiSelect);
+        int active = Project.SelectedFrame;
+        action.Frames = order.Select(index => action.Frames[index]).ToList();
+        Project.MultiSelect.Clear();
+        for (int index = 0; index < order.Length; index++)
+            if (selected.Contains(order[index])) Project.MultiSelect.Add(index);
+        Project.SelectedFrame = System.Array.IndexOf(order, active);
+        FinishFrameEdit();
+    }
 
     public void AppendFrame()
     {
@@ -519,16 +653,25 @@ public sealed partial class EditorTimeline : Control
         }
     }
 
-    private void OpenContextMenu(Vector2 pos)
+    private void OpenContextMenu(Vector2 pos, int target)
     {
         var menu = new PopupMenu();
         AddChild(menu);
         menu.AddItem("删除选中帧", 0);
         menu.AddItem("复制选中帧（插入到最右）", 1);
+        menu.AddSeparator();
+        menu.AddItem($"在第 {target} 帧左侧插入空白帧", 2);
+        menu.AddItem($"在第 {target} 帧右侧插入空白帧", 3);
+        menu.SetItemDisabled(menu.GetItemIndex(2), target < 0);
+        menu.SetItemDisabled(menu.GetItemIndex(3), target < 0);
+        var action = Action;
         menu.IdPressed += id =>
         {
+            if (Action != action) return;
             if (id == 0) DeleteSelectedFrames();
             else if (id == 1) CopySelectedFrames();
+            else if (id == 2) InsertFrame(target);
+            else if (id == 3) InsertFrame(target + 1);
         };
         menu.PopupHide += () => menu.QueueFree();
         EditorTabs.PositionPopup(menu, this, GlobalPosition + pos);

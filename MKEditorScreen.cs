@@ -101,6 +101,12 @@ public partial class MKEditorScreen : Control
         _canvas.Changed += OnModelChanged;
         _timeline.Changed += OnModelChanged;
         _timeline.PlaybackToggled += UpdateTransport;
+        _timeline.FramesChanged += () =>
+        {
+            _canvas.Selected = new EditorCanvas.Selection();
+            _canvas.Hovered = new EditorCanvas.Selection();
+            _tabs.RebuildAll();
+        };
         _tabs.Changed += OnModelChanged;
         _tabs.StructureChanged += OnStructureChanged;
         _canvas.SelectionChanged += _ => _tabs.OnModelChanged(false);
@@ -360,6 +366,11 @@ public partial class MKEditorScreen : Control
         }
         else if (k.Keycode == Key.Escape)
         {
+            if (_timeline != null && _timeline.CancelFrameDrag())
+            {
+                GetViewport()?.SetInputAsHandled();
+                return;
+            }
             if (_timeline != null && _timeline.BrushRange != null)
             {
                 _timeline.BrushRange = null;   // cancel range brushing first
@@ -375,9 +386,9 @@ public partial class MKEditorScreen : Control
     private void AfterHistory()
     {
         if (_project == null || _tabs == null || _timeline == null || _canvas == null) return;
-        _tabs.RebuildAll();
         _timeline.InvalidateThumbnails();
         _timeline.FrameChangedExternally();
+        _tabs.RebuildAll();
         _canvas.QueueRedraw();
         UpdateStatus();
     }

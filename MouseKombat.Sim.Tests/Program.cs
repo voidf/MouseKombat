@@ -24,6 +24,7 @@ internal static partial class Program
         FixTests();
         HeroTests();
         EditorFrameTests();
+        EditorTimelineTests();
 
         // ---- SimMath.RoundToInt must be banker's rounding (ToEven), matching Godot Mathf.RoundToInt ----
         Check(SimMath.RoundToInt(0.5f) == 0, "RoundToInt(0.5)=0 (ToEven)");

@@ -175,7 +175,7 @@ public sealed partial class EditorTabs
         var failures = new List<string>();
         foreach (string path in paths)
         {
-            var result = Project.Current.ImportImage(path, overwrite: true);
+            var result = Project.Current.ImportImage(path, action.Name);
             if (result.Result != ImportResult.Ok || result.Path == null) { failures.Add(System.IO.Path.GetFileName(path)); continue; }
             if (imported == 0) Project.PushUndo();
             int index = start + imported;

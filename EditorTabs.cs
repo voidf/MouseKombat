@@ -598,11 +598,9 @@ public sealed partial class EditorTabs : Control
             xy.AddChild(xRow); xy.AddChild(yRow);
             fields.AddChild(xy);
 
-            // replace the image: OS drag & drop a .png anywhere on the card, or this button.
-            // Same-name files are OVERWRITTEN — this is a replace, not a new asset.
             var replace = new Button { Text = "替换图片…", CustomMinimumSize = new Vector2(96, 28) };
             replace.Pressed += () => PickFile("*.png ; PNG 图片", "选择替换用的 PNG 图片", f =>
-                ApplyLayerImage(ch.ImportImage(f, overwrite: true)));
+                ApplyLayerImage(ch.ImportImage(f, action.Name)));
             fields.AddChild(replace);
             box.AddChild(fields);
 
@@ -636,11 +634,9 @@ public sealed partial class EditorTabs : Control
                     RebuildLayerPage();
                 });
 
-            // OS file drop (routed via Window.FilesDropped): replace this layer's image,
-            // offsets stay, the original file name is kept. Page 1 = 图层 tab.
             RegisterDropZone(card, ".png", files =>
             {
-                if (files.Length == 1) ApplyLayerImage(ch.ImportImage(files[0], overwrite: true));
+                if (files.Length == 1) ApplyLayerImage(ch.ImportImage(files[0], action.Name));
                 else ImportFrameImages(files, true, l);
             }, page: 1);
 
