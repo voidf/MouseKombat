@@ -8,6 +8,7 @@
     <AssemblyName>MouseKombat.Sim.Tests</AssemblyName>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="..\EditorFrameOperations.cs" Link="EditorFrameOperations.cs" />
     <ProjectReference Include="..\MouseKombat.Sim\MouseKombat.Sim.csproj" />
     <!-- Also the runner for the network layer: framing, room rules and (next) a loopback
          host/client handshake. One console runner keeps "one command runs everything" true. -->

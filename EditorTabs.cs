@@ -4,7 +4,7 @@ using System.Globalization;
 using System.Linq;
 using MouseKombat.Sim;
 
-// The five tabs of the editor's main option area (主选项区): 角色 / 图层 / 动作 / 常数 / 洋葱皮.
+// The editor's main option area (主选项区).
 // Everything here edits the EditorProject model directly and calls back Changed() so the canvas,
 // timeline and status bar repaint. Each tab has a Rebuild() because structural edits (selecting
 // another character/action/frame, undo) invalidate every row.
@@ -23,7 +23,7 @@ public sealed partial class EditorTabs : Control
     public TabContainer Tabs;
 
     // -------- pages --------
-    private VBoxContainer _charPage, _actionPage, _layerPage, _constPage, _onionPage;
+    private VBoxContainer _charPage, _actionPage, _layerPage, _constPage, _onionPage, _hurtPage;
     private VBoxContainer _onionSliders;
 
     // runtime-only character order on the 角色 tab (drag reorder, never saved)
@@ -68,6 +68,7 @@ public sealed partial class EditorTabs : Control
         _actionPage = Page("动作");
         _constPage = Page("常数");
         _onionPage = Page("洋葱皮");
+        _hurtPage = Page("受击盒");
     }
 
     // NOTE: Canvas is assigned by the screen AFTER AddChild — _Ready must not touch it
@@ -97,6 +98,7 @@ public sealed partial class EditorTabs : Control
         RebuildActionPage();
         RebuildLayerPage();
         RebuildConstantsPage();
+        RebuildHurtPage();
         RebuildOnionPage();
         CaptureSyncState();
     }
@@ -149,18 +151,20 @@ public sealed partial class EditorTabs : Control
             _pendingRebuild = false;
             RebuildLayerPage();
             RebuildConstantsPage();
+            RebuildHurtPage();
         }
         else if (hurtStruct)
         {
             // dragging a BASE hurtbox materialized the per-frame override list: refresh the
-            // constants page so the new boxes and their editors appear immediately
+            // hurtbox page so the new boxes and their editors appear immediately
             CaptureSyncState();
-            RebuildConstantsPage();
+            RebuildHurtPage();
         }
         else if (selMoved)
         {
             CaptureSyncState();
             RebuildLayerPage();   // selection highlight only
+            RebuildHurtPage();
         }
         else SyncLiveNumbers();
     }
@@ -170,6 +174,8 @@ public sealed partial class EditorTabs : Control
         foreach (var (widget, read) in _liveLayerNums)
             if (GodotObject.IsInstanceValid(widget)) widget.Text = FmtFloat(read());
         foreach (var (widget, read) in _liveConstNums)
+            if (GodotObject.IsInstanceValid(widget)) widget.Text = FmtFloat(read());
+        foreach (var (widget, read) in _liveHurtNums)
             if (GodotObject.IsInstanceValid(widget)) widget.Text = FmtFloat(read());
         foreach (var (widget, read) in _liveRangeNums)
             if (GodotObject.IsInstanceValid(widget)) widget.SetValueNoSignal(read());
@@ -194,6 +200,9 @@ public sealed partial class EditorTabs : Control
             z.OnFiles(matching);
             return;
         }
+        if (Canvas.GetGlobalRect().HasPoint(globalMouse)
+            || (Tabs.CurrentTab == 1 && Tabs.GetGlobalRect().HasPoint(globalMouse)))
+            ImportFrameImages(files, Canvas.GetGlobalRect().HasPoint(globalMouse));
     }
 
     private void RegisterDropZone(Control c, string ext, System.Action<string[]> onFiles, int page = -1)
@@ -526,6 +535,15 @@ public sealed partial class EditorTabs : Control
         if (action == null || Project.SelectedFrame >= action.Frames.Count) return;
         var frame = action.Frames[Project.SelectedFrame];
 
+        BuildFrameTransferTools(_layerPage, false);
+        var import = new Button
+        {
+            Text = "导入 PNG / 序列帧（也可直接拖入）",
+            TooltipText = "单张新增图层；多张按文件名自然顺序从当前帧依次导入，不足自动补帧。沿用图层偏移，不修改受击盒。",
+        };
+        import.Pressed += () => PickFile("*.png ; PNG", "导入图片（多张可直接拖入）", path => ImportFrameImages(new[] { path }, false));
+        _layerPage.AddChild(import);
+
         // display list sorted by z ascending
         var layers = frame.Layers.ToList();
         for (int i = 0; i < layers.Count; i++)
@@ -621,7 +639,10 @@ public sealed partial class EditorTabs : Control
             // OS file drop (routed via Window.FilesDropped): replace this layer's image,
             // offsets stay, the original file name is kept. Page 1 = 图层 tab.
             RegisterDropZone(card, ".png", files =>
-                ApplyLayerImage(ch.ImportImage(files[0], overwrite: true)), page: 1);
+            {
+                if (files.Length == 1) ApplyLayerImage(ch.ImportImage(files[0], overwrite: true));
+                else ImportFrameImages(files, true, l);
+            }, page: 1);
 
             card.GuiInput += @event =>
             {
@@ -724,7 +745,6 @@ public sealed partial class EditorTabs : Control
             rootBox.AddChild(rx); rootBox.AddChild(ry);
             _constPage.AddChild(rootBox);
 
-            BuildHurtboxSection(frame);
             BuildFxSection(ch, frame);
         }
 
@@ -760,30 +780,67 @@ public sealed partial class EditorTabs : Control
     // for this frame only.
     private void BuildHurtboxSection(HeroFrame frame)
     {
-        Section(_constPage, "本帧受击盒");
+        Section(_hurtPage, "本帧受击盒");
         if (frame.Hurtboxes.Count == 0)
-            _constPage.AddChild(new Label
+        {
+            _hurtPage.AddChild(new Label
             {
-                Text = "（本帧未覆盖 — 主视图显示并使用角色基础受击盒）",
+                Text = "当前使用角色基础盒（空列表不是无敌）。",
                 Modulate = new Color(1, 1, 1, 0.45f),
             });
+            var materialize = new Button { Text = "以当前基础盒开始编辑" };
+            materialize.Pressed += () =>
+            {
+                var action = Project.Current.Action(Project.SelectedAction);
+                var physics = Project.Current.Def.Physics;
+                var set = action.Attack?.Stance == "Crouch" ? physics.CrouchBoxes : physics.StandBoxes;
+                Project.PushUndo();
+                frame.Hurtboxes = EditorFrameOperations.CloneBoxes(new[] { set.Head, set.Body, set.Arms, set.Legs });
+                RebuildHurtPage();
+                Changed?.Invoke();
+            };
+            _hurtPage.AddChild(materialize);
+        }
+        else
+        {
+            var reset = new Button { Text = "恢复使用角色基础盒" };
+            reset.Pressed += () =>
+            {
+                Project.PushUndo();
+                frame.Hurtboxes.Clear();
+                Canvas.SetSelection(new EditorCanvas.Selection());
+                RebuildHurtPage();
+                Changed?.Invoke();
+            };
+            _hurtPage.AddChild(reset);
+        }
         for (int i = 0; i < frame.Hurtboxes.Count; i++)
         {
             int idx = i;
             var box = frame.Hurtboxes[i];
-            var row = BoxRow(box, hover =>
+            var panel = new VBoxContainer();
+            panel.MouseEntered += () =>
             {
-                Canvas.Hovered = hover
-                    ? new EditorCanvas.Selection { Kind = EditorCanvas.SelectionKind.Hurtbox, Index = idx, ActiveIndex = -1 }
-                    : new EditorCanvas.Selection();
+                Canvas.Hovered = new EditorCanvas.Selection { Kind = EditorCanvas.SelectionKind.Hurtbox, Index = idx, ActiveIndex = -1 };
                 Canvas.QueueRedraw();
-            });
+            };
+            panel.MouseExited += () => { Canvas.Hovered = new EditorCanvas.Selection(); Canvas.QueueRedraw(); };
+            var row = new HBoxContainer();
+            var select = new Button { Text = $"受击盒 {idx + 1}", ToggleMode = true,
+                ButtonPressed = Canvas.Selected.Kind == EditorCanvas.SelectionKind.Hurtbox && Canvas.Selected.Index == idx };
+            select.Pressed += () =>
+            {
+                Canvas.SetSelection(new EditorCanvas.Selection { Kind = EditorCanvas.SelectionKind.Hurtbox, Index = idx, ActiveIndex = -1 });
+                RebuildHurtPage();
+            };
+            row.AddChild(select);
             var dup = new Button { Text = "复制", CustomMinimumSize = new Vector2(52, 26) };
             dup.Pressed += () =>
             {
                 Project.PushUndo();
                 frame.Hurtboxes.Insert(idx + 1, HeroJson.Read<HeroBox>(HeroJson.Write(box)));
-                RebuildConstantsPage();
+                RebuildHurtPage();
+                Changed?.Invoke();
             };
             row.AddChild(dup);
             var del = new Button { Text = "删除", CustomMinimumSize = new Vector2(52, 26) };
@@ -791,20 +848,39 @@ public sealed partial class EditorTabs : Control
             {
                 Project.PushUndo();
                 frame.Hurtboxes.RemoveAt(idx);
-                RebuildConstantsPage();
+                Canvas.SetSelection(new EditorCanvas.Selection());
+                RebuildHurtPage();
+                Changed?.Invoke();
             };
             row.AddChild(del);
-            _constPage.AddChild(row);
+            panel.AddChild(row);
+            var center = new HBoxContainer();
+            AddHurtNumber(center, "中心 X", () => box.Cx, value => box.Cx = value);
+            AddHurtNumber(center, "Y", () => box.Cy, value => box.Cy = value);
+            panel.AddChild(center);
+            var size = new HBoxContainer();
+            AddHurtNumber(size, "半宽", () => box.Hw, value => box.Hw = Mathf.Max(0.5f, value));
+            AddHurtNumber(size, "半高", () => box.Hh, value => box.Hh = Mathf.Max(0.5f, value));
+            panel.AddChild(size);
+            _hurtPage.AddChild(panel);
         }
         var plus = new Button { Text = "+ 受击盒" };
         plus.Pressed += () =>
         {
             Project.PushUndo();
             frame.Hurtboxes.Add(new HeroBox(0, -102, 55, 47));   // seeded from the default body box
-            RebuildConstantsPage();
+            RebuildHurtPage();
             Changed?.Invoke();
         };
-        _constPage.AddChild(plus);
+        _hurtPage.AddChild(plus);
+    }
+
+    private void AddHurtNumber(HBoxContainer row, string label, System.Func<float> read, System.Action<float> write)
+    {
+        row.AddChild(new Label { Text = label });
+        var edit = FloatEdit(read(), value => { MarkEditing(); write(value); Changed?.Invoke(); });
+        _liveHurtNums.Add((edit, () => read()));
+        row.AddChild(edit);
     }
 
     private void BuildAttackSection(EditorChar ch, HeroActionDef action)
@@ -1646,7 +1722,12 @@ public sealed partial class EditorTabs : Control
         float last = value;
         void Commit(string t)
         {
-            if (TryParseFloat(t, out float v)) { last = v; set(v); }
+            if (TryParseFloat(t, out float v))
+            {
+                if (v == last) return;
+                last = v;
+                set(v);
+            }
             else edit.Text = FmtFloat(last);
         }
         edit.TextSubmitted += Commit;

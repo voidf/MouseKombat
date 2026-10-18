@@ -24,6 +24,11 @@ public partial class MKEditorScreen : Control
     private Window.ContentScaleAspectEnum _savedScaleAspect;
     private double _playAcc;      // 60 fps playback accumulator (render fps != logic fps)
     private ConfirmationDialog _exitDialog;
+    private HSplitContainer _mainSplit;
+    private VSplitContainer _viewSplit;
+    private VBoxContainer _timelineBox;
+    private float _optionsWidth = 440, _timelineHeight = 180;
+    private const string LayoutPath = "user://move_editor_layout.cfg";
 
     public override void _Ready()
     {
@@ -40,10 +45,16 @@ public partial class MKEditorScreen : Control
 
         _project = EditorProject.LoadDefault();
 
-        var split = new HSplitContainer { AnchorRight = 1f, AnchorBottom = 1f };
+        var layout = new ConfigFile();
+        if (layout.Load(LayoutPath) == Error.Ok)
+        {
+            _optionsWidth = Mathf.Clamp((float)layout.GetValue("layout", "options_width", 440f), 300, 1200);
+            _timelineHeight = Mathf.Clamp((float)layout.GetValue("layout", "timeline_height", 180f), 150, 800);
+        }
+        var split = _mainSplit = new HSplitContainer { AnchorRight = 1f, AnchorBottom = 1f, OffsetBottom = -32 };
         AddChild(split);
 
-        // ---- left: the five tabs (fixed width, splitter-draggable) ----
+        // ---- left: option tabs (fixed width, splitter-draggable) ----
         _tabs = new EditorTabs
         {
             CustomMinimumSize = new Vector2(300, 0),
@@ -51,17 +62,19 @@ public partial class MKEditorScreen : Control
         split.AddChild(_tabs);
 
         // ---- right: canvas (expands) over the timeline (fixed height) ----
-        var vSplit = new VSplitContainer
+        var vSplit = _viewSplit = new VSplitContainer
         {
             AnchorRight = 1f, AnchorBottom = 1f,
             CustomMinimumSize = new Vector2(320, 0),
+            SizeFlagsHorizontal = SizeFlags.ExpandFill,
         };
         split.AddChild(vSplit);
 
-        _canvas = new EditorCanvas { Project = _project };
+        _canvas = new EditorCanvas { Project = _project, SizeFlagsVertical = SizeFlags.ExpandFill, ClipContents = true,
+            CustomMinimumSize = new Vector2(0, 240) };
         vSplit.AddChild(_canvas);
         _timeline = new EditorTimeline { Project = _project };
-        var timelineBox = new VBoxContainer
+        var timelineBox = _timelineBox = new VBoxContainer
         {
             CustomMinimumSize = new Vector2(0, 150),
         };
@@ -71,8 +84,10 @@ public partial class MKEditorScreen : Control
         vSplit.AddChild(timelineBox);
 
         // initial splitter offsets AFTER the first layout pass, or they get clamped away
-        split.CallDeferred("set", "split_offset", 340);
-        vSplit.CallDeferred("set", "split_offset", -(200 + 40));
+        Callable.From(ApplyEditorLayout).CallDeferred();
+        Resized += () => Callable.From(ApplyEditorLayout).CallDeferred();
+        split.DragEnded += () => Callable.From(RememberEditorLayout).CallDeferred();
+        vSplit.DragEnded += () => Callable.From(RememberEditorLayout).CallDeferred();
 
         BuildTopRightBar();
         BuildStatusBar();
@@ -120,9 +135,18 @@ public partial class MKEditorScreen : Control
         var bar = new HBoxContainer
         {
             AnchorLeft = 1, AnchorRight = 1, AnchorTop = 0, AnchorBottom = 0,
-            OffsetLeft = -128, OffsetRight = -8, OffsetTop = 6, OffsetBottom = 42,
+            OffsetLeft = -232, OffsetRight = -8, OffsetTop = 6, OffsetBottom = 42,
         };
         AddChild(bar);
+        var reset = new Button { Text = "重置布局", TooltipText = "恢复默认面板宽度和时间轴高度；手动拖动后的布局会自动记住。" };
+        reset.Pressed += () =>
+        {
+            _optionsWidth = 440;
+            _timelineHeight = 180;
+            ApplyEditorLayout();
+            SaveEditorLayout();
+        };
+        bar.AddChild(reset);
         var back = new Button { Text = "⟨ 返回主界面", CustomMinimumSize = new Vector2(120, 36) };
         back.Pressed += RequestExit;
         bar.AddChild(back);
@@ -294,6 +318,26 @@ public partial class MKEditorScreen : Control
         }
     }
 
+    public override void _Input(InputEvent @event)
+    {
+        if (_project == null) return;
+        if (@event is not InputEventKey k || !k.Pressed || k.Echo) return;
+        var focus = GetViewport()?.GuiGetFocusOwner();
+        if (focus is LineEdit || focus is TextEdit) return;
+        if (_tabs.HandleFrameShortcut(k))
+        {
+            GetViewport()?.SetInputAsHandled();
+            return;
+        }
+        if (!k.CtrlPressed && !k.AltPressed && !k.ShiftPressed && (k.Keycode == Key.Left || k.Keycode == Key.Right))
+        {
+            _timeline.StepFrame(k.Keycode == Key.Left ? -1 : 1);
+            UpdateTransport();
+            GetViewport()?.SetInputAsHandled();
+            return;
+        }
+    }
+
     public override void _UnhandledKeyInput(InputEvent @event)
     {
         if (_project == null) return;
@@ -343,5 +387,27 @@ public partial class MKEditorScreen : Control
         if (_project == null) return;
         _project.SaveAll();
         UpdateStatus();
+    }
+
+    private void ApplyEditorLayout()
+    {
+        if (_mainSplit == null || _viewSplit == null || _timelineBox == null) return;
+        _mainSplit.SplitOffsets = new[] { Mathf.RoundToInt(_optionsWidth) };
+        _viewSplit.SplitOffsets = new[] { -Mathf.RoundToInt(_timelineHeight) };
+    }
+
+    private void RememberEditorLayout()
+    {
+        _optionsWidth = _tabs.Size.X;
+        _timelineHeight = _timelineBox.Size.Y;
+        SaveEditorLayout();
+    }
+
+    private void SaveEditorLayout()
+    {
+        var layout = new ConfigFile();
+        layout.SetValue("layout", "options_width", _optionsWidth);
+        layout.SetValue("layout", "timeline_height", _timelineHeight);
+        layout.Save(LayoutPath);
     }
 }
