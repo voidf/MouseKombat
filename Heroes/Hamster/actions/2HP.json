@@ -7,7 +7,16 @@
         "x": 0,
         "y": 0
       },
-      "layers": [],
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": -128,
+            "y": -107
+          },
+          "img": "images/Hamster_2HP_0000.png"
+        }
+      ],
       "fx": {
         "particles": [],
         "sounds": []
@@ -20,7 +29,16 @@
         "x": 0,
         "y": 0
       },
-      "layers": [],
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": -128,
+            "y": -107
+          },
+          "img": "images/Hamster_2HP_0000.png"
+        }
+      ],
       "fx": {
         "particles": [],
         "sounds": []
@@ -33,7 +51,16 @@
         "x": 0,
         "y": 0
       },
-      "layers": [],
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": -128,
+            "y": -107
+          },
+          "img": "images/Hamster_2HP_0000.png"
+        }
+      ],
       "fx": {
         "particles": [],
         "sounds": []
@@ -46,7 +73,16 @@
         "x": 0,
         "y": 0
       },
-      "layers": [],
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": -128,
+            "y": -107
+          },
+          "img": "images/Hamster_2HP_0001.png"
+        }
+      ],
       "fx": {
         "particles": [],
         "sounds": []
@@ -59,7 +95,16 @@
         "x": 0,
         "y": 0
       },
-      "layers": [],
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": -128,
+            "y": -107
+          },
+          "img": "images/Hamster_2HP_0001.png"
+        }
+      ],
       "fx": {
         "particles": [],
         "sounds": []
@@ -72,7 +117,16 @@
         "x": 0,
         "y": 0
       },
-      "layers": [],
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": -128,
+            "y": -107
+          },
+          "img": "images/Hamster_2HP_0001.png"
+        }
+      ],
       "fx": {
         "particles": [],
         "sounds": []
@@ -85,7 +139,16 @@
         "x": 0,
         "y": 0
       },
-      "layers": [],
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": -128,
+            "y": -107
+          },
+          "img": "images/Hamster_2HP_0002.png"
+        }
+      ],
       "fx": {
         "particles": [],
         "sounds": []
@@ -98,7 +161,16 @@
         "x": 0,
         "y": 0
       },
-      "layers": [],
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": -128,
+            "y": -107
+          },
+          "img": "images/Hamster_2HP_0002.png"
+        }
+      ],
       "fx": {
         "particles": [],
         "sounds": []
@@ -111,7 +183,16 @@
         "x": 0,
         "y": 0
       },
-      "layers": [],
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": -128,
+            "y": -107
+          },
+          "img": "images/Hamster_2HP_0002.png"
+        }
+      ],
       "fx": {
         "particles": [],
         "sounds": []
@@ -124,7 +205,16 @@
         "x": 0,
         "y": 0
       },
-      "layers": [],
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": -128,
+            "y": -107
+          },
+          "img": "images/Hamster_2HP_0003.png"
+        }
+      ],
       "fx": {
         "particles": [],
         "sounds": []
@@ -137,7 +227,16 @@
         "x": 0,
         "y": 0
       },
-      "layers": [],
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": -128,
+            "y": -107
+          },
+          "img": "images/Hamster_2HP_0003.png"
+        }
+      ],
       "fx": {
         "particles": [],
         "sounds": []
@@ -150,7 +249,16 @@
         "x": 0,
         "y": 0
       },
-      "layers": [],
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": -128,
+            "y": -107
+          },
+          "img": "images/Hamster_2HP_0003.png"
+        }
+      ],
       "fx": {
         "particles": [],
         "sounds": []
@@ -163,7 +271,16 @@
         "x": 0,
         "y": 0
       },
-      "layers": [],
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": -128,
+            "y": -107
+          },
+          "img": "images/Hamster_2HP_0003.png"
+        }
+      ],
       "fx": {
         "particles": [],
         "sounds": []
@@ -176,7 +293,16 @@
         "x": 0,
         "y": 0
       },
-      "layers": [],
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": -128,
+            "y": -107
+          },
+          "img": "images/Hamster_2HP_0004.png"
+        }
+      ],
       "fx": {
         "particles": [],
         "sounds": []
@@ -189,7 +315,16 @@
         "x": 0,
         "y": 0
       },
-      "layers": [],
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": -128,
+            "y": -107
+          },
+          "img": "images/Hamster_2HP_0004.png"
+        }
+      ],
       "fx": {
         "particles": [],
         "sounds": []
@@ -202,7 +337,16 @@
         "x": 0,
         "y": 0
       },
-      "layers": [],
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": -128,
+            "y": -107
+          },
+          "img": "images/Hamster_2HP_0005.png"
+        }
+      ],
       "fx": {
         "particles": [],
         "sounds": []
@@ -215,7 +359,16 @@
         "x": 0,
         "y": 0
       },
-      "layers": [],
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": -128,
+            "y": -107
+          },
+          "img": "images/Hamster_2HP_0005.png"
+        }
+      ],
       "fx": {
         "particles": [],
         "sounds": []
@@ -228,7 +381,16 @@
         "x": 0,
         "y": 0
       },
-      "layers": [],
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": -128,
+            "y": -107
+          },
+          "img": "images/Hamster_2HP_0006.png"
+        }
+      ],
       "fx": {
         "particles": [],
         "sounds": []
@@ -241,7 +403,16 @@
         "x": 0,
         "y": 0
       },
-      "layers": [],
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": -128,
+            "y": -107
+          },
+          "img": "images/Hamster_2HP_0006.png"
+        }
+      ],
       "fx": {
         "particles": [],
         "sounds": []
@@ -254,7 +425,16 @@
         "x": 0,
         "y": 0
       },
-      "layers": [],
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": -128,
+            "y": -107
+          },
+          "img": "images/Hamster_2HP_0006.png"
+        }
+      ],
       "fx": {
         "particles": [],
         "sounds": []
@@ -267,7 +447,16 @@
         "x": 0,
         "y": 0
       },
-      "layers": [],
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": -128,
+            "y": -107
+          },
+          "img": "images/Hamster_2HP_0007.png"
+        }
+      ],
       "fx": {
         "particles": [],
         "sounds": []
@@ -280,7 +469,16 @@
         "x": 0,
         "y": 0
       },
-      "layers": [],
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": -128,
+            "y": -107
+          },
+          "img": "images/Hamster_2HP_0007.png"
+        }
+      ],
       "fx": {
         "particles": [],
         "sounds": []
@@ -293,7 +491,16 @@
         "x": 0,
         "y": 0
       },
-      "layers": [],
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": -128,
+            "y": -107
+          },
+          "img": "images/Hamster_2HP_0007.png"
+        }
+      ],
       "fx": {
         "particles": [],
         "sounds": []
@@ -306,7 +513,16 @@
         "x": 0,
         "y": 0
       },
-      "layers": [],
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": -128,
+            "y": -107
+          },
+          "img": "images/Hamster_2HP_0007.png"
+        }
+      ],
       "fx": {
         "particles": [],
         "sounds": []
@@ -319,7 +535,16 @@
         "x": 0,
         "y": 0
       },
-      "layers": [],
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": -128,
+            "y": -107
+          },
+          "img": "images/Hamster_2HP_0008.png"
+        }
+      ],
       "fx": {
         "particles": [],
         "sounds": []
@@ -332,7 +557,16 @@
         "x": 0,
         "y": 0
       },
-      "layers": [],
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": -128,
+            "y": -107
+          },
+          "img": "images/Hamster_2HP_0008.png"
+        }
+      ],
       "fx": {
         "particles": [],
         "sounds": []
@@ -345,7 +579,16 @@
         "x": 0,
         "y": 0
       },
-      "layers": [],
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": -128,
+            "y": -107
+          },
+          "img": "images/Hamster_2HP_0008.png"
+        }
+      ],
       "fx": {
         "particles": [],
         "sounds": []
@@ -358,7 +601,16 @@
         "x": 0,
         "y": 0
       },
-      "layers": [],
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": -128,
+            "y": -107
+          },
+          "img": "images/Hamster_2HP_0008.png"
+        }
+      ],
       "fx": {
         "particles": [],
         "sounds": []
@@ -371,7 +623,16 @@
         "x": 0,
         "y": 0
       },
-      "layers": [],
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": -128,
+            "y": -107
+          },
+          "img": "images/Hamster_2HP_0009.png"
+        }
+      ],
       "fx": {
         "particles": [],
         "sounds": []
@@ -384,7 +645,16 @@
         "x": 0,
         "y": 0
       },
-      "layers": [],
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": -128,
+            "y": -107
+          },
+          "img": "images/Hamster_2HP_0009.png"
+        }
+      ],
       "fx": {
         "particles": [],
         "sounds": []
@@ -397,7 +667,16 @@
         "x": 0,
         "y": 0
       },
-      "layers": [],
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": -128,
+            "y": -107
+          },
+          "img": "images/Hamster_2HP_0009.png"
+        }
+      ],
       "fx": {
         "particles": [],
         "sounds": []
@@ -410,7 +689,16 @@
         "x": 0,
         "y": 0
       },
-      "layers": [],
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": -128,
+            "y": -107
+          },
+          "img": "images/Hamster_2HP_0009.png"
+        }
+      ],
       "fx": {
         "particles": [],
         "sounds": []
@@ -423,7 +711,16 @@
         "x": 0,
         "y": 0
       },
-      "layers": [],
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": -128,
+            "y": -107
+          },
+          "img": "images/Hamster_2HP_0010.png"
+        }
+      ],
       "fx": {
         "particles": [],
         "sounds": []
@@ -436,7 +733,16 @@
         "x": 0,
         "y": 0
       },
-      "layers": [],
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": -128,
+            "y": -107
+          },
+          "img": "images/Hamster_2HP_0010.png"
+        }
+      ],
       "fx": {
         "particles": [],
         "sounds": []
@@ -449,7 +755,16 @@
         "x": 0,
         "y": 0
       },
-      "layers": [],
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": -128,
+            "y": -107
+          },
+          "img": "images/Hamster_2HP_0010.png"
+        }
+      ],
       "fx": {
         "particles": [],
         "sounds": []
@@ -462,7 +777,16 @@
         "x": 0,
         "y": 0
       },
-      "layers": [],
+      "layers": [
+        {
+          "z": 0,
+          "off": {
+            "x": -128,
+            "y": -107
+          },
+          "img": "images/Hamster_2HP_0010.png"
+        }
+      ],
       "fx": {
         "particles": [],
         "sounds": []
